@@ -260,7 +260,7 @@ function App() {
     const headX = ((playHead - viewStart) / viewDuration) * width; context.strokeStyle = '#ff8a4c'; context.lineWidth = 2; context.beginPath(); context.moveTo(headX, 0); context.lineTo(headX, graphBottom); context.stroke();
     context.fillStyle = '#f2f4e8'; context.font = '10px "Space Mono", monospace'; context.textAlign = 'left';
     for (let tick = 0; tick <= 6; tick += 1) { const time = viewStart + (tick / 6) * viewDuration; context.fillText(formatTime(time), (tick / 6) * width + 4, height - 8); }
-  }, [currentChannels, duration, markers, playHead, selectionEnd, selectionStart, source.channels, source.sampleRate, viewDuration, zoom]);
+  }, [activeTab, currentChannels, duration, markers, playHead, selectionEnd, selectionStart, source.channels, source.sampleRate, viewDuration, zoom]);
 
   useEffect(() => {
     const keyHandler = (event: KeyboardEvent) => {
