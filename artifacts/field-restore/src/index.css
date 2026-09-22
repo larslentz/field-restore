@@ -206,6 +206,8 @@
 .transport { display: flex; align-items: center; gap: 8px; padding: 10px 12px; background: hsl(var(--secondary)); color: hsl(var(--secondary-foreground)); border-radius: 6px; }
 .transport .icon-btn { color: hsl(var(--secondary-foreground)); }
 .transport .icon-btn:hover { background: rgba(255,255,255,.1); }
+.transport-select { background: #263746; color: #f2f4e8; color-scheme: dark; }
+.transport-select option { background: #263746; color: #f2f4e8; }
 .time-readout { font-family: var(--app-font-mono); font-size: 12px; font-weight: 700; min-width: 98px; }
 .module-card { border: 1px solid hsl(var(--border)); border-radius: 6px; margin-bottom: 8px; background: hsl(var(--background)); overflow: hidden; }
 .module-card.bypassed { opacity: .58; }
