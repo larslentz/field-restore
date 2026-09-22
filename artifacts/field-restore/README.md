@@ -44,8 +44,7 @@ Compressed WAV codecs and non-WAV containers are rejected with a clear message.
 
 ### Export
 
-- 16-bit signed PCM WAV
-- 24-bit signed PCM WAV
+- 32-bit IEEE float WAV
 - Correct RIFF chunk lengths, little-endian samples, and channel interleaving
 - Browser download fallback
 
@@ -76,7 +75,7 @@ The visible Static, Dynamic, and Adaptive modes document the intended restoratio
 
 - Project snapshots currently use browser local storage rather than a full IndexedDB blob store, so very long recordings may exceed storage limits.
 - Advanced adaptive hum tracking is represented conservatively rather than as a commercial-grade frequency-tracking implementation.
-- Export currently supports 16-bit and 24-bit PCM; 32-bit float export and selectable dithering remain future work.
+- Export uses 32-bit IEEE float at the source sample rate and channel count; no normalization or dither is applied.
 - Sample-rate conversion, true-peak compliance, standardized loudness measurement, and certified noise-floor/dynamic-range measurements are not claimed.
 - Browser memory limits determine the maximum practical file length.
 

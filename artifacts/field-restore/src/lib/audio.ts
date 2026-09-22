@@ -87,28 +87,24 @@ export function parseWav(buffer: ArrayBuffer, name = 'recording.wav'): AudioSour
   return { channels: result, sampleRate, duration: frameCount / sampleRate, name };
 }
 
-export function encodeWav(source: AudioSource, format: 'archival' | 'listening' = 'archival') {
+export function encodeWav(source: AudioSource) {
   const channels = source.channels.length;
   const sourceLength = source.channels[0]?.length ?? 0;
-  const bitDepth = format === 'archival' ? 24 : 16;
+  const bitDepth = 32;
   const bytesPerSample = bitDepth / 8;
   const dataLength = sourceLength * channels * bytesPerSample;
   const buffer = new ArrayBuffer(44 + dataLength);
   const view = new DataView(buffer);
   const put = (offset: number, text: string) => text.split('').forEach((char, i) => view.setUint8(offset + i, char.charCodeAt(0)));
   put(0, 'RIFF'); view.setUint32(4, 36 + dataLength, true); put(8, 'WAVE'); put(12, 'fmt ');
-  view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, channels, true);
+  view.setUint32(16, 16, true); view.setUint16(20, 3, true); view.setUint16(22, channels, true);
   view.setUint32(24, source.sampleRate, true); view.setUint32(28, source.sampleRate * channels * bytesPerSample, true);
   view.setUint16(32, channels * bytesPerSample, true); view.setUint16(34, bitDepth, true); put(36, 'data'); view.setUint32(40, dataLength, true);
   let offset = 44;
   for (let i = 0; i < sourceLength; i += 1) {
     for (let channel = 0; channel < channels; channel += 1) {
-      const value = Math.max(-1, Math.min(1, source.channels[channel][i] ?? 0));
-      if (bitDepth === 16) view.setInt16(offset, value < 0 ? value * 32768 : value * 32767, true);
-      else {
-        const integer = Math.round(value < 0 ? value * 8388608 : value * 8388607);
-        view.setUint8(offset, integer & 255); view.setUint8(offset + 1, (integer >> 8) & 255); view.setUint8(offset + 2, (integer >> 16) & 255);
-      }
+      const value = source.channels[channel][i] ?? 0;
+      view.setFloat32(offset, Number.isFinite(value) ? value : 0, true);
       offset += bytesPerSample;
     }
   }
