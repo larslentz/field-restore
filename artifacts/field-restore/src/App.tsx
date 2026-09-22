@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent as ReactDragEvent, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent as ReactDragEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import { Activity, ArrowDown, ArrowUp, AudioLines, Check, ChevronDown, CircleHelp, Download, FileAudio, FolderOpen, Gauge, HelpCircle, Info, Keyboard, Layers3, Menu, Pause, Play, Plus, Redo2, RotateCcw, Save, Settings, Square, Trash2, Undo2, Waves, X, ZoomIn, ZoomOut } from 'lucide-react';
 import { createDemoAudio, downloadBlob, encodeWav, parseWav, type AudioSource } from '@/lib/audio';
 import { decodeChannels, loadProject, projectFromSource, saveProject } from '@/lib/persistence';
@@ -15,8 +15,24 @@ type Region = { id: string; start: number; end: number; label: string };
 const MODULE_TYPES: ModuleType[] = ['gain', 'fade', 'eq', 'dc', 'hum', 'wind', 'region', 'ambient'];
 const colorForMarker = '#d8ed55';
 const SPECTROGRAM_LEFT = 48;
-const SPECTROGRAM_RIGHT = 50;
+const SPECTROGRAM_RIGHT = 72;
 const SPECTROGRAM_BOTTOM = 28;
+
+function spectrogramColor(intensity: number) {
+  const red = intensity < 0.55 ? 14 + intensity * 90 : 64 + (intensity - 0.55) * 425;
+  const green = intensity < 0.45 ? 27 + intensity * 210 : 121 + (intensity - 0.45) * 205;
+  const blue = intensity < 0.5 ? 38 + intensity * 170 : 123 - (intensity - 0.5) * 210;
+  return [
+    Math.max(0, Math.min(255, red)),
+    Math.max(0, Math.min(255, green)),
+    Math.max(0, Math.min(255, blue)),
+  ] as const;
+}
+
+function spectrogramColorCss(intensity: number) {
+  const [red, green, blue] = spectrogramColor(intensity);
+  return `rgb(${red}, ${green}, ${blue})`;
+}
 
 function formatTime(seconds: number, precise = false) {
   const safe = Math.max(0, seconds || 0);
@@ -234,20 +250,31 @@ function App() {
   const onCanvasPointerDown = (event: ReactPointerEvent<HTMLCanvasElement>) => { const time = canvasPointToTime(event); pointerDragRef.current = { start: time, current: time }; event.currentTarget.setPointerCapture(event.pointerId); setSelection([time, time]); };
   const onCanvasPointerMove = (event: ReactPointerEvent<HTMLCanvasElement>) => { if (!pointerDragRef.current) return; const time = canvasPointToTime(event); pointerDragRef.current.current = time; setSelection([pointerDragRef.current.start, time]); };
   const onCanvasPointerUp = (event: ReactPointerEvent<HTMLCanvasElement>) => { if (!pointerDragRef.current) return; const time = canvasPointToTime(event); const start = pointerDragRef.current.start; setSelection([Math.min(start, time), Math.max(start, time)]); pointerDragRef.current = null; };
-  const onSpectrogramWheel = (event: ReactWheelEvent<HTMLCanvasElement>) => {
-    const bounds = event.currentTarget.getBoundingClientRect();
+  const onSpectrogramWheel = useCallback((event: WheelEvent) => {
+    const canvas = canvasRef.current;
+    if (!canvas || event.deltaY === 0) return;
+    const bounds = canvas.getBoundingClientRect();
     const x = event.clientX - bounds.left;
     if (x <= SPECTROGRAM_LEFT) {
       event.preventDefault();
+      event.stopPropagation();
       const nyquist = Math.floor(source.sampleRate / 2);
       const direction = event.deltaY > 0 ? 1 : -1;
       setSpectrogramMaxFrequency((value) => Math.max(1000, Math.min(nyquist, Math.round((value + direction * 1000) / 1000) * 1000)));
     } else if (x >= bounds.width - SPECTROGRAM_RIGHT) {
       event.preventDefault();
+      event.stopPropagation();
       const direction = event.deltaY > 0 ? -1 : 1;
       setSpectrogramCeilingDb((value) => Math.max(-60, Math.min(0, value + direction * 2)));
     }
-  };
+  }, [source.sampleRate]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    canvas.addEventListener('wheel', onSpectrogramWheel, { passive: false });
+    return () => canvas.removeEventListener('wheel', onSpectrogramWheel);
+  }, [activeTab, onSpectrogramWheel]);
 
   useEffect(() => {
     const canvas = canvasRef.current; if (!canvas) return;
@@ -270,13 +297,11 @@ function App() {
         const image = imageContext.createImageData(spectrogram.width, spectrogram.height);
         for (let index = 0; index < spectrogram.values.length; index += 1) {
           const intensity = spectrogram.values[index];
-          const red = intensity < 0.55 ? 14 + intensity * 90 : 64 + (intensity - 0.55) * 425;
-          const green = intensity < 0.45 ? 27 + intensity * 210 : 121 + (intensity - 0.45) * 205;
-          const blue = intensity < 0.5 ? 38 + intensity * 170 : 123 - (intensity - 0.5) * 210;
+          const [red, green, blue] = spectrogramColor(intensity);
           const pixel = index * 4;
-          image.data[pixel] = Math.max(0, Math.min(255, red));
-          image.data[pixel + 1] = Math.max(0, Math.min(255, green));
-          image.data[pixel + 2] = Math.max(0, Math.min(255, blue));
+          image.data[pixel] = red;
+          image.data[pixel + 1] = green;
+          image.data[pixel + 2] = blue;
           image.data[pixel + 3] = 255;
         }
         imageContext.putImageData(image, 0, 0);
@@ -322,10 +347,19 @@ function App() {
     }
     context.textAlign = 'left';
     for (const top of [0, paneHeight]) {
+      const gradient = context.createLinearGradient(0, top + 3, 0, top + paneHeight - 3);
+      gradient.addColorStop(0, spectrogramColorCss(1));
+      gradient.addColorStop(0.5, spectrogramColorCss(0.5));
+      gradient.addColorStop(1, spectrogramColorCss(0));
+      context.fillStyle = gradient;
+      context.fillRect(graphRight + 6, top + 3, 9, paneHeight - 6);
+      context.strokeStyle = 'rgba(242, 244, 232, .35)';
+      context.strokeRect(graphRight + 6, top + 3, 9, paneHeight - 6);
+      context.fillStyle = '#f2f4e8';
       for (let tick = 0; tick <= 2; tick += 1) {
         const decibels = spectrogramCeilingDb - (tick / 2) * (spectrogramCeilingDb - spectrogramFloorDb);
         const y = top + (tick / 2) * paneHeight;
-        context.fillText(`${Math.round(decibels)}`, graphRight + 6, Math.max(top + 10, Math.min(top + paneHeight - 3, y + 3)));
+        context.fillText(`${Math.round(decibels)}`, graphRight + 19, Math.max(top + 10, Math.min(top + paneHeight - 3, y + 3)));
       }
     }
     context.textAlign = 'left';
@@ -443,7 +477,7 @@ function App() {
                     </div>
                     <div className="panel-body !pt-3">
                       <div className="waveform-wrap">
-                        <canvas ref={canvasRef} className="waveform-canvas" onPointerDown={onCanvasPointerDown} onPointerMove={onCanvasPointerMove} onPointerUp={onCanvasPointerUp} onPointerCancel={onCanvasPointerUp} onWheel={onSpectrogramWheel} aria-label={`Interactive spectrogram from 0 to ${spectrogramMaxFrequency / 1000} kilohertz with ${spectrogramFloorDb} to ${spectrogramCeilingDb} decibel scale`} data-testid="canvas-spectrogram" />
+                        <canvas ref={canvasRef} className="waveform-canvas" onPointerDown={onCanvasPointerDown} onPointerMove={onCanvasPointerMove} onPointerUp={onCanvasPointerUp} onPointerCancel={onCanvasPointerUp} aria-label={`Interactive spectrogram from 0 to ${spectrogramMaxFrequency / 1000} kilohertz with ${spectrogramFloorDb} to ${spectrogramCeilingDb} decibel scale`} data-testid="canvas-spectrogram" />
                       </div>
                       <div className="flex flex-wrap items-center justify-between gap-3 mt-3">
                         <div className="flex items-center gap-2 text-[11px] text-muted-foreground"><span className="inline-block w-3 h-3 rounded-sm bg-[#142b38]" /> low energy <span className="inline-block w-3 h-3 rounded-sm bg-[#d8ed55] ml-2" /> high energy <span className="inline-block w-3 h-3 rounded-sm bg-[#ff8a4c] ml-2" /> playhead</div>
