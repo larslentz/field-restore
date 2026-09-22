@@ -145,26 +145,26 @@ function App() {
     const [selectedA, selectedB] = selectionRef.current;
     const selectedStart = Math.max(0, Math.min(selectedA, selectedB));
     const selectedEnd = Math.min(duration, Math.max(selectedA, selectedB));
-    const hasLoopSelection = loop && selectedEnd - selectedStart >= .01;
-    const selectionStartFrame = hasLoopSelection ? Math.max(0, Math.floor(selectedStart * source.sampleRate)) : 0;
-    const selectionEndFrame = hasLoopSelection ? Math.min(channels[0]?.length ?? 0, Math.ceil(selectedEnd * source.sampleRate)) : channels[0]?.length ?? 0;
+    const hasSelection = selectedEnd - selectedStart >= .01;
+    const selectionStartFrame = hasSelection ? Math.max(0, Math.floor(selectedStart * source.sampleRate)) : 0;
+    const selectionEndFrame = hasSelection ? Math.min(channels[0]?.length ?? 0, Math.ceil(selectedEnd * source.sampleRate)) : channels[0]?.length ?? 0;
     const bufferLength = Math.max(1, selectionEndFrame - selectionStartFrame);
     const buffer = context.createBuffer(channels.length, bufferLength, source.sampleRate);
     channels.forEach((channel, index) => buffer.getChannelData(index).set(channel.subarray(selectionStartFrame, selectionEndFrame)));
     const node = context.createBufferSource();
     node.buffer = buffer; node.playbackRate.value = rate; node.connect(context.destination);
-    const loopStart = hasLoopSelection ? selectedStart : Math.min(startPosition, Math.max(0, duration - .01));
-    const loopEnd = hasLoopSelection ? selectedEnd : duration;
-    const startAt = hasLoopSelection ? selectedStart : Math.min(startPosition, Math.max(0, duration - .01));
-    const bufferStartOffset = hasLoopSelection ? 0 : startAt;
+    const loopStart = hasSelection ? selectedStart : Math.min(startPosition, Math.max(0, duration - .01));
+    const loopEnd = hasSelection ? selectedEnd : duration;
+    const startAt = hasSelection ? selectedStart : Math.min(startPosition, Math.max(0, duration - .01));
+    const bufferStartOffset = hasSelection ? 0 : startAt;
     const startedAt = context.currentTime;
     node.loop = loop;
-    node.loopStart = hasLoopSelection ? 0 : loopStart;
-    node.loopEnd = hasLoopSelection ? buffer.duration : loopEnd;
+    node.loopStart = hasSelection ? 0 : loopStart;
+    node.loopEnd = hasSelection ? buffer.duration : loopEnd;
     node.onended = () => {
       if (!loop && audioSourceRef.current === node) {
-        playHeadRef.current = duration;
-        setPlayHead(duration);
+        playHeadRef.current = loopEnd;
+        setPlayHead(loopEnd);
         setIsPlaying(false);
         audioSourceRef.current = null;
       }
@@ -174,7 +174,7 @@ function App() {
     const tick = () => {
       if (audioSourceRef.current !== node) return;
       const elapsed = (context.currentTime - startedAt) * rate;
-      const next = Math.min(duration, startAt + elapsed);
+      const next = Math.min(loopEnd, startAt + elapsed);
       const position = loop ? loopStart + (elapsed % Math.max(.01, loopEnd - loopStart)) : next;
       playHeadRef.current = position;
       setPlayHead(position);
