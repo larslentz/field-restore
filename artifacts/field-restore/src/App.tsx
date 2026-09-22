@@ -182,6 +182,16 @@ function App() {
     startPlayback(channels, playHeadRef.current);
   }, [currentChannels, isPlaying, monitor, source.channels, startPlayback, stopPlayback]);
 
+  const seekTo = useCallback((time: number) => {
+    const position = Math.max(0, Math.min(duration, time));
+    playHeadRef.current = position;
+    setPlayHead(position);
+    if (isPlaying) {
+      const channels = monitor === 'original' ? source.channels : currentChannels;
+      startPlayback(channels, position);
+    }
+  }, [currentChannels, duration, isPlaying, monitor, source.channels, startPlayback]);
+
   useEffect(() => {
     if (!isPlaying) return;
     const channels = monitor === 'original' ? source.channels : currentChannels;
@@ -285,15 +295,18 @@ function App() {
   };
   const onCanvasPointerDown = (event: ReactPointerEvent<HTMLCanvasElement>) => {
     const bounds = event.currentTarget.getBoundingClientRect();
-    if (event.clientX - bounds.left <= SPECTROGRAM_LEFT) {
+    const localX = event.clientX - bounds.left;
+    if (localX <= SPECTROGRAM_LEFT) {
       frequencyDragRef.current = { startY: event.clientY, startFrequency: spectrogramMaxFrequency };
       event.currentTarget.setPointerCapture(event.pointerId);
       return;
     }
+    if (localX >= bounds.width - SPECTROGRAM_RIGHT) return;
     const time = canvasPointToTime(event);
     pointerDragRef.current = { start: time, current: time };
     event.currentTarget.setPointerCapture(event.pointerId);
     setSelection([time, time]);
+    seekTo(time);
   };
   const onCanvasPointerMove = (event: ReactPointerEvent<HTMLCanvasElement>) => {
     if (frequencyDragRef.current) {
@@ -316,7 +329,9 @@ function App() {
     if (!pointerDragRef.current) return;
     const time = canvasPointToTime(event);
     const start = pointerDragRef.current.start;
-    setSelection([Math.min(start, time), Math.max(start, time)]);
+    const selectionStartTime = Math.min(start, time);
+    setSelection([selectionStartTime, Math.max(start, time)]);
+    if (selectionStartTime !== start) seekTo(selectionStartTime);
     pointerDragRef.current = null;
   };
   const onSpectrogramWheel = useCallback((event: WheelEvent) => {
