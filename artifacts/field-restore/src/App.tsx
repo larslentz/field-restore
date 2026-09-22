@@ -77,6 +77,7 @@ function App() {
   const audioSourceRef = useRef<AudioBufferSourceNode | null>(null);
   const animationRef = useRef<number | null>(null);
   const pointerDragRef = useRef<{ start: number; current: number } | null>(null);
+  const frequencyDragRef = useRef<{ startY: number; startFrequency: number } | null>(null);
   const dragDepthRef = useRef(0);
 
   const currentChannels = useMemo(() => renderChain(source.channels, modules, source.sampleRate), [source.channels, source.sampleRate, modules]);
@@ -247,9 +248,42 @@ function App() {
     const x = Math.max(0, Math.min(1, (event.clientX - bounds.left - SPECTROGRAM_LEFT) / plotWidth));
     return Math.max(0, Math.min(duration, viewStart + x * viewDuration));
   };
-  const onCanvasPointerDown = (event: ReactPointerEvent<HTMLCanvasElement>) => { const time = canvasPointToTime(event); pointerDragRef.current = { start: time, current: time }; event.currentTarget.setPointerCapture(event.pointerId); setSelection([time, time]); };
-  const onCanvasPointerMove = (event: ReactPointerEvent<HTMLCanvasElement>) => { if (!pointerDragRef.current) return; const time = canvasPointToTime(event); pointerDragRef.current.current = time; setSelection([pointerDragRef.current.start, time]); };
-  const onCanvasPointerUp = (event: ReactPointerEvent<HTMLCanvasElement>) => { if (!pointerDragRef.current) return; const time = canvasPointToTime(event); const start = pointerDragRef.current.start; setSelection([Math.min(start, time), Math.max(start, time)]); pointerDragRef.current = null; };
+  const onCanvasPointerDown = (event: ReactPointerEvent<HTMLCanvasElement>) => {
+    const bounds = event.currentTarget.getBoundingClientRect();
+    if (event.clientX - bounds.left <= SPECTROGRAM_LEFT) {
+      frequencyDragRef.current = { startY: event.clientY, startFrequency: spectrogramMaxFrequency };
+      event.currentTarget.setPointerCapture(event.pointerId);
+      return;
+    }
+    const time = canvasPointToTime(event);
+    pointerDragRef.current = { start: time, current: time };
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setSelection([time, time]);
+  };
+  const onCanvasPointerMove = (event: ReactPointerEvent<HTMLCanvasElement>) => {
+    if (frequencyDragRef.current) {
+      const nyquist = Math.floor(source.sampleRate / 2);
+      const deltaFrequency = (event.clientY - frequencyDragRef.current.startY) * 75;
+      const nextFrequency = Math.round((frequencyDragRef.current.startFrequency + deltaFrequency) / 100) * 100;
+      setSpectrogramMaxFrequency(Math.max(1000, Math.min(nyquist, nextFrequency)));
+      return;
+    }
+    if (!pointerDragRef.current) return;
+    const time = canvasPointToTime(event);
+    pointerDragRef.current.current = time;
+    setSelection([pointerDragRef.current.start, time]);
+  };
+  const onCanvasPointerUp = (event: ReactPointerEvent<HTMLCanvasElement>) => {
+    if (frequencyDragRef.current) {
+      frequencyDragRef.current = null;
+      return;
+    }
+    if (!pointerDragRef.current) return;
+    const time = canvasPointToTime(event);
+    const start = pointerDragRef.current.start;
+    setSelection([Math.min(start, time), Math.max(start, time)]);
+    pointerDragRef.current = null;
+  };
   const onSpectrogramWheel = useCallback((event: WheelEvent) => {
     const canvas = canvasRef.current;
     if (!canvas || event.deltaY === 0) return;
@@ -472,7 +506,7 @@ function App() {
                 <>
                   <section className="panel instrument-grid" aria-label="Spectrogram editor">
                     <div className="panel-header">
-                      <div className="flex items-center gap-3"><Waves size={17} color="hsl(var(--primary))" /><div><div className="section-title">Spectrogram / selection</div><div className="text-[10px] text-muted-foreground mt-0.5">Drag to select · scroll left frequency or right dB axis to rescale</div></div></div>
+                      <div className="flex items-center gap-3"><Waves size={17} color="hsl(var(--primary))" /><div><div className="section-title">Spectrogram / selection</div><div className="text-[10px] text-muted-foreground mt-0.5">Drag to select · scroll or vertically drag the left frequency axis · scroll the right dB axis</div></div></div>
                       <div className="flex items-center gap-1"><button type="button" className="icon-btn" onClick={() => setZoom(Math.max(1, zoom / 1.8))} aria-label="Zoom out" data-testid="button-zoom-out"><ZoomOut size={15} /></button><span className="font-mono-value text-[10px] text-muted-foreground w-12 text-center">{zoom.toFixed(1)}×</span><button type="button" className="icon-btn" onClick={() => setZoom(Math.min(16, zoom * 1.8))} aria-label="Zoom in" data-testid="button-zoom-in"><ZoomIn size={15} /></button><button type="button" className="quiet-btn ml-2 !py-[5px]" onClick={() => setZoom(1)} data-testid="button-fit">Fit</button></div>
                     </div>
                     <div className="panel-body !pt-3">
