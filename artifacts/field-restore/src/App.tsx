@@ -142,21 +142,25 @@ function App() {
       audioSourceRef.current.disconnect();
     }
     if (animationRef.current) cancelAnimationFrame(animationRef.current);
-    const buffer = context.createBuffer(channels.length, channels[0]?.length ?? 0, source.sampleRate);
-    channels.forEach((channel, index) => buffer.getChannelData(index).set(channel));
-    const node = context.createBufferSource();
-    node.buffer = buffer; node.playbackRate.value = rate; node.connect(context.destination);
     const [selectedA, selectedB] = selectionRef.current;
     const selectedStart = Math.max(0, Math.min(selectedA, selectedB));
     const selectedEnd = Math.min(duration, Math.max(selectedA, selectedB));
     const hasLoopSelection = loop && selectedEnd - selectedStart >= .01;
+    const selectionStartFrame = hasLoopSelection ? Math.max(0, Math.floor(selectedStart * source.sampleRate)) : 0;
+    const selectionEndFrame = hasLoopSelection ? Math.min(channels[0]?.length ?? 0, Math.ceil(selectedEnd * source.sampleRate)) : channels[0]?.length ?? 0;
+    const bufferLength = Math.max(1, selectionEndFrame - selectionStartFrame);
+    const buffer = context.createBuffer(channels.length, bufferLength, source.sampleRate);
+    channels.forEach((channel, index) => buffer.getChannelData(index).set(channel.subarray(selectionStartFrame, selectionEndFrame)));
+    const node = context.createBufferSource();
+    node.buffer = buffer; node.playbackRate.value = rate; node.connect(context.destination);
     const loopStart = hasLoopSelection ? selectedStart : Math.min(startPosition, Math.max(0, duration - .01));
     const loopEnd = hasLoopSelection ? selectedEnd : duration;
-    const startAt = hasLoopSelection ? loopStart : Math.min(startPosition, Math.max(0, duration - .01));
+    const startAt = hasLoopSelection ? selectedStart : Math.min(startPosition, Math.max(0, duration - .01));
+    const bufferStartOffset = hasLoopSelection ? 0 : startAt;
     const startedAt = context.currentTime;
     node.loop = loop;
-    node.loopStart = loopStart;
-    node.loopEnd = loopEnd;
+    node.loopStart = hasLoopSelection ? 0 : loopStart;
+    node.loopEnd = hasLoopSelection ? buffer.duration : loopEnd;
     node.onended = () => {
       if (!loop && audioSourceRef.current === node) {
         playHeadRef.current = duration;
@@ -165,7 +169,7 @@ function App() {
         audioSourceRef.current = null;
       }
     };
-    node.start(0, startAt);
+    node.start(0, bufferStartOffset);
     audioSourceRef.current = node; setIsPlaying(true);
     const tick = () => {
       if (audioSourceRef.current !== node) return;
@@ -430,7 +434,20 @@ function App() {
     const selectedRight = graphLeft + ((selectionEnd - viewStart) / viewDuration) * graphWidth;
     context.fillStyle = 'rgba(214, 237, 85, .13)'; context.fillRect(selectedLeft, 0, Math.max(2, selectedRight - selectedLeft), graphBottom);
     context.strokeStyle = 'rgba(216, 237, 85, .5)'; context.strokeRect(selectedLeft, 0, Math.max(2, selectedRight - selectedLeft), graphBottom);
-    markers.forEach((marker) => { const x = graphLeft + ((marker.time - viewStart) / viewDuration) * graphWidth; if (x >= graphLeft && x <= graphRight) { context.strokeStyle = marker.color; context.setLineDash([3, 3]); context.beginPath(); context.moveTo(x, 0); context.lineTo(x, graphBottom); context.stroke(); context.setLineDash([]); context.fillStyle = marker.color; context.beginPath(); context.arc(x, 9, 3, 0, Math.PI * 2); context.fill(); } });
+    markers.forEach((marker) => {
+      const x = graphLeft + ((marker.time - viewStart) / viewDuration) * graphWidth;
+      if (x >= graphLeft && x <= graphRight) {
+        context.strokeStyle = 'rgba(216, 237, 85, .55)';
+        context.setLineDash([3, 4]);
+        context.beginPath(); context.moveTo(x, 0); context.lineTo(x, graphBottom); context.stroke();
+        context.setLineDash([]);
+        context.fillStyle = marker.color;
+        context.beginPath(); context.moveTo(x - 4, 2); context.lineTo(x + 4, 2); context.lineTo(x, 9); context.closePath(); context.fill();
+        context.font = '9px "Space Mono", monospace';
+        context.textAlign = 'left';
+        context.fillText(marker.label, Math.min(graphRight - 70, x + 6), 11);
+      }
+    });
     const headX = graphLeft + ((playHead - viewStart) / viewDuration) * graphWidth; context.strokeStyle = '#ff8a4c'; context.lineWidth = 2; context.beginPath(); context.moveTo(headX, 0); context.lineTo(headX, graphBottom); context.stroke();
 
     context.fillStyle = '#f2f4e8'; context.font = '10px "Space Mono", monospace'; context.textAlign = 'left';
