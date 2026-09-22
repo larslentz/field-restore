@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "Field Restore"
+description = "A local-first audio restoration editor for field recordings, with non-destructive edits, waveform analysis, project persistence, and reliable WAV export entirely in the browser."
+version = "1.0.0"
+id = "artifacts/field-restore"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 19590
+
+[services.development]
+run = "pnpm --filter @workspace/field-restore run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/field-restore", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/field-restore/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "19590"
+BASE_PATH = "/"
