@@ -77,6 +77,7 @@ function App() {
   const audioContextRef = useRef<AudioContext | null>(null);
   const audioSourceRef = useRef<AudioBufferSourceNode | null>(null);
   const animationRef = useRef<number | null>(null);
+  const playHeadRef = useRef(0);
   const pointerDragRef = useRef<{ start: number; current: number } | null>(null);
   const frequencyDragRef = useRef<{ startY: number; startFrequency: number } | null>(null);
   const dragDepthRef = useRef(0);
@@ -118,41 +119,74 @@ function App() {
   }, []);
 
   const stopPlayback = useCallback(() => {
-    audioSourceRef.current?.stop();
-    audioSourceRef.current?.disconnect();
+    if (audioSourceRef.current) {
+      audioSourceRef.current.onended = null;
+      audioSourceRef.current.stop();
+      audioSourceRef.current.disconnect();
+    }
     audioSourceRef.current = null;
     if (animationRef.current) cancelAnimationFrame(animationRef.current);
+    animationRef.current = null;
     setIsPlaying(false);
   }, []);
 
-  const play = useCallback(() => {
-    if (isPlaying) { stopPlayback(); return; }
+  const startPlayback = useCallback((channels: Float32Array[], startPosition: number) => {
     const AudioContextClass = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
     if (!AudioContextClass) { setError('This browser does not expose Web Audio playback.'); return; }
     const context = audioContextRef.current ?? new AudioContextClass();
     audioContextRef.current = context;
-    const buffer = context.createBuffer(monitor === 'original' ? source.channels.length : currentChannels.length, source.channels[0].length, source.sampleRate);
-    const channels = monitor === 'original' ? source.channels : currentChannels;
+    if (audioSourceRef.current) {
+      audioSourceRef.current.onended = null;
+      audioSourceRef.current.stop();
+      audioSourceRef.current.disconnect();
+    }
+    if (animationRef.current) cancelAnimationFrame(animationRef.current);
+    const buffer = context.createBuffer(channels.length, channels[0]?.length ?? 0, source.sampleRate);
     channels.forEach((channel, index) => buffer.getChannelData(index).set(channel));
     const node = context.createBufferSource();
     node.buffer = buffer; node.playbackRate.value = rate; node.connect(context.destination);
-    const startAt = Math.min(playHead, Math.max(0, duration - .01));
+    const startAt = Math.min(startPosition, Math.max(0, duration - .01));
     const startedAt = context.currentTime;
     node.loop = loop;
     node.loopStart = startAt;
     node.loopEnd = duration;
-    node.onended = () => { if (!loop) { setPlayHead(duration); setIsPlaying(false); } };
+    node.onended = () => {
+      if (!loop && audioSourceRef.current === node) {
+        playHeadRef.current = duration;
+        setPlayHead(duration);
+        setIsPlaying(false);
+        audioSourceRef.current = null;
+      }
+    };
     node.start(0, startAt);
     audioSourceRef.current = node; setIsPlaying(true);
     const tick = () => {
-      if (!audioSourceRef.current) return;
+      if (audioSourceRef.current !== node) return;
       const elapsed = (context.currentTime - startedAt) * rate;
       const next = Math.min(duration, startAt + elapsed);
-      setPlayHead(loop ? startAt + (elapsed % Math.max(.01, duration - startAt)) : next);
+      const position = loop ? startAt + (elapsed % Math.max(.01, duration - startAt)) : next;
+      playHeadRef.current = position;
+      setPlayHead(position);
       animationRef.current = requestAnimationFrame(tick);
     };
     animationRef.current = requestAnimationFrame(tick);
-  }, [currentChannels, duration, isPlaying, loop, monitor, playHead, rate, source.channels, source.sampleRate, stopPlayback]);
+  }, [duration, loop, rate, source.sampleRate]);
+
+  useEffect(() => {
+    playHeadRef.current = playHead;
+  }, [playHead]);
+
+  const play = useCallback(() => {
+    if (isPlaying) { stopPlayback(); return; }
+    const channels = monitor === 'original' ? source.channels : currentChannels;
+    startPlayback(channels, playHeadRef.current);
+  }, [currentChannels, isPlaying, monitor, source.channels, startPlayback, stopPlayback]);
+
+  useEffect(() => {
+    if (!isPlaying) return;
+    const channels = monitor === 'original' ? source.channels : currentChannels;
+    startPlayback(channels, playHeadRef.current);
+  }, [currentChannels, loop, monitor, rate]);
 
   useEffect(() => () => { stopPlayback(); audioContextRef.current?.close(); }, [stopPlayback]);
 
