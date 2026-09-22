@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type PointerEvent as ReactPointerEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent as ReactDragEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import { Activity, ArrowDown, ArrowUp, AudioLines, Check, ChevronDown, CircleHelp, Download, FileAudio, FolderOpen, Gauge, HelpCircle, Info, Keyboard, Layers3, Menu, Pause, Play, Plus, Redo2, RotateCcw, Save, Settings, Square, Trash2, Undo2, Waves, X, ZoomIn, ZoomOut } from 'lucide-react';
 import { createDemoAudio, downloadBlob, encodeWav, parseWav, type AudioSource } from '@/lib/audio';
 import { decodeChannels, loadProject, projectFromSource, saveProject } from '@/lib/persistence';
@@ -59,12 +59,14 @@ function App() {
   const [savedStatus, setSavedStatus] = useState('Local session');
   const [error, setError] = useState('');
   const [showAllModules, setShowAllModules] = useState(true);
+  const [isDraggingWav, setIsDraggingWav] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const audioSourceRef = useRef<AudioBufferSourceNode | null>(null);
   const animationRef = useRef<number | null>(null);
   const pointerDragRef = useRef<{ start: number; current: number } | null>(null);
+  const dragDepthRef = useRef(0);
 
   const currentChannels = useMemo(() => renderChain(source.channels, modules, source.sampleRate), [source.channels, source.sampleRate, modules]);
   const currentSource = useMemo<AudioSource>(() => ({ ...source, channels: currentChannels }), [source, currentChannels]);
@@ -157,13 +159,50 @@ function App() {
     setUndoStack((stack) => [...stack, modules]); setModules(next); setRedoStack((stack) => stack.slice(0, -1));
   };
 
-  const importFile = async (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0]; if (!file) return;
+  const importWavFile = useCallback(async (file: File) => {
+    if (!file.name.toLowerCase().endsWith('.wav') && !['audio/wav', 'audio/x-wav', 'audio/wave'].includes(file.type)) {
+      setError('Drop an uncompressed WAV file to begin editing.');
+      return;
+    }
     try {
       setError(''); const parsed = parseWav(await file.arrayBuffer(), file.name);
       stopPlayback(); setSource(parsed); setModules([]); setSelection([0, Math.min(parsed.duration, 5)]); setMarkers([]); setRegions([]); setTitle(file.name.replace(/\.wav$/i, '')); setSavedStatus('Imported · not saved');
     } catch (caught) { setError(caught instanceof Error ? caught.message : 'Unable to read this WAV file.'); }
+  }, [stopPlayback]);
+
+  const importFile = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) void importWavFile(file);
     event.target.value = '';
+  };
+
+  const onDragEnter = (event: ReactDragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    dragDepthRef.current += 1;
+    if (event.dataTransfer.types.includes('Files')) setIsDraggingWav(true);
+  };
+
+  const onDragOver = (event: ReactDragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'copy';
+  };
+
+  const onDragLeave = (event: ReactDragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+    if (dragDepthRef.current === 0) setIsDraggingWav(false);
+  };
+
+  const onDrop = (event: ReactDragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    dragDepthRef.current = 0;
+    setIsDraggingWav(false);
+    const file = event.dataTransfer.files?.[0];
+    if (!file) {
+      setError('No file was found in that drop.');
+      return;
+    }
+    void importWavFile(file);
   };
 
   const save = () => {
@@ -238,7 +277,25 @@ function App() {
   const addRegion = () => selectionEnd - selectionStart > .01 && setRegions((items) => [...items, { id: `region-${Date.now()}`, start: selectionStart, end: selectionEnd, label: `region ${items.length + 1}` }]);
 
   return (
-    <div className="app-shell noise" data-testid="app-field-restore">
+    <div
+      className={`app-shell noise ${isDraggingWav ? 'is-dragging-wav' : ''}`}
+      onDragEnter={onDragEnter}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+      data-testid="app-field-restore"
+    >
+      {isDraggingWav && (
+        <div className="wav-drop-overlay" role="status" aria-live="polite" data-testid="wav-drop-overlay">
+          <div className="wav-drop-card">
+            <FileAudio size={34} strokeWidth={1.5} />
+            <div>
+              <div className="wav-drop-title">Drop WAV to open</div>
+              <div className="wav-drop-copy">Your recording stays on this device. The original will remain unchanged.</div>
+            </div>
+          </div>
+        </div>
+      )}
       <aside className="sidebar-shell">
         <div className="px-4 py-5 flex items-center gap-3">
           <div className="brand-mark" aria-hidden="true" />
