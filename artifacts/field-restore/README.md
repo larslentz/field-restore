@@ -62,9 +62,13 @@ New imports and the demo source start with this linked chain:
 2. Automatic DC-offset removal
 3. Low-rumble removal using a 55.5 Hz high-pass filter at Q 0.38
 4. Adaptive hum removal
-5. A +3 dB low shelf at 55 Hz and Q 0.4
-6. A 0.25-second fade in
-7. A 0.25-second fade out
+5. Wind/rumble removal using a 100 Hz high-pass filter at Q 0.7
+6. A +3 dB low shelf at 55 Hz and Q 0.4
+7. A 7-second fade in
+8. A 7-second fade out
+9. Neutral output gain
+
+The same chain is available under Local presets as **Common Field Recording Adjustments**.
 
 ## Statistics
 
