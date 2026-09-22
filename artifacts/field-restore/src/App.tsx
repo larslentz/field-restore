@@ -78,6 +78,7 @@ function App() {
   const audioSourceRef = useRef<AudioBufferSourceNode | null>(null);
   const animationRef = useRef<number | null>(null);
   const playHeadRef = useRef(0);
+  const selectionRef = useRef<[number, number]>([4.1, 7.8]);
   const pointerDragRef = useRef<{ start: number; current: number } | null>(null);
   const frequencyDragRef = useRef<{ startY: number; startFrequency: number } | null>(null);
   const dragDepthRef = useRef(0);
@@ -145,11 +146,17 @@ function App() {
     channels.forEach((channel, index) => buffer.getChannelData(index).set(channel));
     const node = context.createBufferSource();
     node.buffer = buffer; node.playbackRate.value = rate; node.connect(context.destination);
-    const startAt = Math.min(startPosition, Math.max(0, duration - .01));
+    const [selectedA, selectedB] = selectionRef.current;
+    const selectedStart = Math.max(0, Math.min(selectedA, selectedB));
+    const selectedEnd = Math.min(duration, Math.max(selectedA, selectedB));
+    const hasLoopSelection = loop && selectedEnd - selectedStart >= .01;
+    const loopStart = hasLoopSelection ? selectedStart : Math.min(startPosition, Math.max(0, duration - .01));
+    const loopEnd = hasLoopSelection ? selectedEnd : duration;
+    const startAt = hasLoopSelection ? loopStart : Math.min(startPosition, Math.max(0, duration - .01));
     const startedAt = context.currentTime;
     node.loop = loop;
-    node.loopStart = startAt;
-    node.loopEnd = duration;
+    node.loopStart = loopStart;
+    node.loopEnd = loopEnd;
     node.onended = () => {
       if (!loop && audioSourceRef.current === node) {
         playHeadRef.current = duration;
@@ -164,7 +171,7 @@ function App() {
       if (audioSourceRef.current !== node) return;
       const elapsed = (context.currentTime - startedAt) * rate;
       const next = Math.min(duration, startAt + elapsed);
-      const position = loop ? startAt + (elapsed % Math.max(.01, duration - startAt)) : next;
+      const position = loop ? loopStart + (elapsed % Math.max(.01, loopEnd - loopStart)) : next;
       playHeadRef.current = position;
       setPlayHead(position);
       animationRef.current = requestAnimationFrame(tick);
@@ -175,6 +182,10 @@ function App() {
   useEffect(() => {
     playHeadRef.current = playHead;
   }, [playHead]);
+
+  useEffect(() => {
+    selectionRef.current = [selectionStart, selectionEnd];
+  }, [selectionEnd, selectionStart]);
 
   const play = useCallback(() => {
     if (isPlaying) { stopPlayback(); return; }
@@ -305,6 +316,7 @@ function App() {
     const time = canvasPointToTime(event);
     pointerDragRef.current = { start: time, current: time };
     event.currentTarget.setPointerCapture(event.pointerId);
+    selectionRef.current = [time, time];
     setSelection([time, time]);
     seekTo(time);
   };
@@ -319,6 +331,7 @@ function App() {
     if (!pointerDragRef.current) return;
     const time = canvasPointToTime(event);
     pointerDragRef.current.current = time;
+    selectionRef.current = [Math.min(pointerDragRef.current.start, time), Math.max(pointerDragRef.current.start, time)];
     setSelection([pointerDragRef.current.start, time]);
   };
   const onCanvasPointerUp = (event: ReactPointerEvent<HTMLCanvasElement>) => {
@@ -330,8 +343,10 @@ function App() {
     const time = canvasPointToTime(event);
     const start = pointerDragRef.current.start;
     const selectionStartTime = Math.min(start, time);
-    setSelection([selectionStartTime, Math.max(start, time)]);
-    if (selectionStartTime !== start) seekTo(selectionStartTime);
+    const selectionEndTime = Math.max(start, time);
+    selectionRef.current = [selectionStartTime, selectionEndTime];
+    setSelection([selectionStartTime, selectionEndTime]);
+    if (loop || selectionStartTime !== start) seekTo(selectionStartTime);
     pointerDragRef.current = null;
   };
   const onSpectrogramWheel = useCallback((event: WheelEvent) => {
