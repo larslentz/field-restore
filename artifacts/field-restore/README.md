@@ -56,6 +56,16 @@ Processing is represented as ordered typed instructions. The app includes practi
 
 Stereo channels receive the same timing and linked settings by default so channel alignment is preserved.
 
+New imports and the demo source start with this linked chain:
+
+1. Neutral gain
+2. Automatic DC-offset removal
+3. Low-rumble removal using a 55.5 Hz high-pass filter at Q 0.38
+4. Adaptive hum removal
+5. A +3 dB low shelf at 55 Hz and Q 0.4
+6. A 0.25-second fade in
+7. A 0.25-second fade out
+
 ## Statistics
 
 Field Restore calculates browser-local true-peak estimates, integrated loudness, loudness range, and maximum short-term loudness for the full file and active selection. Loudness uses BS.1770-style K-weighting and absolute/relative gating; true peak uses 4× inter-sample interpolation. These are practical estimates rather than certified compliance-meter readings.
