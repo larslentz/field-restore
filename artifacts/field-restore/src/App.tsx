@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent as ReactDragEvent, type PointerEvent as ReactPointerEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent as ReactDragEvent, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent } from 'react';
 import { Activity, ArrowDown, ArrowUp, AudioLines, Check, ChevronDown, CircleHelp, Download, FileAudio, FolderOpen, Gauge, HelpCircle, Info, Keyboard, Layers3, Menu, Pause, Play, Plus, Redo2, RotateCcw, Save, Settings, Square, Trash2, Undo2, Waves, X, ZoomIn, ZoomOut } from 'lucide-react';
 import { createDemoAudio, downloadBlob, encodeWav, parseWav, type AudioSource } from '@/lib/audio';
 import { decodeChannels, loadProject, projectFromSource, saveProject } from '@/lib/persistence';
@@ -15,7 +15,7 @@ type Region = { id: string; start: number; end: number; label: string };
 const MODULE_TYPES: ModuleType[] = ['gain', 'fade', 'eq', 'dc', 'hum', 'wind', 'region', 'ambient'];
 const colorForMarker = '#d8ed55';
 const SPECTROGRAM_LEFT = 48;
-const SPECTROGRAM_RIGHT = 10;
+const SPECTROGRAM_RIGHT = 50;
 const SPECTROGRAM_BOTTOM = 28;
 
 function formatTime(seconds: number, precise = false) {
@@ -53,6 +53,8 @@ function App() {
   const [error, setError] = useState('');
   const [showAllModules, setShowAllModules] = useState(true);
   const [isDraggingWav, setIsDraggingWav] = useState(false);
+  const [spectrogramMaxFrequency, setSpectrogramMaxFrequency] = useState(20000);
+  const [spectrogramCeilingDb, setSpectrogramCeilingDb] = useState(-20);
   const fileRef = useRef<HTMLInputElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -69,12 +71,13 @@ function App() {
   const selectionEnd = Math.max(...selection);
   const viewCenter = selectionStart + (selectionEnd - selectionStart) / 2 || duration / 2;
   const viewStart = zoom === 1 ? 0 : Math.max(0, Math.min(duration - viewDuration, viewCenter - viewDuration / 2));
+  const spectrogramFloorDb = spectrogramCeilingDb - 85;
   const spectrograms = useMemo(
     () => ({
-      left: calculateSpectrogram([currentChannels[0]], source.sampleRate, viewStart, viewDuration, 480, 110),
-      right: calculateSpectrogram([currentChannels[1] ?? currentChannels[0]], source.sampleRate, viewStart, viewDuration, 480, 110),
+      left: calculateSpectrogram([currentChannels[0]], source.sampleRate, viewStart, viewDuration, 480, 110, spectrogramMaxFrequency, spectrogramFloorDb, spectrogramCeilingDb),
+      right: calculateSpectrogram([currentChannels[1] ?? currentChannels[0]], source.sampleRate, viewStart, viewDuration, 480, 110, spectrogramMaxFrequency, spectrogramFloorDb, spectrogramCeilingDb),
     }),
-    [currentChannels, source.sampleRate, viewDuration, viewStart],
+    [currentChannels, source.sampleRate, spectrogramCeilingDb, spectrogramFloorDb, spectrogramMaxFrequency, viewDuration, viewStart],
   );
   const originalStats = useMemo(() => analyzeLoudness(source.channels, source.sampleRate), [source.channels, source.sampleRate]);
   const currentStats = useMemo(() => analyzeLoudness(currentChannels, source.sampleRate), [currentChannels, source.sampleRate]);
@@ -231,6 +234,20 @@ function App() {
   const onCanvasPointerDown = (event: ReactPointerEvent<HTMLCanvasElement>) => { const time = canvasPointToTime(event); pointerDragRef.current = { start: time, current: time }; event.currentTarget.setPointerCapture(event.pointerId); setSelection([time, time]); };
   const onCanvasPointerMove = (event: ReactPointerEvent<HTMLCanvasElement>) => { if (!pointerDragRef.current) return; const time = canvasPointToTime(event); pointerDragRef.current.current = time; setSelection([pointerDragRef.current.start, time]); };
   const onCanvasPointerUp = (event: ReactPointerEvent<HTMLCanvasElement>) => { if (!pointerDragRef.current) return; const time = canvasPointToTime(event); const start = pointerDragRef.current.start; setSelection([Math.min(start, time), Math.max(start, time)]); pointerDragRef.current = null; };
+  const onSpectrogramWheel = (event: ReactWheelEvent<HTMLCanvasElement>) => {
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const x = event.clientX - bounds.left;
+    if (x <= SPECTROGRAM_LEFT) {
+      event.preventDefault();
+      const nyquist = Math.floor(source.sampleRate / 2);
+      const direction = event.deltaY > 0 ? 1 : -1;
+      setSpectrogramMaxFrequency((value) => Math.max(1000, Math.min(nyquist, Math.round((value + direction * 1000) / 1000) * 1000)));
+    } else if (x >= bounds.width - SPECTROGRAM_RIGHT) {
+      event.preventDefault();
+      const direction = event.deltaY > 0 ? -1 : 1;
+      setSpectrogramCeilingDb((value) => Math.max(-60, Math.min(0, value + direction * 2)));
+    }
+  };
 
   useEffect(() => {
     const canvas = canvasRef.current; if (!canvas) return;
@@ -276,8 +293,9 @@ function App() {
       context.beginPath(); context.moveTo(x, 0); context.lineTo(x, graphBottom); context.stroke();
     }
     for (const top of [0, paneHeight]) {
-      for (let frequency = 0; frequency <= 20000; frequency += 10000) {
-        const y = top + paneHeight - (frequency / 20000) * paneHeight;
+      for (let tick = 0; tick <= 2; tick += 1) {
+        const frequency = (tick / 2) * spectrogramMaxFrequency;
+        const y = top + paneHeight - (frequency / spectrogramMaxFrequency) * paneHeight;
         context.beginPath(); context.moveTo(graphLeft, y); context.lineTo(graphRight, y); context.stroke();
       }
     }
@@ -295,10 +313,19 @@ function App() {
     for (let tick = 0; tick <= 6; tick += 1) { const time = viewStart + (tick / 6) * viewDuration; context.fillText(formatTime(time), graphLeft + (tick / 6) * graphWidth + 4, height - 8); }
     context.textAlign = 'right';
     for (const top of [0, paneHeight]) {
-      for (let frequency = 0; frequency <= 20000; frequency += 10000) {
-        const y = top + paneHeight - (frequency / 20000) * paneHeight;
-        const label = frequency === 0 ? '0' : `${frequency / 1000}k`;
+      for (let tick = 0; tick <= 2; tick += 1) {
+        const frequency = (tick / 2) * spectrogramMaxFrequency;
+        const y = top + paneHeight - (frequency / spectrogramMaxFrequency) * paneHeight;
+        const label = frequency === 0 ? '0' : `${Number((frequency / 1000).toFixed(1))}k`;
         context.fillText(label, graphLeft - 6, Math.max(top + 10, Math.min(top + paneHeight - 3, y + 3)));
+      }
+    }
+    context.textAlign = 'left';
+    for (const top of [0, paneHeight]) {
+      for (let tick = 0; tick <= 2; tick += 1) {
+        const decibels = spectrogramCeilingDb - (tick / 2) * (spectrogramCeilingDb - spectrogramFloorDb);
+        const y = top + (tick / 2) * paneHeight;
+        context.fillText(`${Math.round(decibels)}`, graphRight + 6, Math.max(top + 10, Math.min(top + paneHeight - 3, y + 3)));
       }
     }
     context.textAlign = 'left';
@@ -312,7 +339,14 @@ function App() {
     context.textAlign = 'center';
     context.fillText('FREQUENCY (Hz)', 0, 0);
     context.restore();
-  }, [activeTab, markers, playHead, selectionEnd, selectionStart, source.channels.length, spectrograms, viewDuration, viewStart]);
+    context.save();
+    context.translate(width - 7, graphBottom / 2);
+    context.rotate(Math.PI / 2);
+    context.fillStyle = '#91a69d';
+    context.textAlign = 'center';
+    context.fillText('LEVEL (dB)', 0, 0);
+    context.restore();
+  }, [activeTab, markers, playHead, selectionEnd, selectionStart, source.channels.length, spectrogramCeilingDb, spectrogramFloorDb, spectrogramMaxFrequency, spectrograms, viewDuration, viewStart]);
 
   useEffect(() => {
     const keyHandler = (event: KeyboardEvent) => {
@@ -404,12 +438,12 @@ function App() {
                 <>
                   <section className="panel instrument-grid" aria-label="Spectrogram editor">
                     <div className="panel-header">
-                      <div className="flex items-center gap-3"><Waves size={17} color="hsl(var(--primary))" /><div><div className="section-title">Spectrogram / selection</div><div className="text-[10px] text-muted-foreground mt-0.5">Time × frequency · click-drag to mark a precise working range</div></div></div>
+                      <div className="flex items-center gap-3"><Waves size={17} color="hsl(var(--primary))" /><div><div className="section-title">Spectrogram / selection</div><div className="text-[10px] text-muted-foreground mt-0.5">Drag to select · scroll left frequency or right dB axis to rescale</div></div></div>
                       <div className="flex items-center gap-1"><button type="button" className="icon-btn" onClick={() => setZoom(Math.max(1, zoom / 1.8))} aria-label="Zoom out" data-testid="button-zoom-out"><ZoomOut size={15} /></button><span className="font-mono-value text-[10px] text-muted-foreground w-12 text-center">{zoom.toFixed(1)}×</span><button type="button" className="icon-btn" onClick={() => setZoom(Math.min(16, zoom * 1.8))} aria-label="Zoom in" data-testid="button-zoom-in"><ZoomIn size={15} /></button><button type="button" className="quiet-btn ml-2 !py-[5px]" onClick={() => setZoom(1)} data-testid="button-fit">Fit</button></div>
                     </div>
                     <div className="panel-body !pt-3">
                       <div className="waveform-wrap">
-                        <canvas ref={canvasRef} className="waveform-canvas" onPointerDown={onCanvasPointerDown} onPointerMove={onCanvasPointerMove} onPointerUp={onCanvasPointerUp} onPointerCancel={onCanvasPointerUp} aria-label="Interactive spectrogram from 0 to 20 kilohertz" data-testid="canvas-spectrogram" />
+                        <canvas ref={canvasRef} className="waveform-canvas" onPointerDown={onCanvasPointerDown} onPointerMove={onCanvasPointerMove} onPointerUp={onCanvasPointerUp} onPointerCancel={onCanvasPointerUp} onWheel={onSpectrogramWheel} aria-label={`Interactive spectrogram from 0 to ${spectrogramMaxFrequency / 1000} kilohertz with ${spectrogramFloorDb} to ${spectrogramCeilingDb} decibel scale`} data-testid="canvas-spectrogram" />
                       </div>
                       <div className="flex flex-wrap items-center justify-between gap-3 mt-3">
                         <div className="flex items-center gap-2 text-[11px] text-muted-foreground"><span className="inline-block w-3 h-3 rounded-sm bg-[#142b38]" /> low energy <span className="inline-block w-3 h-3 rounded-sm bg-[#d8ed55] ml-2" /> high energy <span className="inline-block w-3 h-3 rounded-sm bg-[#ff8a4c] ml-2" /> playhead</div>

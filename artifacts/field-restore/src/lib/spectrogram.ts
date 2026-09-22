@@ -48,6 +48,8 @@ export function calculateSpectrogram(
   width = 480,
   height = 220,
   maximumFrequency = 20000,
+  floorDb = -105,
+  ceilingDb = -20,
 ): SpectrogramData {
   const fftSize = 1024;
   const availableFrames = channels[0]?.length ?? 0;
@@ -58,9 +60,6 @@ export function calculateSpectrogram(
   const imaginary = new Float64Array(fftSize);
   const magnitudes = new Float64Array(fftSize / 2 + 1);
   const channelCount = Math.max(1, channels.length);
-  const floorDb = -105;
-  const ceilingDb = -20;
-
   for (let column = 0; column < width; column += 1) {
     const centerFrame = startFrame + Math.floor(((column + 0.5) / width) * viewFrames);
     const windowStart = centerFrame - Math.floor(fftSize / 2);
