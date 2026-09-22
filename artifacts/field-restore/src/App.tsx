@@ -69,8 +69,11 @@ function App() {
   const selectionEnd = Math.max(...selection);
   const viewCenter = selectionStart + (selectionEnd - selectionStart) / 2 || duration / 2;
   const viewStart = zoom === 1 ? 0 : Math.max(0, Math.min(duration - viewDuration, viewCenter - viewDuration / 2));
-  const spectrogram = useMemo(
-    () => calculateSpectrogram(currentChannels, source.sampleRate, viewStart, viewDuration),
+  const spectrograms = useMemo(
+    () => ({
+      left: calculateSpectrogram([currentChannels[0]], source.sampleRate, viewStart, viewDuration, 480, 110),
+      right: calculateSpectrogram([currentChannels[1] ?? currentChannels[0]], source.sampleRate, viewStart, viewDuration, 480, 110),
+    }),
     [currentChannels, source.sampleRate, viewDuration, viewStart],
   );
   const originalStats = useMemo(() => analyzeLoudness(source.channels, source.sampleRate), [source.channels, source.sampleRate]);
@@ -238,39 +241,48 @@ function App() {
     const graphLeft = SPECTROGRAM_LEFT;
     const graphRight = width - SPECTROGRAM_RIGHT;
     const graphWidth = Math.max(1, graphRight - graphLeft);
+    const paneHeight = graphBottom / 2;
     context.fillStyle = '#17242c'; context.fillRect(0, 0, width, height);
 
-    const imageCanvas = document.createElement('canvas');
-    imageCanvas.width = spectrogram.width;
-    imageCanvas.height = spectrogram.height;
-    const imageContext = imageCanvas.getContext('2d');
-    if (imageContext) {
-      const image = imageContext.createImageData(spectrogram.width, spectrogram.height);
-      for (let index = 0; index < spectrogram.values.length; index += 1) {
-        const intensity = spectrogram.values[index];
-        const red = intensity < 0.55 ? 14 + intensity * 90 : 64 + (intensity - 0.55) * 425;
-        const green = intensity < 0.45 ? 27 + intensity * 210 : 121 + (intensity - 0.45) * 205;
-        const blue = intensity < 0.5 ? 38 + intensity * 170 : 123 - (intensity - 0.5) * 210;
-        const pixel = index * 4;
-        image.data[pixel] = Math.max(0, Math.min(255, red));
-        image.data[pixel + 1] = Math.max(0, Math.min(255, green));
-        image.data[pixel + 2] = Math.max(0, Math.min(255, blue));
-        image.data[pixel + 3] = 255;
+    const drawSpectrogramPane = (spectrogram: typeof spectrograms.left, top: number) => {
+      const imageCanvas = document.createElement('canvas');
+      imageCanvas.width = spectrogram.width;
+      imageCanvas.height = spectrogram.height;
+      const imageContext = imageCanvas.getContext('2d');
+      if (imageContext) {
+        const image = imageContext.createImageData(spectrogram.width, spectrogram.height);
+        for (let index = 0; index < spectrogram.values.length; index += 1) {
+          const intensity = spectrogram.values[index];
+          const red = intensity < 0.55 ? 14 + intensity * 90 : 64 + (intensity - 0.55) * 425;
+          const green = intensity < 0.45 ? 27 + intensity * 210 : 121 + (intensity - 0.45) * 205;
+          const blue = intensity < 0.5 ? 38 + intensity * 170 : 123 - (intensity - 0.5) * 210;
+          const pixel = index * 4;
+          image.data[pixel] = Math.max(0, Math.min(255, red));
+          image.data[pixel + 1] = Math.max(0, Math.min(255, green));
+          image.data[pixel + 2] = Math.max(0, Math.min(255, blue));
+          image.data[pixel + 3] = 255;
+        }
+        imageContext.putImageData(image, 0, 0);
+        context.imageSmoothingEnabled = true;
+        context.drawImage(imageCanvas, graphLeft, top, graphWidth, paneHeight);
       }
-      imageContext.putImageData(image, 0, 0);
-      context.imageSmoothingEnabled = true;
-      context.drawImage(imageCanvas, graphLeft, 0, graphWidth, graphBottom);
-    }
+    };
+    drawSpectrogramPane(spectrograms.left, 0);
+    drawSpectrogramPane(spectrograms.right, paneHeight);
 
     context.strokeStyle = 'rgba(235, 250, 231, .13)'; context.lineWidth = 1;
     for (let tick = 0; tick <= 10; tick += 1) {
       const x = graphLeft + (tick / 10) * graphWidth;
       context.beginPath(); context.moveTo(x, 0); context.lineTo(x, graphBottom); context.stroke();
     }
-    for (let frequency = 0; frequency <= 20000; frequency += 5000) {
-      const y = graphBottom - (frequency / 20000) * graphBottom;
-      context.beginPath(); context.moveTo(graphLeft, y); context.lineTo(graphRight, y); context.stroke();
+    for (const top of [0, paneHeight]) {
+      for (let frequency = 0; frequency <= 20000; frequency += 10000) {
+        const y = top + paneHeight - (frequency / 20000) * paneHeight;
+        context.beginPath(); context.moveTo(graphLeft, y); context.lineTo(graphRight, y); context.stroke();
+      }
     }
+    context.strokeStyle = 'rgba(242, 244, 232, .55)'; context.lineWidth = 1;
+    context.beginPath(); context.moveTo(graphLeft, paneHeight); context.lineTo(graphRight, paneHeight); context.stroke();
 
     const selectedLeft = graphLeft + ((selectionStart - viewStart) / viewDuration) * graphWidth;
     const selectedRight = graphLeft + ((selectionEnd - viewStart) / viewDuration) * graphWidth;
@@ -282,12 +294,25 @@ function App() {
     context.fillStyle = '#f2f4e8'; context.font = '10px "Space Mono", monospace'; context.textAlign = 'left';
     for (let tick = 0; tick <= 6; tick += 1) { const time = viewStart + (tick / 6) * viewDuration; context.fillText(formatTime(time), graphLeft + (tick / 6) * graphWidth + 4, height - 8); }
     context.textAlign = 'right';
-    for (let frequency = 0; frequency <= 20000; frequency += 5000) {
-      const y = graphBottom - (frequency / 20000) * graphBottom;
-      const label = frequency === 0 ? '0 Hz' : `${frequency / 1000} kHz`;
-      context.fillText(label, graphLeft - 6, Math.max(10, Math.min(graphBottom - 3, y + 3)));
+    for (const top of [0, paneHeight]) {
+      for (let frequency = 0; frequency <= 20000; frequency += 10000) {
+        const y = top + paneHeight - (frequency / 20000) * paneHeight;
+        const label = frequency === 0 ? '0' : `${frequency / 1000}k`;
+        context.fillText(label, graphLeft - 6, Math.max(top + 10, Math.min(top + paneHeight - 3, y + 3)));
+      }
     }
-  }, [activeTab, markers, playHead, selectionEnd, selectionStart, spectrogram, viewDuration, viewStart]);
+    context.textAlign = 'left';
+    context.fillStyle = '#d8ed55';
+    context.fillText(source.channels.length > 1 ? 'L' : 'MONO', graphLeft + 6, 14);
+    context.fillText(source.channels.length > 1 ? 'R' : 'MONO', graphLeft + 6, paneHeight + 14);
+    context.save();
+    context.translate(11, graphBottom / 2);
+    context.rotate(-Math.PI / 2);
+    context.fillStyle = '#91a69d';
+    context.textAlign = 'center';
+    context.fillText('FREQUENCY (Hz)', 0, 0);
+    context.restore();
+  }, [activeTab, markers, playHead, selectionEnd, selectionStart, source.channels.length, spectrograms, viewDuration, viewStart]);
 
   useEffect(() => {
     const keyHandler = (event: KeyboardEvent) => {
