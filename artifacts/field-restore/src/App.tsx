@@ -4,6 +4,7 @@ import { createDemoAudio, downloadBlob, encodeWav, parseWav, type AudioSource } 
 import { decodeChannels, loadProject, projectFromSource, saveProject } from '@/lib/persistence';
 import { makeModule, MODULE_LABELS, renderChain, type EditModule, type ModuleType } from '@/lib/edit-chain';
 import { analyzeLoudness, type LoudnessStats } from '@/lib/loudness';
+import { calculateSpectrogram } from '@/lib/spectrogram';
 import './index.css';
 
 type ViewTab = 'edit' | 'analyze' | 'project';
@@ -13,6 +14,9 @@ type Region = { id: string; start: number; end: number; label: string };
 
 const MODULE_TYPES: ModuleType[] = ['gain', 'fade', 'eq', 'dc', 'hum', 'wind', 'region', 'ambient'];
 const colorForMarker = '#d8ed55';
+const SPECTROGRAM_LEFT = 48;
+const SPECTROGRAM_RIGHT = 10;
+const SPECTROGRAM_BOTTOM = 28;
 
 function formatTime(seconds: number, precise = false) {
   const safe = Math.max(0, seconds || 0);
@@ -63,6 +67,12 @@ function App() {
   const viewDuration = duration / zoom;
   const selectionStart = Math.min(...selection);
   const selectionEnd = Math.max(...selection);
+  const viewCenter = selectionStart + (selectionEnd - selectionStart) / 2 || duration / 2;
+  const viewStart = zoom === 1 ? 0 : Math.max(0, Math.min(duration - viewDuration, viewCenter - viewDuration / 2));
+  const spectrogram = useMemo(
+    () => calculateSpectrogram(currentChannels, source.sampleRate, viewStart, viewDuration),
+    [currentChannels, source.sampleRate, viewDuration, viewStart],
+  );
   const originalStats = useMemo(() => analyzeLoudness(source.channels, source.sampleRate), [source.channels, source.sampleRate]);
   const currentStats = useMemo(() => analyzeLoudness(currentChannels, source.sampleRate), [currentChannels, source.sampleRate]);
   const selectionOriginalStats = useMemo(() => analyzeLoudness(source.channels, source.sampleRate, selectionStart * source.sampleRate, selectionEnd * source.sampleRate), [source.channels, selectionStart, selectionEnd, source.sampleRate]);
@@ -210,9 +220,9 @@ function App() {
 
   const canvasPointToTime = (event: ReactPointerEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current; if (!canvas) return 0;
-    const bounds = canvas.getBoundingClientRect(); const x = (event.clientX - bounds.left) / bounds.width;
-    const center = selectionStart + (selectionEnd - selectionStart) / 2 || duration / 2;
-    const viewStart = zoom === 1 ? 0 : Math.max(0, Math.min(duration - viewDuration, center - viewDuration / 2));
+    const bounds = canvas.getBoundingClientRect();
+    const plotWidth = Math.max(1, bounds.width - SPECTROGRAM_LEFT - SPECTROGRAM_RIGHT);
+    const x = Math.max(0, Math.min(1, (event.clientX - bounds.left - SPECTROGRAM_LEFT) / plotWidth));
     return Math.max(0, Math.min(duration, viewStart + x * viewDuration));
   };
   const onCanvasPointerDown = (event: ReactPointerEvent<HTMLCanvasElement>) => { const time = canvasPointToTime(event); pointerDragRef.current = { start: time, current: time }; event.currentTarget.setPointerCapture(event.pointerId); setSelection([time, time]); };
@@ -224,33 +234,60 @@ function App() {
     const context = canvas.getContext('2d'); if (!context) return;
     const ratio = window.devicePixelRatio || 1; const width = canvas.clientWidth; const height = canvas.clientHeight;
     canvas.width = width * ratio; canvas.height = height * ratio; context.setTransform(ratio, 0, 0, ratio, 0, 0);
-    const center = selectionStart + (selectionEnd - selectionStart) / 2 || duration / 2;
-    const viewStart = zoom === 1 ? 0 : Math.max(0, Math.min(duration - viewDuration, center - viewDuration / 2));
-    const graphBottom = height - 28;
+    const graphBottom = height - SPECTROGRAM_BOTTOM;
+    const graphLeft = SPECTROGRAM_LEFT;
+    const graphRight = width - SPECTROGRAM_RIGHT;
+    const graphWidth = Math.max(1, graphRight - graphLeft);
     context.fillStyle = '#17242c'; context.fillRect(0, 0, width, height);
-    context.strokeStyle = 'rgba(218, 237, 196, .11)'; context.lineWidth = 1;
-    for (let x = 0; x < width; x += width / 10) { context.beginPath(); context.moveTo(x, 0); context.lineTo(x, graphBottom); context.stroke(); }
-    for (let y = 18; y < graphBottom; y += 32) { context.beginPath(); context.moveTo(0, y); context.lineTo(width, y); context.stroke(); }
-    const selectedLeft = ((selectionStart - viewStart) / viewDuration) * width; const selectedRight = ((selectionEnd - viewStart) / viewDuration) * width;
-    context.fillStyle = 'rgba(214, 237, 85, .13)'; context.fillRect(selectedLeft, 0, Math.max(2, selectedRight - selectedLeft), graphBottom);
-    const drawWave = (channels: Float32Array[], color: string, alpha: number) => {
-      context.strokeStyle = color; context.globalAlpha = alpha; context.lineWidth = 1;
-      context.beginPath();
-      const columns = Math.ceil(width); const startSample = Math.floor(viewStart * source.sampleRate); const sampleCount = Math.max(1, Math.floor(viewDuration * source.sampleRate));
-      for (let x = 0; x < columns; x += 1) {
-        const from = startSample + Math.floor((x / columns) * sampleCount); const to = Math.min(channels[0].length, startSample + Math.floor(((x + 1) / columns) * sampleCount));
-        let min = 1; let max = -1; for (let i = from; i < Math.max(from + 1, to); i += 1) { const value = channels[0][i] ?? 0; min = Math.min(min, value); max = Math.max(max, value); }
-        const mid = graphBottom / 2; context.moveTo(x, mid + min * (graphBottom * .43)); context.lineTo(x, mid + max * (graphBottom * .43));
+
+    const imageCanvas = document.createElement('canvas');
+    imageCanvas.width = spectrogram.width;
+    imageCanvas.height = spectrogram.height;
+    const imageContext = imageCanvas.getContext('2d');
+    if (imageContext) {
+      const image = imageContext.createImageData(spectrogram.width, spectrogram.height);
+      for (let index = 0; index < spectrogram.values.length; index += 1) {
+        const intensity = spectrogram.values[index];
+        const red = intensity < 0.55 ? 14 + intensity * 90 : 64 + (intensity - 0.55) * 425;
+        const green = intensity < 0.45 ? 27 + intensity * 210 : 121 + (intensity - 0.45) * 205;
+        const blue = intensity < 0.5 ? 38 + intensity * 170 : 123 - (intensity - 0.5) * 210;
+        const pixel = index * 4;
+        image.data[pixel] = Math.max(0, Math.min(255, red));
+        image.data[pixel + 1] = Math.max(0, Math.min(255, green));
+        image.data[pixel + 2] = Math.max(0, Math.min(255, blue));
+        image.data[pixel + 3] = 255;
       }
-      context.stroke(); context.globalAlpha = 1;
-    };
-    drawWave(source.channels, '#8fa4a1', .42); drawWave(currentChannels, '#d8ed55', 1);
-    context.strokeStyle = 'rgba(235, 250, 231, .28)'; context.beginPath(); context.moveTo(0, graphBottom / 2); context.lineTo(width, graphBottom / 2); context.stroke();
-    markers.forEach((marker) => { const x = ((marker.time - viewStart) / viewDuration) * width; if (x >= 0 && x <= width) { context.strokeStyle = marker.color; context.setLineDash([3, 3]); context.beginPath(); context.moveTo(x, 0); context.lineTo(x, graphBottom); context.stroke(); context.setLineDash([]); context.fillStyle = marker.color; context.beginPath(); context.arc(x, 9, 3, 0, Math.PI * 2); context.fill(); } });
-    const headX = ((playHead - viewStart) / viewDuration) * width; context.strokeStyle = '#ff8a4c'; context.lineWidth = 2; context.beginPath(); context.moveTo(headX, 0); context.lineTo(headX, graphBottom); context.stroke();
+      imageContext.putImageData(image, 0, 0);
+      context.imageSmoothingEnabled = true;
+      context.drawImage(imageCanvas, graphLeft, 0, graphWidth, graphBottom);
+    }
+
+    context.strokeStyle = 'rgba(235, 250, 231, .13)'; context.lineWidth = 1;
+    for (let tick = 0; tick <= 10; tick += 1) {
+      const x = graphLeft + (tick / 10) * graphWidth;
+      context.beginPath(); context.moveTo(x, 0); context.lineTo(x, graphBottom); context.stroke();
+    }
+    for (let frequency = 0; frequency <= 20000; frequency += 5000) {
+      const y = graphBottom - (frequency / 20000) * graphBottom;
+      context.beginPath(); context.moveTo(graphLeft, y); context.lineTo(graphRight, y); context.stroke();
+    }
+
+    const selectedLeft = graphLeft + ((selectionStart - viewStart) / viewDuration) * graphWidth;
+    const selectedRight = graphLeft + ((selectionEnd - viewStart) / viewDuration) * graphWidth;
+    context.fillStyle = 'rgba(214, 237, 85, .13)'; context.fillRect(selectedLeft, 0, Math.max(2, selectedRight - selectedLeft), graphBottom);
+    context.strokeStyle = 'rgba(216, 237, 85, .5)'; context.strokeRect(selectedLeft, 0, Math.max(2, selectedRight - selectedLeft), graphBottom);
+    markers.forEach((marker) => { const x = graphLeft + ((marker.time - viewStart) / viewDuration) * graphWidth; if (x >= graphLeft && x <= graphRight) { context.strokeStyle = marker.color; context.setLineDash([3, 3]); context.beginPath(); context.moveTo(x, 0); context.lineTo(x, graphBottom); context.stroke(); context.setLineDash([]); context.fillStyle = marker.color; context.beginPath(); context.arc(x, 9, 3, 0, Math.PI * 2); context.fill(); } });
+    const headX = graphLeft + ((playHead - viewStart) / viewDuration) * graphWidth; context.strokeStyle = '#ff8a4c'; context.lineWidth = 2; context.beginPath(); context.moveTo(headX, 0); context.lineTo(headX, graphBottom); context.stroke();
+
     context.fillStyle = '#f2f4e8'; context.font = '10px "Space Mono", monospace'; context.textAlign = 'left';
-    for (let tick = 0; tick <= 6; tick += 1) { const time = viewStart + (tick / 6) * viewDuration; context.fillText(formatTime(time), (tick / 6) * width + 4, height - 8); }
-  }, [activeTab, currentChannels, duration, markers, playHead, selectionEnd, selectionStart, source.channels, source.sampleRate, viewDuration, zoom]);
+    for (let tick = 0; tick <= 6; tick += 1) { const time = viewStart + (tick / 6) * viewDuration; context.fillText(formatTime(time), graphLeft + (tick / 6) * graphWidth + 4, height - 8); }
+    context.textAlign = 'right';
+    for (let frequency = 0; frequency <= 20000; frequency += 5000) {
+      const y = graphBottom - (frequency / 20000) * graphBottom;
+      const label = frequency === 0 ? '0 Hz' : `${frequency / 1000} kHz`;
+      context.fillText(label, graphLeft - 6, Math.max(10, Math.min(graphBottom - 3, y + 3)));
+    }
+  }, [activeTab, markers, playHead, selectionEnd, selectionStart, spectrogram, viewDuration, viewStart]);
 
   useEffect(() => {
     const keyHandler = (event: KeyboardEvent) => {
@@ -340,17 +377,17 @@ function App() {
                 <AnalyzePanel originalStats={originalStats} currentStats={currentStats} selectionOriginalStats={selectionOriginalStats} selectionCurrentStats={selectionCurrentStats} duration={duration} selection={[selectionStart, selectionEnd]} modules={modules} />
               ) : (
                 <>
-                  <section className="panel instrument-grid" aria-label="Waveform editor">
+                  <section className="panel instrument-grid" aria-label="Spectrogram editor">
                     <div className="panel-header">
-                      <div className="flex items-center gap-3"><Waves size={17} color="hsl(var(--primary))" /><div><div className="section-title">Waveform / selection</div><div className="text-[10px] text-muted-foreground mt-0.5">Click-drag to mark a precise working range</div></div></div>
+                      <div className="flex items-center gap-3"><Waves size={17} color="hsl(var(--primary))" /><div><div className="section-title">Spectrogram / selection</div><div className="text-[10px] text-muted-foreground mt-0.5">Time × frequency · click-drag to mark a precise working range</div></div></div>
                       <div className="flex items-center gap-1"><button type="button" className="icon-btn" onClick={() => setZoom(Math.max(1, zoom / 1.8))} aria-label="Zoom out" data-testid="button-zoom-out"><ZoomOut size={15} /></button><span className="font-mono-value text-[10px] text-muted-foreground w-12 text-center">{zoom.toFixed(1)}×</span><button type="button" className="icon-btn" onClick={() => setZoom(Math.min(16, zoom * 1.8))} aria-label="Zoom in" data-testid="button-zoom-in"><ZoomIn size={15} /></button><button type="button" className="quiet-btn ml-2 !py-[5px]" onClick={() => setZoom(1)} data-testid="button-fit">Fit</button></div>
                     </div>
                     <div className="panel-body !pt-3">
                       <div className="waveform-wrap">
-                        <canvas ref={canvasRef} className="waveform-canvas" onPointerDown={onCanvasPointerDown} onPointerMove={onCanvasPointerMove} onPointerUp={onCanvasPointerUp} onPointerCancel={onCanvasPointerUp} aria-label="Interactive waveform selection" data-testid="canvas-waveform" />
+                        <canvas ref={canvasRef} className="waveform-canvas" onPointerDown={onCanvasPointerDown} onPointerMove={onCanvasPointerMove} onPointerUp={onCanvasPointerUp} onPointerCancel={onCanvasPointerUp} aria-label="Interactive spectrogram from 0 to 20 kilohertz" data-testid="canvas-spectrogram" />
                       </div>
                       <div className="flex flex-wrap items-center justify-between gap-3 mt-3">
-                        <div className="flex items-center gap-2 text-[11px] text-muted-foreground"><span className="inline-block w-3 h-3 rounded-sm bg-[#d8ed55]" /> current <span className="inline-block w-3 h-3 rounded-sm bg-[#8fa4a1] ml-2" /> original <span className="inline-block w-3 h-3 rounded-sm bg-[#ff8a4c] ml-2" /> playhead</div>
+                        <div className="flex items-center gap-2 text-[11px] text-muted-foreground"><span className="inline-block w-3 h-3 rounded-sm bg-[#142b38]" /> low energy <span className="inline-block w-3 h-3 rounded-sm bg-[#d8ed55] ml-2" /> high energy <span className="inline-block w-3 h-3 rounded-sm bg-[#ff8a4c] ml-2" /> playhead</div>
                         <div className="font-mono-value text-[11px]" data-testid="text-selection-time">{formatTime(selectionStart, true)} — {formatTime(selectionEnd, true)} <span className="text-muted-foreground">({(selectionEnd - selectionStart).toFixed(3)} s selected)</span></div>
                       </div>
                     </div>
