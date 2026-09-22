@@ -3,6 +3,7 @@ import { Activity, ArrowDown, ArrowUp, AudioLines, Check, ChevronDown, CircleHel
 import { createDemoAudio, downloadBlob, encodeWav, parseWav, type AudioSource } from '@/lib/audio';
 import { decodeChannels, loadProject, projectFromSource, saveProject } from '@/lib/persistence';
 import { makeModule, MODULE_LABELS, renderChain, type EditModule, type ModuleType } from '@/lib/edit-chain';
+import { analyzeLoudness, type LoudnessStats } from '@/lib/loudness';
 import './index.css';
 
 type ViewTab = 'edit' | 'analyze' | 'project';
@@ -20,20 +21,9 @@ function formatTime(seconds: number, precise = false) {
   return `${String(minutes).padStart(2, '0')}:${remaining.toFixed(precise ? 3 : 1).padStart(precise ? 6 : 4, '0')}`;
 }
 
-function formatDb(value: number) {
-  if (!Number.isFinite(value)) return '-∞ dB';
-  return `${value > 0 ? '+' : ''}${value.toFixed(1)} dB`;
-}
-
-function getStats(channels: Float32Array[], start = 0, end = channels[0]?.length ?? 0) {
-  const from = Math.max(0, Math.floor(start));
-  const to = Math.min(channels[0]?.length ?? 0, Math.max(from + 1, Math.floor(end)));
-  let peak = 0; let sumSquares = 0; let sum = 0; let count = 0;
-  for (const channel of channels) {
-    for (let i = from; i < to; i += 1) { const value = channel[i] ?? 0; peak = Math.max(peak, Math.abs(value)); sumSquares += value * value; sum += value; count += 1; }
-  }
-  const rms = count ? Math.sqrt(sumSquares / count) : 0;
-  return { peak, rms, peakDb: peak ? 20 * Math.log10(peak) : -Infinity, rmsDb: rms ? 20 * Math.log10(rms) : -Infinity, dc: count ? sum / count : 0, count };
+function formatLevel(value: number, unit: 'dBTP' | 'LUFS' | 'LU') {
+  if (!Number.isFinite(value)) return `-∞ ${unit}`;
+  return `${value > 0 ? '+' : ''}${value.toFixed(1)} ${unit}`;
 }
 
 function App() {
@@ -73,10 +63,10 @@ function App() {
   const viewDuration = duration / zoom;
   const selectionStart = Math.min(...selection);
   const selectionEnd = Math.max(...selection);
-  const originalStats = useMemo(() => getStats(source.channels), [source.channels]);
-  const currentStats = useMemo(() => getStats(currentChannels), [currentChannels]);
-  const selectionOriginalStats = useMemo(() => getStats(source.channels, selectionStart * source.sampleRate, selectionEnd * source.sampleRate), [source.channels, selectionStart, selectionEnd, source.sampleRate]);
-  const selectionCurrentStats = useMemo(() => getStats(currentChannels, selectionStart * source.sampleRate, selectionEnd * source.sampleRate), [currentChannels, selectionStart, selectionEnd, source.sampleRate]);
+  const originalStats = useMemo(() => analyzeLoudness(source.channels, source.sampleRate), [source.channels, source.sampleRate]);
+  const currentStats = useMemo(() => analyzeLoudness(currentChannels, source.sampleRate), [currentChannels, source.sampleRate]);
+  const selectionOriginalStats = useMemo(() => analyzeLoudness(source.channels, source.sampleRate, selectionStart * source.sampleRate, selectionEnd * source.sampleRate), [source.channels, selectionStart, selectionEnd, source.sampleRate]);
+  const selectionCurrentStats = useMemo(() => analyzeLoudness(currentChannels, source.sampleRate, selectionStart * source.sampleRate, selectionEnd * source.sampleRate), [currentChannels, selectionStart, selectionEnd, source.sampleRate]);
 
   useEffect(() => {
     const saved = loadProject();
@@ -387,7 +377,7 @@ function App() {
               <section className="panel">
                 <div className="panel-header"><div className="flex items-center gap-2"><Gauge size={15} color="hsl(var(--primary))" /><div className="section-title">Signal statistics</div></div><span className="chip">estimate</span></div>
                 <div className="panel-body !pb-3"><div className="text-[10px] text-muted-foreground uppercase tracking-wider mb-2">Current / full file</div><StatsGrid stats={currentStats} /><div className="text-[10px] text-muted-foreground uppercase tracking-wider mt-4 mb-2">Selection · {formatTime(selectionEnd - selectionStart)}</div><StatsGrid stats={selectionCurrentStats} /></div>
-                <div className="px-4 pb-4 text-[10px] leading-relaxed text-muted-foreground"><Info size={12} className="inline mr-1 -mt-0.5" />RMS and peak are measured from rendered samples. Noise floor and LUFS are not inferred.</div>
+                <div className="px-4 pb-4 text-[10px] leading-relaxed text-muted-foreground"><Info size={12} className="inline mr-1 -mt-0.5" />Local BS.1770-style K-weighting and gating; true peak uses 4× interpolation. Values are practical estimates, not certified meter readings.</div>
               </section>
               <section className="panel">
                 <div className="panel-header"><div className="flex items-center gap-2"><AudioLines size={15} color="hsl(var(--accent))" /><div className="section-title">Markers & regions</div></div><span className="font-mono-value text-[10px] text-muted-foreground">{markers.length + regions.length}</span></div>
@@ -414,8 +404,8 @@ function App() {
   );
 }
 
-function StatsGrid({ stats }: { stats: ReturnType<typeof getStats> }) {
-  return <div className="stat-grid"><div className="stat-cell"><div className="stat-value">{formatDb(stats.peakDb)}</div><div className="stat-label">Peak</div></div><div className="stat-cell"><div className="stat-value">{formatDb(stats.rmsDb)}</div><div className="stat-label">RMS</div></div><div className="stat-cell"><div className="stat-value">{stats.dc >= 0 ? '+' : ''}{(stats.dc * 1000).toFixed(2)}</div><div className="stat-label">DC ×10⁻³</div></div><div className="stat-cell"><div className="stat-value">{(stats.peak / Math.max(.0001, stats.rms)).toFixed(1)}</div><div className="stat-label">Crest factor</div></div></div>;
+function StatsGrid({ stats }: { stats: LoudnessStats }) {
+  return <div className="stat-grid"><div className="stat-cell"><div className="stat-value">{formatLevel(stats.truePeakDbtp, 'dBTP')}</div><div className="stat-label">True peak estimate</div></div><div className="stat-cell"><div className="stat-value">{formatLevel(stats.integratedLufs, 'LUFS')}</div><div className="stat-label">Integrated loudness</div></div><div className="stat-cell"><div className="stat-value">{formatLevel(stats.loudnessRangeLu, 'LU')}</div><div className="stat-label">Loudness range</div></div><div className="stat-cell"><div className="stat-value">{formatLevel(stats.maxShortTermLufs, 'LUFS')}</div><div className="stat-label">Max short-term</div></div></div>;
 }
 
 function ModuleCard({ module, index, total, collapsed, updateModule, updateParams, deleteModule, duplicateModule, moveModule }: { module: EditModule; index: number; total: number; collapsed: boolean; updateModule: (id: string, patch: Partial<EditModule>) => void; updateParams: (id: string, key: string, value: number | string) => void; deleteModule: (id: string) => void; duplicateModule: (module: EditModule) => void; moveModule: (index: number, direction: -1 | 1) => void }) {
@@ -436,7 +426,7 @@ function ModuleCard({ module, index, total, collapsed, updateModule, updateParam
   </div>;
 }
 
-function AnalyzePanel({ originalStats, currentStats, selectionOriginalStats, selectionCurrentStats, duration, selection, modules }: { originalStats: ReturnType<typeof getStats>; currentStats: ReturnType<typeof getStats>; selectionOriginalStats: ReturnType<typeof getStats>; selectionCurrentStats: ReturnType<typeof getStats>; duration: number; selection: [number, number]; modules: EditModule[] }) {
+function AnalyzePanel({ originalStats, currentStats, selectionOriginalStats, selectionCurrentStats, duration, selection, modules }: { originalStats: LoudnessStats; currentStats: LoudnessStats; selectionOriginalStats: LoudnessStats; selectionCurrentStats: LoudnessStats; duration: number; selection: [number, number]; modules: EditModule[] }) {
   return (
     <div className="space-y-4">
       <section className="panel">
@@ -476,24 +466,28 @@ function AnalyzePanel({ originalStats, currentStats, selectionOriginalStats, sel
       <section className="panel">
         <div className="panel-header"><div className="section-title">Interpretation notes</div></div>
         <div className="panel-body grid md:grid-cols-3 gap-3 text-[12px]">
-          <div className="border-l-2 border-[#d8ed55] pl-3"><strong>Dynamic range</strong><p className="text-muted-foreground mt-1 leading-relaxed">Compare RMS and peak rather than chasing a louder waveform. Preserve headroom for archival work.</p></div>
+          <div className="border-l-2 border-[#d8ed55] pl-3"><strong>Loudness context</strong><p className="text-muted-foreground mt-1 leading-relaxed">Use integrated loudness for the overall program and loudness range for long-term variation. Preserve headroom for archival work.</p></div>
           <div className="border-l-2 border-[#ff8a4c] pl-3"><strong>Chain impact</strong><p className="text-muted-foreground mt-1 leading-relaxed">{modules.filter((module) => module.enabled).length} enabled modules are rendered in order. Bypassed modules remain editable.</p></div>
-          <div className="border-l-2 border-[#91a69d] pl-3"><strong>Known boundary</strong><p className="text-muted-foreground mt-1 leading-relaxed">Spectral noise floor, LUFS, and phase correlation need a dedicated analyzer and are intentionally not guessed here.</p></div>
+          <div className="border-l-2 border-[#91a69d] pl-3"><strong>Known boundary</strong><p className="text-muted-foreground mt-1 leading-relaxed">These browser-local readings follow BS.1770-style weighting and gating but are not a substitute for a calibrated compliance meter.</p></div>
         </div>
       </section>
     </div>
   );
 }
 
-function SignalComparison({ title, original, current }: { title: string; original: ReturnType<typeof getStats>; current: ReturnType<typeof getStats> }) {
+function SignalComparison({ title, original, current }: { title: string; original: LoudnessStats; current: LoudnessStats }) {
   return (
     <div>
       <div className="eyebrow mb-2">{title}</div>
       <div className="stat-grid">
-        <div className="stat-cell"><div className="stat-value">{formatDb(original.peakDb)}</div><div className="stat-label">Original peak</div></div>
-        <div className="stat-cell"><div className="stat-value">{formatDb(current.peakDb)}</div><div className="stat-label">Current peak</div></div>
-        <div className="stat-cell"><div className="stat-value">{formatDb(original.rmsDb)}</div><div className="stat-label">Original RMS</div></div>
-        <div className="stat-cell"><div className="stat-value">{formatDb(current.rmsDb)}</div><div className="stat-label">Current RMS</div></div>
+        <div className="stat-cell"><div className="stat-value">{formatLevel(original.truePeakDbtp, 'dBTP')}</div><div className="stat-label">Original true peak</div></div>
+        <div className="stat-cell"><div className="stat-value">{formatLevel(current.truePeakDbtp, 'dBTP')}</div><div className="stat-label">Current true peak</div></div>
+        <div className="stat-cell"><div className="stat-value">{formatLevel(original.integratedLufs, 'LUFS')}</div><div className="stat-label">Original integrated</div></div>
+        <div className="stat-cell"><div className="stat-value">{formatLevel(current.integratedLufs, 'LUFS')}</div><div className="stat-label">Current integrated</div></div>
+        <div className="stat-cell"><div className="stat-value">{formatLevel(original.loudnessRangeLu, 'LU')}</div><div className="stat-label">Original LRA</div></div>
+        <div className="stat-cell"><div className="stat-value">{formatLevel(current.loudnessRangeLu, 'LU')}</div><div className="stat-label">Current LRA</div></div>
+        <div className="stat-cell"><div className="stat-value">{formatLevel(original.maxShortTermLufs, 'LUFS')}</div><div className="stat-label">Original max short-term</div></div>
+        <div className="stat-cell"><div className="stat-value">{formatLevel(current.maxShortTermLufs, 'LUFS')}</div><div className="stat-label">Current max short-term</div></div>
       </div>
     </div>
   );

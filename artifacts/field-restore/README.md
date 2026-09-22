@@ -58,7 +58,7 @@ Stereo channels receive the same timing and linked settings by default so channe
 
 ## Statistics
 
-Field Restore calculates practical browser-local measurements including duration, peak, RMS, DC offset, crest factor, channel balance, and selection-specific values. Metrics that would require a formal standards implementation or more advanced detector are presented as estimates rather than asserted as certified measurements.
+Field Restore calculates browser-local true-peak estimates, integrated loudness, loudness range, and maximum short-term loudness for the full file and active selection. Loudness uses BS.1770-style K-weighting and absolute/relative gating; true peak uses 4× inter-sample interpolation. These are practical estimates rather than certified compliance-meter readings.
 
 ## Hum processing
 
@@ -76,7 +76,7 @@ The visible Static, Dynamic, and Adaptive modes document the intended restoratio
 - Project snapshots currently use browser local storage rather than a full IndexedDB blob store, so very long recordings may exceed storage limits.
 - Advanced adaptive hum tracking is represented conservatively rather than as a commercial-grade frequency-tracking implementation.
 - Export uses 32-bit IEEE float at the source sample rate and channel count; no normalization or dither is applied.
-- Sample-rate conversion, true-peak compliance, standardized loudness measurement, and certified noise-floor/dynamic-range measurements are not claimed.
+- Sample-rate conversion and certified true-peak/loudness compliance are not claimed.
 - Browser memory limits determine the maximum practical file length.
 
 ## Accessibility
