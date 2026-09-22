@@ -17,6 +17,7 @@ const colorForMarker = '#d8ed55';
 const SPECTROGRAM_LEFT = 48;
 const SPECTROGRAM_RIGHT = 72;
 const SPECTROGRAM_BOTTOM = 28;
+const SPECTROGRAM_SCALE_DIVISIONS = 5;
 
 function spectrogramColor(intensity: number) {
   const red = intensity < 0.55 ? 14 + intensity * 90 : 64 + (intensity - 0.55) * 425;
@@ -352,8 +353,8 @@ function App() {
       context.beginPath(); context.moveTo(x, 0); context.lineTo(x, graphBottom); context.stroke();
     }
     for (const top of [0, paneHeight]) {
-      for (let tick = 0; tick <= 2; tick += 1) {
-        const frequency = (tick / 2) * spectrogramMaxFrequency;
+      for (let tick = 0; tick <= SPECTROGRAM_SCALE_DIVISIONS; tick += 1) {
+        const frequency = (tick / SPECTROGRAM_SCALE_DIVISIONS) * spectrogramMaxFrequency;
         const y = top + paneHeight - (frequency / spectrogramMaxFrequency) * paneHeight;
         context.beginPath(); context.moveTo(graphLeft, y); context.lineTo(graphRight, y); context.stroke();
       }
@@ -372,8 +373,8 @@ function App() {
     for (let tick = 0; tick <= 6; tick += 1) { const time = viewStart + (tick / 6) * viewDuration; context.fillText(formatTime(time), graphLeft + (tick / 6) * graphWidth + 4, height - 8); }
     context.textAlign = 'right';
     for (const top of [0, paneHeight]) {
-      for (let tick = 0; tick <= 2; tick += 1) {
-        const frequency = (tick / 2) * spectrogramMaxFrequency;
+      for (let tick = 0; tick <= SPECTROGRAM_SCALE_DIVISIONS; tick += 1) {
+        const frequency = (tick / SPECTROGRAM_SCALE_DIVISIONS) * spectrogramMaxFrequency;
         const y = top + paneHeight - (frequency / spectrogramMaxFrequency) * paneHeight;
         const label = frequency === 0 ? '0' : `${Number((frequency / 1000).toFixed(1))}k`;
         context.fillText(label, graphLeft - 6, Math.max(top + 10, Math.min(top + paneHeight - 3, y + 3)));
@@ -390,9 +391,9 @@ function App() {
       context.strokeStyle = 'rgba(242, 244, 232, .35)';
       context.strokeRect(graphRight + 6, top + 3, 9, paneHeight - 6);
       context.fillStyle = '#f2f4e8';
-      for (let tick = 0; tick <= 2; tick += 1) {
-        const decibels = spectrogramCeilingDb - (tick / 2) * (spectrogramCeilingDb - spectrogramFloorDb);
-        const y = top + (tick / 2) * paneHeight;
+      for (let tick = 0; tick <= SPECTROGRAM_SCALE_DIVISIONS; tick += 1) {
+        const decibels = spectrogramCeilingDb - (tick / SPECTROGRAM_SCALE_DIVISIONS) * (spectrogramCeilingDb - spectrogramFloorDb);
+        const y = top + (tick / SPECTROGRAM_SCALE_DIVISIONS) * paneHeight;
         context.fillText(`${Math.round(decibels)}`, graphRight + 19, Math.max(top + 10, Math.min(top + paneHeight - 3, y + 3)));
       }
     }
