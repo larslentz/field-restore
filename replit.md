@@ -1,15 +1,16 @@
-# [Project name]
+# Field Restore
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+Field Restore is a local-first browser editor for conservative, non-destructive restoration of mono, stereo, and binaural field recordings.
 
 ## Run & Operate
 
 - `pnpm --filter @workspace/api-server run dev` — run the API server (port 5000)
+- `pnpm --filter @workspace/field-restore run dev` — run the Field Restore web app through its managed workflow
 - `pnpm run typecheck` — full typecheck across all packages
 - `pnpm run build` — typecheck + build all packages
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
 - `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
-- Required env: `DATABASE_URL` — Postgres connection string
+- Field Restore requires no backend, login, cloud database, or audio-upload service.
 
 ## Stack
 
@@ -22,23 +23,35 @@ _Replace the heading above with the project's name, and this line with one sente
 
 ## Where things live
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+- `artifacts/field-restore/src/App.tsx` — editor shell and browser-local user workflows
+- `artifacts/field-restore/src/lib/audio.ts` — WAV parsing/encoding and synthesized demo audio
+- `artifacts/field-restore/src/lib/edit-chain.ts` — typed non-destructive processing model
+- `artifacts/field-restore/src/lib/persistence.ts` — local project persistence
+- `artifacts/field-restore/src/index.css` — visual system and responsive editor layout
+- `artifacts/field-restore/README.md` — supported formats, workflow, and honest limitations
 
 ## Architecture decisions
 
-_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
+- Audio never leaves the browser; the shared API and database are intentionally unused.
+- Imported channel data is treated as immutable, and processing is replayed from an ordered edit chain.
+- Stereo and binaural channels keep exact frame alignment and linked processing by default.
+- Advanced measurements and hum detection are labeled as estimates instead of overstating certainty.
+- The first build favors transparent, conservative sample-domain processing over simulated commercial spectral repair.
 
 ## Product
 
-_Describe the high-level user-facing capabilities of this app once they exist._
+Import WAV files, inspect and select waveform ranges, compare Original and Current monitoring, add and manage restoration edits, work with markers/regions and presets, calculate practical statistics, save locally, and export a rendered WAV with a restoration report.
 
 ## User preferences
 
-_Populate as you build — explicit user instructions worth remembering across sessions._
+- Use Figtree for interface text and Space Mono for technical values.
+- Keep the product restrained, technical, local-first, and honest about browser DSP limitations.
 
 ## Gotchas
 
-_Populate as you build — sharp edges, "always run X before Y" rules._
+- Do not add server-side audio processing, uploads, analytics, accounts, or cloud persistence.
+- Never silently downmix stereo or binaural sources.
+- Browser storage and memory limits must be surfaced for long recordings.
 
 ## Pointers
 

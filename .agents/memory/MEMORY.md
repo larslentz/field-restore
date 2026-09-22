@@ -1,0 +1,1 @@
+- [Audio restoration integrity](audio-restoration-integrity.md) — keep processing local, non-destructive, stereo-linked by default, and explicit about DSP estimates.
