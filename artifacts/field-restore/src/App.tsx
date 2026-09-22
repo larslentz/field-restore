@@ -437,7 +437,66 @@ function ModuleCard({ module, index, total, collapsed, updateModule, updateParam
 }
 
 function AnalyzePanel({ originalStats, currentStats, selectionOriginalStats, selectionCurrentStats, duration, selection, modules }: { originalStats: ReturnType<typeof getStats>; currentStats: ReturnType<typeof getStats>; selectionOriginalStats: ReturnType<typeof getStats>; selectionCurrentStats: ReturnType<typeof getStats>; duration: number; selection: [number, number]; modules: EditModule[] }) {
-  return <div className="space-y-4"><section className="panel"><div className="panel-header"><div><div className="section-title">Measured signal report</div><div className="text-[10px] text-muted-foreground mt-1">Practical estimates from the original and rendered sample arrays</div></div><span className="chip"><Check size={11} /> local calculation</span></div><div className="panel-body"><div className="grid md:grid-cols-2 gap-4"><div><div className="eyebrow mb-2">Full file · {formatTime(duration)}</div><div className="grid grid-cols-2 gap-3"><div className="p-3 bg-[hsl(var(--muted))] rounded"><div className="text-[10px] text-muted-foreground">Original peak</div><div className="font-mono-value text-lg mt-1">{formatDb(originalStats.peakDb)}</div></div><div className="p-3 bg-[hsl(var(--muted))] rounded"><div className="text-[10px] text-muted-foreground">Current peak</div><div className="font-mono-value text-lg mt-1">{formatDb(currentStats.peakDb)}</div></div><div className="p-3 bg-[hsl(var(--muted))] rounded"><div className="text-[10px] text-muted-foreground">Original RMS</div><div className="font-mono-value text-lg mt-1">{formatDb(originalStats.rmsDb)}</div></div><div className="p-3 bg-[hsl(var(--muted))] rounded"><div className="text-[10px] text-muted-foreground">Current RMS</div><div className="font-mono-value text-lg mt-1">{formatDb(currentStats.rmsDb)}</div></div></div></div><div><div className="eyebrow mb-2">Selection · {formatTime(selection[1] - selection[0])}</div><div className="grid grid-cols-2 gap-3"><div className="p-3 border rounded"><div className="text-[10px] text-muted-foreground">Original RMS</div><div className="font-mono-value text-lg mt-1">{formatDb(selectionOriginalStats.rmsDb)}</div></div><div className="p-3 border rounded"><div className="text-[10px] text-muted-foreground">Current RMS</div><div className="font-mono-value text-lg mt-1">{formatDb(selectionCurrentStats.rmsDb)}</div></div><div className="p-3 border rounded"><div className="text-[10px] text-muted-foreground">DC offset</div><div className="font-mono-value text-lg mt-1">{(selectionCurrentStats.dc * 1000).toFixed(2)}</div></div><div className="p-3 border rounded"><div className="text-[10px] text-muted-foreground">Crest factor</div><div className="font-mono-value text-lg mt-1">{(selectionCurrentStats.peak / Math.max(.0001, selectionCurrentStats.rms)).toFixed(1)}</div></div></div></div></div></div></section><section className="panel"><div className="panel-header"><div className="section-title">Interpretation notes</div></div><div className="panel-body grid md:grid-cols-3 gap-3 text-[12px]"><div className="border-l-2 border-[#d8ed55] pl-3"><strong>Dynamic range</strong><p className="text-muted-foreground mt-1 leading-relaxed">Compare RMS and peak rather than chasing a louder waveform. Preserve headroom for archival work.</p></div><div className="border-l-2 border-[#ff8a4c] pl-3"><strong>Chain impact</strong><p className="text-muted-foreground mt-1 leading-relaxed">{modules.filter((module) => module.enabled).length} enabled modules are rendered in order. Bypassed modules remain editable.</p></div><div className="border-l-2 border-[#91a69d] pl-3"><strong>Known boundary</strong><p className="text-muted-foreground mt-1 leading-relaxed">Spectral noise floor, LUFS, and phase correlation need a dedicated analyzer and are intentionally not guessed here.</p></div></div></section></div>;
+  return (
+    <div className="space-y-4">
+      <section className="panel">
+        <div className="panel-header">
+          <div>
+            <div className="section-title">Measured signal report</div>
+            <div className="text-[10px] text-muted-foreground mt-1">Current processed signal · matches the right-side Signal statistics panel</div>
+          </div>
+          <span className="chip"><Check size={11} /> current</span>
+        </div>
+        <div className="panel-body grid md:grid-cols-2 gap-5">
+          <div>
+            <div className="eyebrow mb-2">Current / full file · {formatTime(duration)}</div>
+            <StatsGrid stats={currentStats} />
+          </div>
+          <div>
+            <div className="eyebrow mb-2">Current / selection · {formatTime(selection[1] - selection[0])}</div>
+            <StatsGrid stats={selectionCurrentStats} />
+          </div>
+        </div>
+      </section>
+
+      <section className="panel">
+        <div className="panel-header">
+          <div>
+            <div className="section-title">Original vs Current comparison</div>
+            <div className="text-[10px] text-muted-foreground mt-1">A/B changes introduced by the enabled edit chain</div>
+          </div>
+          <span className="chip">{modules.filter((module) => module.enabled).length} edits enabled</span>
+        </div>
+        <div className="panel-body grid md:grid-cols-2 gap-5">
+          <SignalComparison title={`Full file · ${formatTime(duration)}`} original={originalStats} current={currentStats} />
+          <SignalComparison title={`Selection · ${formatTime(selection[1] - selection[0])}`} original={selectionOriginalStats} current={selectionCurrentStats} />
+        </div>
+      </section>
+
+      <section className="panel">
+        <div className="panel-header"><div className="section-title">Interpretation notes</div></div>
+        <div className="panel-body grid md:grid-cols-3 gap-3 text-[12px]">
+          <div className="border-l-2 border-[#d8ed55] pl-3"><strong>Dynamic range</strong><p className="text-muted-foreground mt-1 leading-relaxed">Compare RMS and peak rather than chasing a louder waveform. Preserve headroom for archival work.</p></div>
+          <div className="border-l-2 border-[#ff8a4c] pl-3"><strong>Chain impact</strong><p className="text-muted-foreground mt-1 leading-relaxed">{modules.filter((module) => module.enabled).length} enabled modules are rendered in order. Bypassed modules remain editable.</p></div>
+          <div className="border-l-2 border-[#91a69d] pl-3"><strong>Known boundary</strong><p className="text-muted-foreground mt-1 leading-relaxed">Spectral noise floor, LUFS, and phase correlation need a dedicated analyzer and are intentionally not guessed here.</p></div>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function SignalComparison({ title, original, current }: { title: string; original: ReturnType<typeof getStats>; current: ReturnType<typeof getStats> }) {
+  return (
+    <div>
+      <div className="eyebrow mb-2">{title}</div>
+      <div className="stat-grid">
+        <div className="stat-cell"><div className="stat-value">{formatDb(original.peakDb)}</div><div className="stat-label">Original peak</div></div>
+        <div className="stat-cell"><div className="stat-value">{formatDb(current.peakDb)}</div><div className="stat-label">Current peak</div></div>
+        <div className="stat-cell"><div className="stat-value">{formatDb(original.rmsDb)}</div><div className="stat-label">Original RMS</div></div>
+        <div className="stat-cell"><div className="stat-value">{formatDb(current.rmsDb)}</div><div className="stat-label">Current RMS</div></div>
+      </div>
+    </div>
+  );
 }
 
 function ProjectPanel({ title, notes, setTitle, setNotes, source, save, setModal }: { title: string; notes: string; setTitle: (value: string) => void; setNotes: (value: string) => void; source: AudioSource; save: () => void; setModal: (value: 'export' | 'help' | 'settings' | null) => void }) {
