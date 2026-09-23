@@ -28,15 +28,23 @@ async function checkpoint() {
 
 async function run(request: WorkerJobRequest) {
   if (request.kind === 'spectrogram') {
+    const channelIndex = request.options.channelIndex ?? 0;
     const result = await calculateFileSpectrogram(request.file, request.metadata, {
       ...request.options,
       checkpoint,
-      transform: (channels, frame) => createStreamingEditChain(
-        request.modules,
-        request.metadata.sampleRate,
-        request.metadata.frameCount,
-        frame,
-      ).process(channels, frame),
+      transform: (channels, frame) => {
+        const selected = channels[channelIndex];
+        if (!selected) return channels;
+        const processed = createStreamingEditChain(
+          request.modules,
+          request.metadata.sampleRate,
+          request.metadata.frameCount,
+          frame,
+        ).process([selected], frame);
+        const output = [...channels];
+        output[channelIndex] = processed[0];
+        return output;
+      },
       onProgress: (completed, total) => send({ type: 'progress', fraction: total ? completed / total : 1 }),
     });
     send({ type: 'result', result }, [result.values.buffer]);

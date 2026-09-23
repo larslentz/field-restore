@@ -29,6 +29,8 @@ const SPECTROGRAM_BOTTOM = 28;
 const SPECTROGRAM_SCALE_DIVISIONS = 5;
 const SPECTROGRAM_MIN_CEILING_DB = -60;
 const SPECTROGRAM_MAX_CEILING_DB = 24;
+const SPECTROGRAM_DATA_FLOOR_DB = -180;
+const SPECTROGRAM_DATA_CEILING_DB = 0;
 const EMPTY_STATS: LoudnessStats = { truePeakDbtp: -Infinity, integratedLufs: -Infinity, loudnessRangeLu: 0, maxShortTermLufs: -Infinity };
 const EMPTY_SPECTROGRAM = { width: 480, height: 110, values: new Float32Array(480 * 110) };
 const SPECTROGRAM_PALETTES: Record<SpectrogramPaletteId, { label: string; description: string; stops: Array<[number, string]> }> = {
@@ -175,10 +177,10 @@ function App() {
   const spectrogramFloorDb = spectrogramCeilingDb - 85;
   const memorySpectrograms = useMemo(
     () => ({
-      left: largeSource || !currentChannels[0] ? EMPTY_SPECTROGRAM : calculateSpectrogram([currentChannels[0]], source.sampleRate, viewStart, viewDuration, 480, 110, spectrogramMinFrequency, spectrogramMaxFrequency, spectrogramFloorDb, spectrogramCeilingDb),
-      right: largeSource || !currentChannels[0] ? EMPTY_SPECTROGRAM : calculateSpectrogram([currentChannels[1] ?? currentChannels[0]], source.sampleRate, viewStart, viewDuration, 480, 110, spectrogramMinFrequency, spectrogramMaxFrequency, spectrogramFloorDb, spectrogramCeilingDb),
+      left: largeSource || !currentChannels[0] ? EMPTY_SPECTROGRAM : calculateSpectrogram([currentChannels[0]], source.sampleRate, viewStart, viewDuration, 480, 110, spectrogramMinFrequency, spectrogramMaxFrequency, SPECTROGRAM_DATA_FLOOR_DB, SPECTROGRAM_DATA_CEILING_DB),
+      right: largeSource || !currentChannels[0] ? EMPTY_SPECTROGRAM : calculateSpectrogram([currentChannels[1] ?? currentChannels[0]], source.sampleRate, viewStart, viewDuration, 480, 110, spectrogramMinFrequency, spectrogramMaxFrequency, SPECTROGRAM_DATA_FLOOR_DB, SPECTROGRAM_DATA_CEILING_DB),
     }),
-    [currentChannels, largeSource, source.sampleRate, spectrogramCeilingDb, spectrogramFloorDb, spectrogramMaxFrequency, spectrogramMinFrequency, viewDuration, viewStart],
+    [currentChannels, largeSource, source.sampleRate, spectrogramMaxFrequency, spectrogramMinFrequency, viewDuration, viewStart],
   );
   const spectrograms = largeSource ? largeSpectrograms : memorySpectrograms;
   const memoryOriginalStats = useMemo(() => largeSource ? EMPTY_STATS : analyzeLoudness(source.channels, source.sampleRate), [largeSource, source.channels, source.sampleRate]);
@@ -276,13 +278,15 @@ function App() {
     const options = {
       startSeconds: viewStart,
       durationSeconds: viewDuration,
-      width: 480,
+      width: 256,
       height: 110,
       minimumFrequency: spectrogramMinFrequency,
       maximumFrequency: Math.min(spectrogramMaxFrequency, metadata.sampleRate / 2),
-      floorDb: spectrogramFloorDb,
-      ceilingDb: spectrogramCeilingDb,
-      warmupFrames: Math.floor(metadata.sampleRate * 0.5),
+      floorDb: SPECTROGRAM_DATA_FLOOR_DB,
+      ceilingDb: SPECTROGRAM_DATA_CEILING_DB,
+      // Stateful filters settle within this bounded prefix; keeping it fixed
+      // avoids multiplying half a second of DSP by every visible column.
+      warmupFrames: 2048,
     };
     setSpectrogramStatus('Building visible spectrogram');
     setSpectrogramProgress(0);
@@ -312,7 +316,7 @@ function App() {
       leftJob.cancel();
       rightJob.cancel();
     };
-  }, [largeSource, modules, spectrogramCeilingDb, spectrogramFloorDb, spectrogramMaxFrequency, spectrogramMinFrequency, viewDuration, viewStart]);
+  }, [largeSource, modules, spectrogramMaxFrequency, spectrogramMinFrequency, viewDuration, viewStart]);
 
   useEffect(() => {
     if (!largeSource) return;
@@ -1000,7 +1004,9 @@ function App() {
       if (imageContext) {
         const image = imageContext.createImageData(spectrogram.width, spectrogram.height);
         for (let index = 0; index < spectrogram.values.length; index += 1) {
-          const intensity = spectrogram.values[index];
+          const storedIntensity = spectrogram.values[index];
+          const decibels = SPECTROGRAM_DATA_FLOOR_DB + storedIntensity * (SPECTROGRAM_DATA_CEILING_DB - SPECTROGRAM_DATA_FLOOR_DB);
+          const intensity = Math.max(0, Math.min(1, (decibels - spectrogramFloorDb) / (spectrogramCeilingDb - spectrogramFloorDb)));
           const [red, green, blue] = spectrogramColor(intensity, spectrogramPalette);
           const pixel = index * 4;
           image.data[pixel] = red;
