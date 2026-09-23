@@ -27,10 +27,11 @@ const SPECTROGRAM_LEFT = 48;
 const SPECTROGRAM_RIGHT = 72;
 const SPECTROGRAM_BOTTOM = 28;
 const SPECTROGRAM_SCALE_DIVISIONS = 5;
-const SPECTROGRAM_MIN_CEILING_DB = -60;
 const SPECTROGRAM_MAX_CEILING_DB = 24;
 const SPECTROGRAM_DATA_FLOOR_DB = -180;
 const SPECTROGRAM_DATA_CEILING_DB = 0;
+const SPECTROGRAM_MIN_LEVEL_SPAN_DB = 10;
+const SPECTROGRAM_MAX_LEVEL_SPAN_DB = 180;
 const SPECTROGRAM_DATA_HEIGHT = 256;
 const SPECTROGRAM_DISPLAY_HEIGHT = 110;
 const EMPTY_STATS: LoudnessStats = { truePeakDbtp: -Infinity, integratedLufs: -Infinity, loudnessRangeLu: 0, maxShortTermLufs: -Infinity };
@@ -119,6 +120,7 @@ function App() {
   const [spectrogramMinFrequency, setSpectrogramMinFrequency] = useState(0);
   const [spectrogramMaxFrequency, setSpectrogramMaxFrequency] = useState(20000);
   const [spectrogramCeilingDb, setSpectrogramCeilingDb] = useState(-20);
+  const [spectrogramLevelSpanDb, setSpectrogramLevelSpanDb] = useState(85);
   const [spectrogramPalette, setSpectrogramPalette] = useState<SpectrogramPaletteId>(() => {
     const saved = localStorage.getItem('field-restore-spectrogram-palette');
     return saved && saved in SPECTROGRAM_PALETTES ? saved as SpectrogramPaletteId : 'cyan-orange';
@@ -176,7 +178,7 @@ function App() {
   const selectionCenter = selectionStart + (selectionEnd - selectionStart) / 2 || duration / 2;
   const viewCenter = timeViewCenter ?? selectionCenter;
   const viewStart = zoom === 1 ? 0 : Math.max(0, Math.min(duration - viewDuration, viewCenter - viewDuration / 2));
-  const spectrogramFloorDb = spectrogramCeilingDb - 85;
+  const spectrogramFloorDb = spectrogramCeilingDb - spectrogramLevelSpanDb;
   const memorySpectrograms = useMemo(
     () => ({
       left: largeSource || !currentChannels[0] ? EMPTY_SPECTROGRAM : calculateSpectrogram([currentChannels[0]], source.sampleRate, viewStart, viewDuration, 480, SPECTROGRAM_DATA_HEIGHT, 0, source.sampleRate / 2, SPECTROGRAM_DATA_FLOOR_DB, SPECTROGRAM_DATA_CEILING_DB),
@@ -907,7 +909,7 @@ function App() {
     if (levelDragRef.current) {
       const deltaDb = -(event.clientY - levelDragRef.current.startY) * 0.25;
       const nextCeiling = Math.round(levelDragRef.current.startCeiling + deltaDb);
-      setSpectrogramCeilingDb(Math.max(SPECTROGRAM_MIN_CEILING_DB, Math.min(SPECTROGRAM_MAX_CEILING_DB, nextCeiling)));
+      setSpectrogramCeilingDb(Math.max(SPECTROGRAM_DATA_FLOOR_DB + spectrogramLevelSpanDb, Math.min(SPECTROGRAM_MAX_CEILING_DB, nextCeiling)));
       return;
     }
     if (!pointerDragRef.current) return;
@@ -984,10 +986,26 @@ function App() {
     } else if (x >= bounds.width - SPECTROGRAM_RIGHT) {
       event.preventDefault();
       event.stopPropagation();
-      const direction = event.deltaY > 0 ? -1 : 1;
-      setSpectrogramCeilingDb((value) => Math.max(SPECTROGRAM_MIN_CEILING_DB, Math.min(SPECTROGRAM_MAX_CEILING_DB, value + direction * 2)));
+      const paneHeight = graphBottom / 2;
+      const paneY = ((Math.max(0, Math.min(graphBottom, y)) % paneHeight) + paneHeight) % paneHeight;
+      const pointerRatio = Math.max(0, Math.min(1, 1 - paneY / paneHeight));
+      const pointerLevel = spectrogramFloorDb + pointerRatio * spectrogramLevelSpanDb;
+      const factor = event.deltaY > 0 ? 1.15 : 1 / 1.15;
+      const nextSpan = Math.max(SPECTROGRAM_MIN_LEVEL_SPAN_DB, Math.min(SPECTROGRAM_MAX_LEVEL_SPAN_DB, spectrogramLevelSpanDb * factor));
+      let nextFloor = pointerLevel - pointerRatio * nextSpan;
+      let nextCeiling = nextFloor + nextSpan;
+      if (nextCeiling > SPECTROGRAM_MAX_CEILING_DB) {
+        nextFloor -= nextCeiling - SPECTROGRAM_MAX_CEILING_DB;
+        nextCeiling = SPECTROGRAM_MAX_CEILING_DB;
+      }
+      if (nextFloor < SPECTROGRAM_DATA_FLOOR_DB) {
+        nextCeiling += SPECTROGRAM_DATA_FLOOR_DB - nextFloor;
+        nextFloor = SPECTROGRAM_DATA_FLOOR_DB;
+      }
+      setSpectrogramLevelSpanDb(nextCeiling - nextFloor);
+      setSpectrogramCeilingDb(nextCeiling);
     }
-  }, [duration, source.sampleRate, spectrogramMaxFrequency, spectrogramMinFrequency, viewDuration, viewStart, zoom]);
+  }, [duration, source.sampleRate, spectrogramFloorDb, spectrogramLevelSpanDb, spectrogramMaxFrequency, spectrogramMinFrequency, viewDuration, viewStart, zoom]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
