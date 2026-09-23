@@ -146,6 +146,7 @@ function App() {
   const selectionRef = useRef<[number, number]>([4.1, 7.8]);
   const pointerDragRef = useRef<{ start: number; current: number } | null>(null);
   const frequencyDragRef = useRef<{ startY: number; startMaximum: number } | null>(null);
+  const levelDragRef = useRef<{ startY: number; startCeiling: number } | null>(null);
   const timeDragRef = useRef<{ startX: number; startCenter: number; viewDuration: number; plotWidth: number } | null>(null);
   const dragDepthRef = useRef(0);
   const analysisJobRef = useRef<WorkerJob<LargeAnalysisResult> | null>(null);
@@ -803,7 +804,11 @@ function App() {
       event.currentTarget.setPointerCapture(event.pointerId);
       return;
     }
-    if (localX >= bounds.width - SPECTROGRAM_RIGHT) return;
+    if (localX >= bounds.width - SPECTROGRAM_RIGHT) {
+      levelDragRef.current = { startY: event.clientY, startCeiling: spectrogramCeilingDb };
+      event.currentTarget.setPointerCapture(event.pointerId);
+      return;
+    }
     const time = canvasPointToTime(event);
     pointerDragRef.current = { start: time, current: time };
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -825,6 +830,12 @@ function App() {
       setSpectrogramMaxFrequency(Math.max(spectrogramMinFrequency + 500, Math.min(nyquist, nextFrequency)));
       return;
     }
+    if (levelDragRef.current) {
+      const deltaDb = -(event.clientY - levelDragRef.current.startY) * 0.25;
+      const nextCeiling = Math.round(levelDragRef.current.startCeiling + deltaDb);
+      setSpectrogramCeilingDb(Math.max(-60, Math.min(0, nextCeiling)));
+      return;
+    }
     if (!pointerDragRef.current) return;
     const time = canvasPointToTime(event);
     pointerDragRef.current.current = time;
@@ -838,6 +849,10 @@ function App() {
     }
     if (frequencyDragRef.current) {
       frequencyDragRef.current = null;
+      return;
+    }
+    if (levelDragRef.current) {
+      levelDragRef.current = null;
       return;
     }
     if (!pointerDragRef.current) return;
@@ -1114,7 +1129,7 @@ function App() {
                 <>
                   <section className="panel instrument-grid" aria-label="Spectrogram editor">
                     <div className="panel-header">
-                      <div className="flex items-center gap-3"><Waves size={17} color="hsl(var(--primary))" /><div><div className="section-title">Spectrogram / selection</div><div className="text-[10px] text-muted-foreground mt-0.5">Drag to select · scroll/drag the bottom time axis · scroll/drag the left frequency axis · scroll the right dB axis</div></div></div>
+                      <div className="flex items-center gap-3"><Waves size={17} color="hsl(var(--primary))" /><div><div className="section-title">Spectrogram / selection</div><div className="text-[10px] text-muted-foreground mt-0.5">Drag to select · scroll/drag the bottom time axis · scroll/drag the left frequency axis · scroll/drag the right dB axis</div></div></div>
                       <div className="flex items-center gap-1"><button type="button" className="icon-btn" onClick={() => { setTimeViewCenter(viewStart + viewDuration / 2); setZoom(Math.max(1, zoom / 1.8)); }} aria-label="Zoom out" data-testid="button-zoom-out"><ZoomOut size={15} /></button><span className="font-mono-value text-[10px] text-muted-foreground w-12 text-center">{zoom.toFixed(1)}×</span><button type="button" className="icon-btn" onClick={() => { setTimeViewCenter(viewStart + viewDuration / 2); setZoom(Math.min(16, zoom * 1.8)); }} aria-label="Zoom in" data-testid="button-zoom-in"><ZoomIn size={15} /></button><button type="button" className="quiet-btn ml-2 !py-[5px]" onClick={() => { setZoom(1); setTimeViewCenter(null); }} data-testid="button-fit">Fit</button></div>
                     </div>
                     <div className="panel-body !pt-3">
