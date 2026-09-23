@@ -71,6 +71,7 @@ function App() {
   const [error, setError] = useState('');
   const [showAllModules, setShowAllModules] = useState(true);
   const [isDraggingWav, setIsDraggingWav] = useState(false);
+  const [spectrogramMinFrequency, setSpectrogramMinFrequency] = useState(0);
   const [spectrogramMaxFrequency, setSpectrogramMaxFrequency] = useState(20000);
   const [spectrogramCeilingDb, setSpectrogramCeilingDb] = useState(-20);
   const [timeViewCenter, setTimeViewCenter] = useState<number | null>(null);
@@ -82,7 +83,7 @@ function App() {
   const playHeadRef = useRef(0);
   const selectionRef = useRef<[number, number]>([4.1, 7.8]);
   const pointerDragRef = useRef<{ start: number; current: number } | null>(null);
-  const frequencyDragRef = useRef<{ startY: number; startFrequency: number } | null>(null);
+  const frequencyDragRef = useRef<{ startY: number; startMaximum: number } | null>(null);
   const timeDragRef = useRef<{ startX: number; startCenter: number; viewDuration: number; plotWidth: number } | null>(null);
   const dragDepthRef = useRef(0);
 
@@ -98,10 +99,10 @@ function App() {
   const spectrogramFloorDb = spectrogramCeilingDb - 85;
   const spectrograms = useMemo(
     () => ({
-      left: calculateSpectrogram([currentChannels[0]], source.sampleRate, viewStart, viewDuration, 480, 110, spectrogramMaxFrequency, spectrogramFloorDb, spectrogramCeilingDb),
-      right: calculateSpectrogram([currentChannels[1] ?? currentChannels[0]], source.sampleRate, viewStart, viewDuration, 480, 110, spectrogramMaxFrequency, spectrogramFloorDb, spectrogramCeilingDb),
+      left: calculateSpectrogram([currentChannels[0]], source.sampleRate, viewStart, viewDuration, 480, 110, spectrogramMinFrequency, spectrogramMaxFrequency, spectrogramFloorDb, spectrogramCeilingDb),
+      right: calculateSpectrogram([currentChannels[1] ?? currentChannels[0]], source.sampleRate, viewStart, viewDuration, 480, 110, spectrogramMinFrequency, spectrogramMaxFrequency, spectrogramFloorDb, spectrogramCeilingDb),
     }),
-    [currentChannels, source.sampleRate, spectrogramCeilingDb, spectrogramFloorDb, spectrogramMaxFrequency, viewDuration, viewStart],
+    [currentChannels, source.sampleRate, spectrogramCeilingDb, spectrogramFloorDb, spectrogramMaxFrequency, spectrogramMinFrequency, viewDuration, viewStart],
   );
   const originalStats = useMemo(() => analyzeLoudness(source.channels, source.sampleRate), [source.channels, source.sampleRate]);
   const currentStats = useMemo(() => analyzeLoudness(currentChannels, source.sampleRate), [currentChannels, source.sampleRate]);
@@ -327,7 +328,7 @@ function App() {
       return;
     }
     if (localX <= SPECTROGRAM_LEFT) {
-      frequencyDragRef.current = { startY: event.clientY, startFrequency: spectrogramMaxFrequency };
+      frequencyDragRef.current = { startY: event.clientY, startMaximum: spectrogramMaxFrequency };
       event.currentTarget.setPointerCapture(event.pointerId);
       return;
     }
@@ -349,8 +350,8 @@ function App() {
     if (frequencyDragRef.current) {
       const nyquist = Math.floor(source.sampleRate / 2);
       const deltaFrequency = (event.clientY - frequencyDragRef.current.startY) * 75;
-      const nextFrequency = Math.round((frequencyDragRef.current.startFrequency + deltaFrequency) / 100) * 100;
-      setSpectrogramMaxFrequency(Math.max(1000, Math.min(nyquist, nextFrequency)));
+      const nextFrequency = Math.round((frequencyDragRef.current.startMaximum + deltaFrequency) / 100) * 100;
+      setSpectrogramMaxFrequency(Math.max(spectrogramMinFrequency + 500, Math.min(nyquist, nextFrequency)));
       return;
     }
     if (!pointerDragRef.current) return;
@@ -401,15 +402,24 @@ function App() {
       event.preventDefault();
       event.stopPropagation();
       const nyquist = Math.floor(source.sampleRate / 2);
-      const direction = event.deltaY > 0 ? 1 : -1;
-      setSpectrogramMaxFrequency((value) => Math.max(1000, Math.min(nyquist, Math.round((value + direction * 1000) / 1000) * 1000)));
+      const paneHeight = graphBottom / 2;
+      const paneY = ((y % paneHeight) + paneHeight) % paneHeight;
+      const pointerRatio = Math.max(0, Math.min(1, 1 - paneY / paneHeight));
+      const pointerFrequency = spectrogramMinFrequency + pointerRatio * (spectrogramMaxFrequency - spectrogramMinFrequency);
+      const factor = event.deltaY > 0 ? 1.25 : 1 / 1.25;
+      const nextSpan = Math.max(500, Math.min(nyquist, (spectrogramMaxFrequency - spectrogramMinFrequency) * factor));
+      const nextMin = Math.max(0, Math.min(nyquist - nextSpan, pointerFrequency - pointerRatio * nextSpan));
+      const roundedMin = Math.max(0, Math.min(nyquist - 500, Math.round(nextMin / 100) * 100));
+      const roundedMax = Math.max(roundedMin + 500, Math.min(nyquist, Math.round((nextMin + nextSpan) / 100) * 100));
+      setSpectrogramMinFrequency(roundedMin);
+      setSpectrogramMaxFrequency(roundedMax);
     } else if (x >= bounds.width - SPECTROGRAM_RIGHT) {
       event.preventDefault();
       event.stopPropagation();
       const direction = event.deltaY > 0 ? -1 : 1;
       setSpectrogramCeilingDb((value) => Math.max(-60, Math.min(0, value + direction * 2)));
     }
-  }, [duration, source.sampleRate, viewDuration, viewStart, zoom]);
+  }, [duration, source.sampleRate, spectrogramMaxFrequency, spectrogramMinFrequency, viewDuration, viewStart, zoom]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -461,8 +471,8 @@ function App() {
     }
     for (const top of [0, paneHeight]) {
       for (let tick = 0; tick <= SPECTROGRAM_SCALE_DIVISIONS; tick += 1) {
-        const frequency = (tick / SPECTROGRAM_SCALE_DIVISIONS) * spectrogramMaxFrequency;
-        const y = top + paneHeight - (frequency / spectrogramMaxFrequency) * paneHeight;
+        const frequency = spectrogramMinFrequency + (tick / SPECTROGRAM_SCALE_DIVISIONS) * (spectrogramMaxFrequency - spectrogramMinFrequency);
+        const y = top + paneHeight - ((frequency - spectrogramMinFrequency) / (spectrogramMaxFrequency - spectrogramMinFrequency)) * paneHeight;
         context.beginPath(); context.moveTo(graphLeft, y); context.lineTo(graphRight, y); context.stroke();
       }
     }
@@ -494,8 +504,8 @@ function App() {
     context.textAlign = 'right';
     for (const top of [0, paneHeight]) {
       for (let tick = 0; tick <= SPECTROGRAM_SCALE_DIVISIONS; tick += 1) {
-        const frequency = (tick / SPECTROGRAM_SCALE_DIVISIONS) * spectrogramMaxFrequency;
-        const y = top + paneHeight - (frequency / spectrogramMaxFrequency) * paneHeight;
+        const frequency = spectrogramMinFrequency + (tick / SPECTROGRAM_SCALE_DIVISIONS) * (spectrogramMaxFrequency - spectrogramMinFrequency);
+        const y = top + paneHeight - ((frequency - spectrogramMinFrequency) / (spectrogramMaxFrequency - spectrogramMinFrequency)) * paneHeight;
         const label = frequency === 0 ? '0' : `${Number((frequency / 1000).toFixed(1))}k`;
         context.fillText(label, graphLeft - 6, Math.max(top + 10, Math.min(top + paneHeight - 3, y + 3)));
       }
@@ -535,7 +545,7 @@ function App() {
     context.textAlign = 'center';
     context.fillText('LEVEL (dB)', 0, 0);
     context.restore();
-  }, [activeTab, markers, playHead, selectionEnd, selectionStart, source.channels.length, spectrogramCeilingDb, spectrogramFloorDb, spectrogramMaxFrequency, spectrograms, viewDuration, viewStart]);
+  }, [activeTab, markers, playHead, selectionEnd, selectionStart, source.channels.length, spectrogramCeilingDb, spectrogramFloorDb, spectrogramMaxFrequency, spectrogramMinFrequency, spectrograms, viewDuration, viewStart]);
 
   useEffect(() => {
     const keyHandler = (event: KeyboardEvent) => {
@@ -632,7 +642,7 @@ function App() {
                     </div>
                     <div className="panel-body !pt-3">
                       <div className="waveform-wrap">
-                        <canvas ref={canvasRef} className="waveform-canvas" onPointerDown={onCanvasPointerDown} onPointerMove={onCanvasPointerMove} onPointerUp={onCanvasPointerUp} onPointerCancel={onCanvasPointerUp} aria-label={`Interactive spectrogram from 0 to ${spectrogramMaxFrequency / 1000} kilohertz with ${spectrogramFloorDb} to ${spectrogramCeilingDb} decibel scale`} data-testid="canvas-spectrogram" />
+                        <canvas ref={canvasRef} className="waveform-canvas" onPointerDown={onCanvasPointerDown} onPointerMove={onCanvasPointerMove} onPointerUp={onCanvasPointerUp} onPointerCancel={onCanvasPointerUp} aria-label={`Interactive spectrogram from ${spectrogramMinFrequency / 1000} to ${spectrogramMaxFrequency / 1000} kilohertz with ${spectrogramFloorDb} to ${spectrogramCeilingDb} decibel scale`} data-testid="canvas-spectrogram" />
                       </div>
                       <div className="flex flex-wrap items-center justify-between gap-3 mt-3">
                         <div className="flex items-center gap-2 text-[11px] text-muted-foreground"><span className="inline-block w-3 h-3 rounded-sm bg-[#142b38]" /> low energy <span className="inline-block w-3 h-3 rounded-sm bg-[#d8ed55] ml-2" /> high energy <span className="inline-block w-3 h-3 rounded-sm bg-[#ff8a4c] ml-2" /> playhead</div>

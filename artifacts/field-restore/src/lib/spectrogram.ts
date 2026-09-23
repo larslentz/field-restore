@@ -47,6 +47,7 @@ export function calculateSpectrogram(
   durationSeconds: number,
   width = 480,
   height = 220,
+  minimumFrequency = 0,
   maximumFrequency = 20000,
   floorDb = -105,
   ceilingDb = -20,
@@ -85,7 +86,7 @@ export function calculateSpectrogram(
     }
 
     for (let row = 0; row < height; row += 1) {
-      const frequency = maximumFrequency * (1 - row / Math.max(1, height - 1));
+      const frequency = minimumFrequency + (maximumFrequency - minimumFrequency) * (1 - row / Math.max(1, height - 1));
       const exactBin = frequency * fftSize / sampleRate;
       let normalized = 0;
       if (exactBin <= fftSize / 2) {
