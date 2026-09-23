@@ -388,9 +388,15 @@ function App() {
     if (y >= graphBottom && x > SPECTROGRAM_LEFT && x < bounds.width - SPECTROGRAM_RIGHT) {
       event.preventDefault();
       event.stopPropagation();
-      setTimeViewCenter(viewStart + viewDuration / 2);
+      const plotWidth = Math.max(1, bounds.width - SPECTROGRAM_LEFT - SPECTROGRAM_RIGHT);
+      const pointerRatio = Math.max(0, Math.min(1, (x - SPECTROGRAM_LEFT) / plotWidth));
+      const pointerTime = viewStart + pointerRatio * viewDuration;
       const factor = event.deltaY > 0 ? 1 / 1.25 : 1.25;
-      setZoom((value) => Math.max(1, Math.min(16, value * factor)));
+      const nextZoom = Math.max(1, Math.min(16, zoom * factor));
+      const nextViewDuration = duration / nextZoom;
+      const nextViewStart = Math.max(0, Math.min(duration - nextViewDuration, pointerTime - pointerRatio * nextViewDuration));
+      setTimeViewCenter(nextViewStart + nextViewDuration / 2);
+      setZoom(nextZoom);
     } else if (x <= SPECTROGRAM_LEFT) {
       event.preventDefault();
       event.stopPropagation();
@@ -403,7 +409,7 @@ function App() {
       const direction = event.deltaY > 0 ? -1 : 1;
       setSpectrogramCeilingDb((value) => Math.max(-60, Math.min(0, value + direction * 2)));
     }
-  }, [source.sampleRate, viewDuration, viewStart]);
+  }, [duration, source.sampleRate, viewDuration, viewStart, zoom]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
