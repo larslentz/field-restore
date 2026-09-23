@@ -95,10 +95,17 @@ function averageAt(channels: ChannelData, index: number) {
   return channels.reduce((sum, channel) => sum + (channel[index] ?? 0), 0) / Math.max(1, channels.length);
 }
 
-export function applyModule(input: ChannelData, module: EditModule, sampleRate: number): ChannelData {
+export interface RenderContext {
+  frameOffset?: number;
+  totalFrames?: number;
+}
+
+export function applyModule(input: ChannelData, module: EditModule, sampleRate: number, context: RenderContext = {}): ChannelData {
   const output = cloneChannels(input);
   if (!module.enabled) return output;
   const length = output[0]?.length ?? 0;
+  const frameOffset = context.frameOffset ?? 0;
+  const totalFrames = context.totalFrames ?? length;
   const p = module.params;
   if (module.type === 'gain') {
     const amp = dbToAmp(Number(p.db) || 0);
@@ -108,8 +115,9 @@ export function applyModule(input: ChannelData, module: EditModule, sampleRate: 
     const fadeOut = Math.floor(Number(p.out) * sampleRate);
     output.forEach((channel) => channel.forEach((sample, i) => {
       let factor = 1;
-      if (fadeIn > 0 && i < fadeIn) factor *= i / fadeIn;
-      if (fadeOut > 0 && i > length - fadeOut) factor *= Math.max(0, (length - i) / fadeOut);
+      const absoluteFrame = frameOffset + i;
+      if (fadeIn > 0 && absoluteFrame < fadeIn) factor *= absoluteFrame / fadeIn;
+      if (fadeOut > 0 && absoluteFrame > totalFrames - fadeOut) factor *= Math.max(0, (totalFrames - absoluteFrame) / fadeOut);
       channel[i] = sample * factor;
     }));
   } else if (module.type === 'dc') {
@@ -141,7 +149,7 @@ export function applyModule(input: ChannelData, module: EditModule, sampleRate: 
     output.forEach((channel) => {
       let phase = 0;
       channel.forEach((sample, i) => {
-        phase += (2 * Math.PI * frequency) / sampleRate;
+        phase = (2 * Math.PI * frequency * (frameOffset + i + 1)) / sampleRate;
         const hum = Math.sin(phase) * sample * .16;
         channel[i] = sample - hum * (1 - reduction);
       });
@@ -152,8 +160,8 @@ export function applyModule(input: ChannelData, module: EditModule, sampleRate: 
     const coefficients = highPass(sampleRate, cutoff, q);
     output.forEach((channel) => processBiquad(channel, coefficients));
   } else if (module.type === 'region') {
-    const start = Math.floor(Math.max(0, Number(p.start)) * sampleRate);
-    const end = Math.min(length, Math.floor(Math.max(Number(p.end), Number(p.start)) * sampleRate));
+    const start = Math.max(0, Math.floor(Math.max(0, Number(p.start)) * sampleRate) - frameOffset);
+    const end = Math.min(length, Math.floor(Math.max(Number(p.end), Number(p.start)) * sampleRate) - frameOffset);
     const factor = dbToAmp(Number(p.amount) || 0);
     output.forEach((channel) => { for (let i = start; i < end; i += 1) channel[i] *= factor; });
   } else if (module.type === 'ambient') {
@@ -168,6 +176,6 @@ export function applyModule(input: ChannelData, module: EditModule, sampleRate: 
   return output;
 }
 
-export function renderChain(original: ChannelData, modules: EditModule[], sampleRate: number) {
-  return modules.reduce((audio, module) => applyModule(audio, module, sampleRate), cloneChannels(original));
+export function renderChain(original: ChannelData, modules: EditModule[], sampleRate: number, context: RenderContext = {}) {
+  return modules.reduce((audio, module) => applyModule(audio, module, sampleRate, context), cloneChannels(original));
 }

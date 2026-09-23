@@ -48,7 +48,15 @@ test('a click without a range seeks into the full recording', () => {
   assert.equal(plan.bufferEndFrame, 10000);
   assert.equal(plan.bufferStartOffset, 6);
   assert.equal(plan.timelineStart, 6);
+  assert.equal(plan.timelineStartFrame, 6000);
   assert.equal(plan.timelineEnd, 10);
+});
+
+test('a full-file loop preserves its nonzero seek frame as the loop boundary', () => {
+  const plan = createPlaybackRangePlan({ ...base, loop: true, selection: [6, 6], startPosition: 8.5 });
+  assert.equal(plan.hasSelection, false);
+  assert.equal(plan.timelineStart, 8.5);
+  assert.equal(plan.timelineStartFrame, 8500);
 });
 
 test('current and original monitor sources receive identical timeline boundaries', () => {

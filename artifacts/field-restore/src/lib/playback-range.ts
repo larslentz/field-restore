@@ -16,6 +16,7 @@ export interface PlaybackRangePlan {
   hasSelection: boolean;
   timelineEnd: number;
   timelineStart: number;
+  timelineStartFrame: number;
 }
 
 export function createPlaybackRangePlan({
@@ -46,5 +47,6 @@ export function createPlaybackRangePlan({
     hasSelection,
     timelineEnd,
     timelineStart,
+    timelineStartFrame: hasSelection ? bufferStartFrame : Math.max(0, Math.min(totalFrames, Math.floor(timelineStart * sampleRate))),
   };
 }

@@ -5,13 +5,19 @@ import { decodeChannels, loadProject, projectFromSource, saveProject } from '@/l
 import { makeDefaultChain, makeModule, MODULE_LABELS, renderChain, type EditModule, type ModuleType } from '@/lib/edit-chain';
 import { analyzeLoudness, type LoudnessStats } from '@/lib/loudness';
 import { createPlaybackRangePlan } from '@/lib/playback-range';
-import { calculateSpectrogram } from '@/lib/spectrogram';
+import { calculateSpectrogram, type SpectrogramData } from '@/lib/spectrogram';
+import { calculateFileSpectrogram } from '@/lib/large-spectrogram';
+import { analyzeLargeLoudness } from '@/lib/large-analysis';
+import { fingerprintWav, generateFloat32WavHeader, parseWavMetadata, readFrames, type WavMetadata } from '@/lib/large-wav';
+import { listProjects, loadProject as loadProjectV2, queryFileHandlePermission, saveProject as saveProjectV2, type ProjectRecord } from '@/lib/project-store';
+import { createStreamingEditChain } from '@/lib/streaming-edit-chain';
 import './index.css';
 
 type ViewTab = 'edit' | 'analyze' | 'project';
 type MonitorMode = 'current' | 'original';
 type Marker = { id: string; time: number; label: string; color: string };
 type Region = { id: string; start: number; end: number; label: string };
+type LargeSource = { file: File; metadata: WavMetadata; fingerprint: string; fileHandle?: FileSystemFileHandle };
 
 const MODULE_TYPES: ModuleType[] = ['gain', 'fade', 'eq', 'dc', 'hum', 'wind', 'region', 'ambient'];
 const colorForMarker = '#d8ed55';
@@ -19,6 +25,8 @@ const SPECTROGRAM_LEFT = 48;
 const SPECTROGRAM_RIGHT = 72;
 const SPECTROGRAM_BOTTOM = 28;
 const SPECTROGRAM_SCALE_DIVISIONS = 5;
+const EMPTY_STATS: LoudnessStats = { truePeakDbtp: -Infinity, integratedLufs: -Infinity, loudnessRangeLu: 0, maxShortTermLufs: -Infinity };
+const EMPTY_SPECTROGRAM = { width: 480, height: 110, values: new Float32Array(480 * 110) };
 
 function spectrogramColor(intensity: number) {
   const red = intensity < 0.55 ? 14 + intensity * 90 : 64 + (intensity - 0.55) * 425;
@@ -75,6 +83,16 @@ function App() {
   const [spectrogramMaxFrequency, setSpectrogramMaxFrequency] = useState(20000);
   const [spectrogramCeilingDb, setSpectrogramCeilingDb] = useState(-20);
   const [timeViewCenter, setTimeViewCenter] = useState<number | null>(null);
+  const [largeSource, setLargeSource] = useState<LargeSource | null>(null);
+  const [largeSpectrograms, setLargeSpectrograms] = useState<{ left: SpectrogramData; right: SpectrogramData }>({ left: EMPTY_SPECTROGRAM, right: EMPTY_SPECTROGRAM });
+  const [largeOriginalStats, setLargeOriginalStats] = useState<LoudnessStats>(EMPTY_STATS);
+  const [largeCurrentStats, setLargeCurrentStats] = useState<LoudnessStats>(EMPTY_STATS);
+  const [largeSelectionOriginalStats, setLargeSelectionOriginalStats] = useState<LoudnessStats>(EMPTY_STATS);
+  const [largeSelectionCurrentStats, setLargeSelectionCurrentStats] = useState<LoudnessStats>(EMPTY_STATS);
+  const [operationStatus, setOperationStatus] = useState('');
+  const [operationProgress, setOperationProgress] = useState(0);
+  const [projectId, setProjectId] = useState<string | null>(null);
+  const [pendingRelink, setPendingRelink] = useState<ProjectRecord | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -86,10 +104,14 @@ function App() {
   const frequencyDragRef = useRef<{ startY: number; startMaximum: number } | null>(null);
   const timeDragRef = useRef<{ startX: number; startCenter: number; viewDuration: number; plotWidth: number } | null>(null);
   const dragDepthRef = useRef(0);
+  const largeJobRef = useRef<AbortController | null>(null);
+  const scheduledNodesRef = useRef<AudioBufferSourceNode[]>([]);
+  const playbackSessionRef = useRef(0);
 
-  const currentChannels = useMemo(() => renderChain(source.channels, modules, source.sampleRate), [source.channels, source.sampleRate, modules]);
+  const currentChannels = useMemo(() => largeSource ? [] : renderChain(source.channels, modules, source.sampleRate), [largeSource, source.channels, source.sampleRate, modules]);
   const currentSource = useMemo<AudioSource>(() => ({ ...source, channels: currentChannels }), [source, currentChannels]);
   const duration = source.duration;
+  const sourceChannelCount = largeSource?.metadata.channels ?? Number(pendingRelink?.source.channels ?? source.channels.length);
   const viewDuration = duration / zoom;
   const selectionStart = Math.min(...selection);
   const selectionEnd = Math.max(...selection);
@@ -97,17 +119,22 @@ function App() {
   const viewCenter = timeViewCenter ?? selectionCenter;
   const viewStart = zoom === 1 ? 0 : Math.max(0, Math.min(duration - viewDuration, viewCenter - viewDuration / 2));
   const spectrogramFloorDb = spectrogramCeilingDb - 85;
-  const spectrograms = useMemo(
+  const memorySpectrograms = useMemo(
     () => ({
-      left: calculateSpectrogram([currentChannels[0]], source.sampleRate, viewStart, viewDuration, 480, 110, spectrogramMinFrequency, spectrogramMaxFrequency, spectrogramFloorDb, spectrogramCeilingDb),
-      right: calculateSpectrogram([currentChannels[1] ?? currentChannels[0]], source.sampleRate, viewStart, viewDuration, 480, 110, spectrogramMinFrequency, spectrogramMaxFrequency, spectrogramFloorDb, spectrogramCeilingDb),
+      left: largeSource || !currentChannels[0] ? EMPTY_SPECTROGRAM : calculateSpectrogram([currentChannels[0]], source.sampleRate, viewStart, viewDuration, 480, 110, spectrogramMinFrequency, spectrogramMaxFrequency, spectrogramFloorDb, spectrogramCeilingDb),
+      right: largeSource || !currentChannels[0] ? EMPTY_SPECTROGRAM : calculateSpectrogram([currentChannels[1] ?? currentChannels[0]], source.sampleRate, viewStart, viewDuration, 480, 110, spectrogramMinFrequency, spectrogramMaxFrequency, spectrogramFloorDb, spectrogramCeilingDb),
     }),
-    [currentChannels, source.sampleRate, spectrogramCeilingDb, spectrogramFloorDb, spectrogramMaxFrequency, spectrogramMinFrequency, viewDuration, viewStart],
+    [currentChannels, largeSource, source.sampleRate, spectrogramCeilingDb, spectrogramFloorDb, spectrogramMaxFrequency, spectrogramMinFrequency, viewDuration, viewStart],
   );
-  const originalStats = useMemo(() => analyzeLoudness(source.channels, source.sampleRate), [source.channels, source.sampleRate]);
-  const currentStats = useMemo(() => analyzeLoudness(currentChannels, source.sampleRate), [currentChannels, source.sampleRate]);
-  const selectionOriginalStats = useMemo(() => analyzeLoudness(source.channels, source.sampleRate, selectionStart * source.sampleRate, selectionEnd * source.sampleRate), [source.channels, selectionStart, selectionEnd, source.sampleRate]);
-  const selectionCurrentStats = useMemo(() => analyzeLoudness(currentChannels, source.sampleRate, selectionStart * source.sampleRate, selectionEnd * source.sampleRate), [currentChannels, selectionStart, selectionEnd, source.sampleRate]);
+  const spectrograms = largeSource ? largeSpectrograms : memorySpectrograms;
+  const memoryOriginalStats = useMemo(() => largeSource ? EMPTY_STATS : analyzeLoudness(source.channels, source.sampleRate), [largeSource, source.channels, source.sampleRate]);
+  const memoryCurrentStats = useMemo(() => largeSource ? EMPTY_STATS : analyzeLoudness(currentChannels, source.sampleRate), [currentChannels, largeSource, source.sampleRate]);
+  const memorySelectionOriginalStats = useMemo(() => largeSource ? EMPTY_STATS : analyzeLoudness(source.channels, source.sampleRate, selectionStart * source.sampleRate, selectionEnd * source.sampleRate), [largeSource, source.channels, selectionStart, selectionEnd, source.sampleRate]);
+  const memorySelectionCurrentStats = useMemo(() => largeSource ? EMPTY_STATS : analyzeLoudness(currentChannels, source.sampleRate, selectionStart * source.sampleRate, selectionEnd * source.sampleRate), [currentChannels, largeSource, selectionStart, selectionEnd, source.sampleRate]);
+  const originalStats = largeSource ? largeOriginalStats : memoryOriginalStats;
+  const currentStats = largeSource ? largeCurrentStats : memoryCurrentStats;
+  const selectionOriginalStats = largeSource ? largeSelectionOriginalStats : memorySelectionOriginalStats;
+  const selectionCurrentStats = largeSource ? largeSelectionCurrentStats : memorySelectionCurrentStats;
 
   useEffect(() => {
     const saved = loadProject();
@@ -122,9 +149,143 @@ function App() {
       setSource(next); setTitle(saved.title); setNotes(saved.notes); setModules(saved.modules); setMarkers(saved.markers); setRegions(saved.regions);
       setSavedStatus(`Restored ${new Date(saved.savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
     }
+    void listProjects().then(async (projects) => {
+      const latest = projects[0];
+      if (!latest) return;
+      const record = await loadProjectV2(latest.id);
+      if (!record) return;
+      setProjectId(record.id);
+      setTitle(record.title);
+      setNotes(record.notes);
+      setModules(record.modules);
+      setMarkers(record.markers);
+      setRegions(record.regions);
+      if (record.fileHandle && await queryFileHandlePermission(record.fileHandle) === 'granted') {
+        const file = await record.fileHandle.getFile();
+        const metadata = await parseWavMetadata(file, { name: file.name });
+        const fingerprint = await fingerprintWav(file, metadata);
+        if (record.source.fingerprint === fingerprint) {
+          setLargeSource({ file, metadata, fingerprint, fileHandle: record.fileHandle });
+          setSource({ channels: [], sampleRate: metadata.sampleRate, duration: metadata.frameCount / metadata.sampleRate, name: file.name });
+          setSelection([0, Math.min(5, metadata.frameCount / metadata.sampleRate)]);
+          setSavedStatus(`Restored file-backed project · ${new Date(record.savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
+          return;
+        }
+        setPendingRelink(record);
+        setSource({ channels: [], sampleRate: record.source.sampleRate, duration: Number(record.source.duration ?? 0), name: record.source.name });
+        setSavedStatus('Source changed · relink the original WAV');
+      } else {
+        setPendingRelink(record);
+        setSource({ channels: [], sampleRate: record.source.sampleRate, duration: Number(record.source.duration ?? 0), name: record.source.name });
+        setSavedStatus('Saved project loaded · relink source WAV');
+      }
+    }).catch(() => {
+      // Legacy localStorage restoration remains available when IndexedDB is unavailable.
+    });
   }, []);
 
+  useEffect(() => {
+    if (!largeSource) return;
+    const controller = new AbortController();
+    const { file, metadata } = largeSource;
+    const options = {
+      startSeconds: viewStart,
+      durationSeconds: viewDuration,
+      width: 480,
+      height: 110,
+      minimumFrequency: spectrogramMinFrequency,
+      maximumFrequency: Math.min(spectrogramMaxFrequency, metadata.sampleRate / 2),
+      floorDb: spectrogramFloorDb,
+      ceilingDb: spectrogramCeilingDb,
+      signal: controller.signal,
+      warmupFrames: Math.floor(metadata.sampleRate * 0.5),
+      transform: (channels: Float32Array[], startFrame: number) => createStreamingEditChain(modules, metadata.sampleRate, metadata.frameCount, startFrame).process(channels, startFrame),
+    };
+    setOperationStatus('Building visible spectrogram');
+    Promise.all([
+      calculateFileSpectrogram(file, metadata, { ...options, channelIndex: 0 }),
+      calculateFileSpectrogram(file, metadata, { ...options, channelIndex: Math.min(1, metadata.channels - 1) }),
+    ]).then(([left, right]) => {
+      if (!controller.signal.aborted) {
+        setLargeSpectrograms({ left, right });
+        setOperationStatus('');
+      }
+    }).catch((caught) => {
+      if ((caught as Error).name !== 'AbortError') setError(caught instanceof Error ? caught.message : 'Unable to build the visible spectrogram.');
+    });
+    return () => controller.abort();
+  }, [largeSource, modules, spectrogramCeilingDb, spectrogramFloorDb, spectrogramMaxFrequency, spectrogramMinFrequency, viewDuration, viewStart]);
+
+  useEffect(() => {
+    if (!largeSource) return;
+    largeJobRef.current?.abort();
+    const controller = new AbortController();
+    largeJobRef.current = controller;
+    const { file, metadata } = largeSource;
+    const selectionStartFrame = Math.max(0, Math.floor(selectionStart * metadata.sampleRate));
+    const selectionFrames = Math.max(1, Math.min(metadata.frameCount - selectionStartFrame, Math.ceil((selectionEnd - selectionStart) * metadata.sampleRate)));
+    const selectionWarmStart = Math.max(0, selectionStartFrame - Math.floor(metadata.sampleRate * 2));
+    const selectionProcessor = createStreamingEditChain(modules, metadata.sampleRate, metadata.frameCount, selectionWarmStart);
+    const fullProcessor = createStreamingEditChain(modules, metadata.sampleRate, metadata.frameCount, 0);
+    const selectionMetadata: WavMetadata = {
+      ...metadata,
+      dataOffset: metadata.dataOffset + selectionStartFrame * metadata.frameSize,
+      frameCount: selectionFrames,
+      dataLength: selectionFrames * metadata.frameSize,
+      dataLengthBigInt: BigInt(selectionFrames * metadata.frameSize),
+    };
+    setOperationStatus('Analyzing selection');
+    setOperationProgress(0);
+    void analyzeLargeLoudness(file, selectionMetadata, {
+      signal: controller.signal,
+      onProgress: ({ fraction }) => setOperationProgress(fraction),
+    }).then(async (stats) => {
+      if (!controller.signal.aborted) setLargeSelectionOriginalStats(stats);
+      setOperationStatus('Analyzing processed selection');
+      if (selectionWarmStart < selectionStartFrame) {
+        const warmup = await readFrames(file, metadata, selectionWarmStart, selectionStartFrame - selectionWarmStart, { signal: controller.signal });
+        selectionProcessor.process(warmup, selectionWarmStart);
+      }
+      return analyzeLargeLoudness(file, selectionMetadata, {
+        signal: controller.signal,
+        transform: (channels, frame) => selectionProcessor.process(channels, selectionStartFrame + frame),
+        onProgress: ({ fraction }) => setOperationProgress(fraction),
+      });
+    }).then((stats) => {
+      if (!controller.signal.aborted) setLargeSelectionCurrentStats(stats);
+      setOperationStatus('Analyzing original recording');
+      return analyzeLargeLoudness(file, metadata, {
+        signal: controller.signal,
+        onProgress: ({ fraction }) => setOperationProgress(fraction),
+      });
+    }).then((stats) => {
+      if (!controller.signal.aborted) setLargeOriginalStats(stats);
+      setOperationStatus('Analyzing processed recording');
+      return analyzeLargeLoudness(file, metadata, {
+        signal: controller.signal,
+        transform: (channels, frame) => fullProcessor.process(channels, frame),
+        onProgress: ({ fraction }) => setOperationProgress(fraction),
+      });
+    }).then((stats) => {
+      if (!controller.signal.aborted) {
+        setLargeCurrentStats(stats);
+        setOperationStatus('');
+        setOperationProgress(1);
+      }
+    }).catch((caught) => {
+      if ((caught as Error).name !== 'AbortError') setError(caught instanceof Error ? caught.message : 'Unable to analyze this recording.');
+    });
+    return () => controller.abort();
+  }, [largeSource, modules, selectionEnd, selectionStart]);
+
   const stopPlayback = useCallback(() => {
+    playbackSessionRef.current += 1;
+    scheduledNodesRef.current.forEach((node) => {
+      node.onended = null;
+      try { node.stop(); } catch { /* already stopped */ }
+      node.disconnect();
+    });
+    scheduledNodesRef.current = [];
     if (audioSourceRef.current) {
       audioSourceRef.current.onended = null;
       audioSourceRef.current.stop();
@@ -186,6 +347,102 @@ function App() {
     animationRef.current = requestAnimationFrame(tick);
   }, [duration, loop, rate, source.sampleRate]);
 
+  const startLargePlayback = useCallback(async (startPosition: number) => {
+    if (!largeSource) return;
+    const AudioContextClass = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AudioContextClass) { setError('This browser does not expose Web Audio playback.'); return; }
+    stopPlayback();
+    const context = audioContextRef.current ?? new AudioContextClass();
+    audioContextRef.current = context;
+    await context.resume();
+    const session = playbackSessionRef.current + 1;
+    playbackSessionRef.current = session;
+    const { file, metadata } = largeSource;
+    const plan = createPlaybackRangePlan({ duration, loop, sampleRate: metadata.sampleRate, selection: selectionRef.current, startPosition, totalFrames: metadata.frameCount });
+    const rangeStart = plan.bufferStartFrame;
+    const rangeEnd = plan.bufferEndFrame;
+    let nextFrame = plan.timelineStartFrame;
+    const loopStartFrame = nextFrame;
+    let scheduledAt = context.currentTime + 0.08;
+    const startedAt = scheduledAt;
+    const playbackStart = nextFrame / metadata.sampleRate;
+    const chunkFrames = Math.max(4096, Math.floor(metadata.sampleRate * 4));
+    const warmStart = monitor === 'current' ? Math.max(0, nextFrame - Math.floor(metadata.sampleRate * 2)) : nextFrame;
+    const processor = createStreamingEditChain(modules, metadata.sampleRate, metadata.frameCount, warmStart);
+    if (monitor === 'current' && warmStart < nextFrame) {
+      const warmup = await readFrames(file, metadata, warmStart, nextFrame - warmStart);
+      processor.process(warmup, warmStart);
+    }
+    const loopState = processor.snapshot();
+    setIsPlaying(true);
+    setOperationStatus('Buffering playback');
+
+    const pump = async () => {
+      if (playbackSessionRef.current !== session) return;
+      try {
+        while (scheduledAt < context.currentTime + 10 && playbackSessionRef.current === session) {
+          if (nextFrame >= rangeEnd) {
+            if (!loop) break;
+            nextFrame = loopStartFrame;
+            processor.restore(loopState);
+          }
+          const count = Math.min(chunkFrames, rangeEnd - nextFrame);
+          const readStart = nextFrame;
+          let channels = await readFrames(file, metadata, readStart, count, { signal: undefined });
+          if (playbackSessionRef.current !== session) return;
+          if (monitor === 'current') channels = processor.process(channels, readStart);
+          const buffer = context.createBuffer(metadata.channels, count, metadata.sampleRate);
+          channels.forEach((channel, index) => buffer.getChannelData(index).set(channel.subarray(0, count)));
+          const node = context.createBufferSource();
+          node.buffer = buffer;
+          node.playbackRate.value = rate;
+          node.connect(context.destination);
+          node.start(scheduledAt);
+          scheduledNodesRef.current.push(node);
+          const cleanupNode = () => {
+            scheduledNodesRef.current = scheduledNodesRef.current.filter((item) => item !== node);
+            node.disconnect();
+          };
+          node.onended = cleanupNode;
+          scheduledAt += count / metadata.sampleRate / rate;
+          nextFrame += count;
+          if (nextFrame >= rangeEnd && !loop) {
+            node.onended = () => {
+              cleanupNode();
+              if (playbackSessionRef.current !== session) return;
+              playHeadRef.current = plan.timelineEnd;
+              setPlayHead(plan.timelineEnd);
+              setIsPlaying(false);
+              setOperationStatus('');
+              scheduledNodesRef.current = [];
+            };
+            break;
+          }
+        }
+        if (playbackSessionRef.current === session && (loop || nextFrame < rangeEnd)) window.setTimeout(() => void pump(), 500);
+        setOperationStatus('');
+      } catch (caught) {
+        if (playbackSessionRef.current === session) {
+          stopPlayback();
+          setError(caught instanceof Error ? caught.message : 'Unable to stream playback.');
+        }
+      }
+    };
+    void pump();
+    const tick = () => {
+      if (playbackSessionRef.current !== session) return;
+      const elapsed = Math.max(0, context.currentTime - startedAt) * rate;
+      const span = Math.max(0.01, plan.timelineEnd - (plan.hasSelection ? plan.timelineStart : playbackStart));
+      const position = loop
+        ? (plan.hasSelection ? plan.timelineStart : playbackStart) + (elapsed % span)
+        : Math.min(plan.timelineEnd, playbackStart + elapsed);
+      playHeadRef.current = position;
+      setPlayHead(position);
+      animationRef.current = requestAnimationFrame(tick);
+    };
+    animationRef.current = requestAnimationFrame(tick);
+  }, [duration, largeSource, loop, modules, monitor, rate, stopPlayback]);
+
   useEffect(() => {
     playHeadRef.current = playHead;
   }, [playHead]);
@@ -196,25 +453,28 @@ function App() {
 
   const play = useCallback(() => {
     if (isPlaying) { stopPlayback(); return; }
+    if (largeSource) { void startLargePlayback(playHeadRef.current); return; }
     const channels = monitor === 'original' ? source.channels : currentChannels;
     startPlayback(channels, playHeadRef.current);
-  }, [currentChannels, isPlaying, monitor, source.channels, startPlayback, stopPlayback]);
+  }, [currentChannels, isPlaying, largeSource, monitor, source.channels, startLargePlayback, startPlayback, stopPlayback]);
 
   const seekTo = useCallback((time: number) => {
     const position = Math.max(0, Math.min(duration, time));
     playHeadRef.current = position;
     setPlayHead(position);
     if (isPlaying) {
+      if (largeSource) { void startLargePlayback(position); return; }
       const channels = monitor === 'original' ? source.channels : currentChannels;
       startPlayback(channels, position);
     }
-  }, [currentChannels, duration, isPlaying, monitor, source.channels, startPlayback]);
+  }, [currentChannels, duration, isPlaying, largeSource, monitor, source.channels, startLargePlayback, startPlayback]);
 
   useEffect(() => {
     if (!isPlaying) return;
+    if (largeSource) { void startLargePlayback(playHeadRef.current); return; }
     const channels = monitor === 'original' ? source.channels : currentChannels;
     startPlayback(channels, playHeadRef.current);
-  }, [currentChannels, loop, monitor, rate]);
+  }, [currentChannels, largeSource, loop, monitor, rate]);
 
   useEffect(() => () => { stopPlayback(); audioContextRef.current?.close(); }, [stopPlayback]);
 
@@ -244,16 +504,63 @@ function App() {
     setUndoStack((stack) => [...stack, modules]); setModules(next); setRedoStack((stack) => stack.slice(0, -1));
   };
 
-  const importWavFile = useCallback(async (file: File) => {
+  const importWavFile = useCallback(async (file: File, fileHandle?: FileSystemFileHandle) => {
     if (!file.name.toLowerCase().endsWith('.wav') && !['audio/wav', 'audio/x-wav', 'audio/wave'].includes(file.type)) {
       setError('Drop an uncompressed WAV file to begin editing.');
       return;
     }
     try {
-      setError(''); const parsed = parseWav(await file.arrayBuffer(), file.name);
-      stopPlayback(); setSource(parsed); setModules(makeDefaultChain()); setSelection([0, Math.min(parsed.duration, 5)]); setMarkers([]); setRegions([]); setTitle(file.name.replace(/\.wav$/i, '')); setSavedStatus('Imported · not saved');
+      setError('');
+      setOperationStatus('Reading WAV metadata');
+      const metadata = await parseWavMetadata(file, { name: file.name });
+      const fingerprint = await fingerprintWav(file, metadata);
+      const useFileBackedPath = file.size >= 64 * 1024 * 1024 || metadata.format === 'RF64';
+      stopPlayback();
+      if (useFileBackedPath) {
+        const next: AudioSource = { channels: [], sampleRate: metadata.sampleRate, duration: metadata.frameCount / metadata.sampleRate, name: file.name };
+        setLargeSource({ file, metadata, fingerprint, fileHandle });
+        setSource(next);
+        setLargeOriginalStats(EMPTY_STATS);
+        setLargeCurrentStats(EMPTY_STATS);
+        setLargeSelectionOriginalStats(EMPTY_STATS);
+        setLargeSelectionCurrentStats(EMPTY_STATS);
+        setSavedStatus(`File-backed ${metadata.format} · not saved`);
+      } else {
+        const parsed = parseWav(await file.arrayBuffer(), file.name);
+        setLargeSource(null);
+        setSource(parsed);
+        setSavedStatus('Imported · not saved');
+      }
+      const relinkMatches = pendingRelink
+        && pendingRelink.source.fingerprint === fingerprint;
+      if (relinkMatches) {
+        setModules(pendingRelink.modules);
+        setMarkers(pendingRelink.markers);
+        setRegions(pendingRelink.regions);
+        setTitle(pendingRelink.title);
+        setNotes(pendingRelink.notes);
+        setProjectId(pendingRelink.id);
+        setPendingRelink(null);
+        setSavedStatus('Source relinked · project restored');
+      } else {
+        setModules(makeDefaultChain()); setMarkers([]); setRegions([]); setTitle(file.name.replace(/\.wav$/i, '')); setProjectId(null);
+      }
+      setSelection([0, Math.min(metadata.frameCount / metadata.sampleRate, 5)]); setOperationStatus('');
     } catch (caught) { setError(caught instanceof Error ? caught.message : 'Unable to read this WAV file.'); }
-  }, [stopPlayback]);
+  }, [pendingRelink, stopPlayback]);
+
+  const pickWavFile = useCallback(async () => {
+    const picker = (window as typeof window & {
+      showOpenFilePicker?: (options?: unknown) => Promise<FileSystemFileHandle[]>;
+    }).showOpenFilePicker;
+    if (!picker) { fileRef.current?.click(); return; }
+    try {
+      const [handle] = await picker({ multiple: false, types: [{ description: 'WAV audio', accept: { 'audio/wav': ['.wav'] } }] });
+      if (handle) void importWavFile(await handle.getFile(), handle);
+    } catch (caught) {
+      if ((caught as Error).name !== 'AbortError') setError(caught instanceof Error ? caught.message : 'Unable to open this WAV file.');
+    }
+  }, [importWavFile]);
 
   const importFile = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -290,18 +597,94 @@ function App() {
     void importWavFile(file);
   };
 
-  const save = () => {
+  const save = async () => {
+    if (largeSource) {
+      try {
+        const record = await saveProjectV2({
+          id: projectId ?? undefined,
+          title,
+          notes,
+          modules,
+          markers,
+          regions,
+          source: {
+            name: source.name,
+            sampleRate: source.sampleRate,
+            duration,
+            channels: largeSource.metadata.channels,
+            size: largeSource.file.size,
+            lastModified: largeSource.file.lastModified,
+            format: largeSource.metadata.format,
+            bitsPerSample: largeSource.metadata.bitsPerSample,
+            frameCount: largeSource.metadata.frameCount,
+            fingerprint: largeSource.fingerprint,
+          },
+          fileHandle: largeSource.fileHandle,
+          analysis: { original: largeOriginalStats, current: largeCurrentStats, selectionOriginal: largeSelectionOriginalStats, selectionCurrent: largeSelectionCurrentStats },
+        });
+        setProjectId(record.id);
+        setSavedStatus(`Saved locally · ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}${largeSource.fileHandle ? '' : ' · relink required after restart'}`);
+      } catch (caught) {
+        setError(caught instanceof Error ? caught.message : 'Unable to save this project.');
+      }
+      return;
+    }
     const project = projectFromSource(source, modules, markers, regions, title, notes);
     const ok = saveProject(project);
     setSavedStatus(ok ? `Saved locally · ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 'Storage full · export a project report');
   };
 
-  const exportAudio = () => {
+  const exportAudio = async () => {
     const safeName = (title || source.name).replace(/[^a-z0-9-_]+/gi, '-').replace(/-+/g, '-').toLowerCase();
-    downloadBlob(encodeWav(currentSource), `${safeName || 'field-restore'}-rx.wav`);
-    const report = { tool: 'Field Restore', version: 'local preview', source: source.name, sampleRate: source.sampleRate, channels: source.channels.length, duration: duration, format: '32-bit IEEE float WAV', modules, selection: [selectionStart, selectionEnd], exportedAt: new Date().toISOString(), limitations: ['Edits are conservative sample-domain approximations in this browser build.', 'Original source remains immutable; export reflects enabled modules only.'] };
+    if (largeSource) {
+      const picker = (window as typeof window & {
+        showSaveFilePicker?: (options?: unknown) => Promise<FileSystemFileHandle>;
+      }).showSaveFilePicker;
+      if (!picker) {
+        setError('Large-file export requires desktop Chrome or Edge with the file save picker.');
+        return;
+      }
+      const controller = new AbortController();
+      largeJobRef.current?.abort();
+      largeJobRef.current = controller;
+      try {
+        const handle = await picker({ suggestedName: `${safeName || 'field-restore'}-rx.wav`, types: [{ description: 'WAV audio', accept: { 'audio/wav': ['.wav'] } }] });
+        const writable = await handle.createWritable();
+        const { file, metadata } = largeSource;
+        const header = generateFloat32WavHeader({ channels: metadata.channels, sampleRate: metadata.sampleRate, frameCount: metadata.frameCount });
+        const headerBuffer = new ArrayBuffer(header.byteLength);
+        new Uint8Array(headerBuffer).set(header);
+        await writable.write(headerBuffer);
+        const chunkFrames = Math.max(4096, Math.floor(metadata.sampleRate * 2));
+        const processor = createStreamingEditChain(modules, metadata.sampleRate, metadata.frameCount, 0);
+        setOperationStatus('Exporting file-backed WAV');
+        for (let start = 0; start < metadata.frameCount; start += chunkFrames) {
+          if (controller.signal.aborted) throw new DOMException('The operation was aborted.', 'AbortError');
+          const count = Math.min(chunkFrames, metadata.frameCount - start);
+          let channels = await readFrames(file, metadata, start, count, { signal: controller.signal });
+          channels = processor.process(channels, start);
+          const output = new ArrayBuffer(count * metadata.channels * 4);
+          const view = new DataView(output);
+          let offset = 0;
+          for (let frame = 0; frame < count; frame += 1) for (let channel = 0; channel < metadata.channels; channel += 1) {
+            view.setFloat32(offset, Number.isFinite(channels[channel]?.[frame]) ? channels[channel][frame] : 0, true);
+            offset += 4;
+          }
+          await writable.write(output);
+          setOperationProgress((start + count) / metadata.frameCount);
+        }
+        await writable.close();
+      } catch (caught) {
+        if ((caught as Error).name !== 'AbortError') setError(caught instanceof Error ? caught.message : 'Unable to export this recording.');
+        setOperationStatus('');
+        return;
+      }
+    } else {
+      downloadBlob(encodeWav(currentSource), `${safeName || 'field-restore'}-rx.wav`);
+    }
+    const report = { tool: 'Field Restore', version: 'local preview', source: source.name, sampleRate: source.sampleRate, channels: sourceChannelCount, duration: duration, format: '32-bit IEEE float WAV', container: largeSource && largeSource.metadata.frameCount * sourceChannelCount * 4 + 36 > 0xffffffff ? 'RF64' : 'RIFF', modules, selection: [selectionStart, selectionEnd], exportedAt: new Date().toISOString(), limitations: ['Edits are conservative sample-domain approximations in this browser build.', 'Original source remains immutable; export reflects enabled modules only.'] };
     downloadBlob(new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' }), `${safeName || 'field-restore'}-restoration-report.json`);
-    setModal(null); setSavedStatus('WAV + report exported');
+    setOperationStatus(''); setModal(null); setSavedStatus('WAV + report exported');
   };
 
   const canvasPointToTime = (event: ReactPointerEvent<HTMLCanvasElement>) => {
@@ -529,8 +912,8 @@ function App() {
     }
     context.textAlign = 'left';
     context.fillStyle = '#d8ed55';
-    context.fillText(source.channels.length > 1 ? 'L' : 'MONO', graphLeft + 6, 14);
-    context.fillText(source.channels.length > 1 ? 'R' : 'MONO', graphLeft + 6, paneHeight + 14);
+    context.fillText(sourceChannelCount > 1 ? 'L' : 'MONO', graphLeft + 6, 14);
+    context.fillText(sourceChannelCount > 1 ? 'R' : 'MONO', graphLeft + 6, paneHeight + 14);
     context.save();
     context.translate(11, graphBottom / 2);
     context.rotate(-Math.PI / 2);
@@ -545,7 +928,7 @@ function App() {
     context.textAlign = 'center';
     context.fillText('LEVEL (dB)', 0, 0);
     context.restore();
-  }, [activeTab, markers, playHead, selectionEnd, selectionStart, source.channels.length, spectrogramCeilingDb, spectrogramFloorDb, spectrogramMaxFrequency, spectrogramMinFrequency, spectrograms, viewDuration, viewStart]);
+  }, [activeTab, markers, playHead, selectionEnd, selectionStart, sourceChannelCount, spectrogramCeilingDb, spectrogramFloorDb, spectrogramMaxFrequency, spectrogramMinFrequency, spectrograms, viewDuration, viewStart]);
 
   useEffect(() => {
     const keyHandler = (event: KeyboardEvent) => {
@@ -591,15 +974,15 @@ function App() {
         </nav>
         <div className="px-3 mt-8 sidebar-title eyebrow text-[#91a69d]">Session</div>
         <div className="px-3 mt-2 space-y-1">
-          <button type="button" className="nav-item" onClick={() => fileRef.current?.click()} data-testid="nav-import"><FileAudio size={15} /><span className="nav-label">Import WAV</span></button>
-          <button type="button" className="nav-item" onClick={() => { stopPlayback(); setSource(createDemoAudio()); setModules(makeDefaultChain()); setSelection([4.1, 7.8]); setMarkers([{ id: 'm-1', time: 7.8, label: 'transient', color: colorForMarker }]); setRegions([]); setTitle('Coastal dawn / north bluff'); setSavedStatus('Demo source loaded'); }} data-testid="nav-demo"><Waves size={15} /><span className="nav-label">Load demo source</span></button>
+          <button type="button" className="nav-item" onClick={() => void pickWavFile()} data-testid="nav-import"><FileAudio size={15} /><span className="nav-label">Import WAV</span></button>
+          <button type="button" className="nav-item" onClick={() => { stopPlayback(); setLargeSource(null); setSource(createDemoAudio()); setModules(makeDefaultChain()); setSelection([4.1, 7.8]); setMarkers([{ id: 'm-1', time: 7.8, label: 'transient', color: colorForMarker }]); setRegions([]); setTitle('Coastal dawn / north bluff'); setSavedStatus('Demo source loaded'); }} data-testid="nav-demo"><Waves size={15} /><span className="nav-label">Load demo source</span></button>
           <button type="button" className="nav-item" onClick={save} data-testid="nav-save"><Save size={15} /><span className="nav-label">Save locally</span></button>
           <button type="button" className="nav-item" onClick={() => setModal('export')} data-testid="nav-export"><Download size={15} /><span className="nav-label">Export</span></button>
         </div>
         <div className="mt-auto px-4 pb-5 sidebar-meta">
           <div className="border-t border-[#34454b] pt-4">
             <div className="flex items-center gap-2 text-[11px] text-[#b7c8bb]"><span className="w-2 h-2 rounded-full bg-[#d8ed55]" /> Offline / local only</div>
-            <div className="font-mono-value text-[10px] text-[#829890] mt-2">{source.sampleRate / 1000} kHz · {source.channels.length} ch</div>
+            <div className="font-mono-value text-[10px] text-[#829890] mt-2">{source.sampleRate / 1000} kHz · {sourceChannelCount} ch</div>
           </div>
         </div>
       </aside>
@@ -621,6 +1004,7 @@ function App() {
         </header>
         <main className="main-content scrollbar-thin">
           {error && <div className="max-w-[1660px] mx-auto mb-3 border border-[#d79c88] bg-[#fff0e9] text-[#8e3a2b] rounded-md px-3 py-2 text-[12px] flex items-center justify-between" role="alert" data-testid="status-error"><span>{error}</span><button type="button" className="icon-btn" onClick={() => setError('')} aria-label="Dismiss error"><X size={14} /></button></div>}
+          {operationStatus && <div className="max-w-[1660px] mx-auto mb-3 border rounded-md px-3 py-2 text-[11px] flex items-center gap-3 bg-[hsl(var(--card))]" role="status"><span>{operationStatus}</span><div className="h-1.5 flex-1 max-w-56 bg-[hsl(var(--muted))] rounded overflow-hidden"><div className="h-full bg-[hsl(var(--primary))]" style={{ width: `${Math.max(4, operationProgress * 100)}%` }} /></div><span className="font-mono-value">{Math.round(operationProgress * 100)}%</span></div>}
           <div className="workspace-grid">
             <div className="min-w-0 space-y-4">
               <div className="flex items-center justify-between">
@@ -630,7 +1014,7 @@ function App() {
                 </div>
               </div>
               {activeTab === 'project' ? (
-                <ProjectPanel title={title} notes={notes} setTitle={setTitle} setNotes={setNotes} source={source} save={save} setModal={setModal} />
+                <ProjectPanel title={title} notes={notes} setTitle={setTitle} setNotes={setNotes} source={source} sourceChannelCount={sourceChannelCount} save={() => void save()} setModal={setModal} />
               ) : activeTab === 'analyze' ? (
                 <AnalyzePanel originalStats={originalStats} currentStats={currentStats} selectionOriginalStats={selectionOriginalStats} selectionCurrentStats={selectionCurrentStats} duration={duration} selection={[selectionStart, selectionEnd]} modules={modules} />
               ) : (
@@ -810,8 +1194,8 @@ function SignalComparison({ title, original, current }: { title: string; origina
   );
 }
 
-function ProjectPanel({ title, notes, setTitle, setNotes, source, save, setModal }: { title: string; notes: string; setTitle: (value: string) => void; setNotes: (value: string) => void; source: AudioSource; save: () => void; setModal: (value: 'export' | 'help' | 'settings' | null) => void }) {
-  return <div className="space-y-4"><section className="panel"><div className="panel-header"><div><div className="section-title">Project metadata</div><div className="text-[10px] text-muted-foreground mt-1">Stored only in this browser on this device</div></div><button type="button" className="primary-btn" onClick={save} data-testid="button-project-save"><Save size={14} /> Save locally</button></div><div className="panel-body space-y-5 max-w-[740px]"><label><span className="field-label">Project title</span><input className="input-field text-[16px]" value={title} onChange={(event) => setTitle(event.target.value)} data-testid="input-project-title" /></label><label><span className="field-label">Field notes</span><textarea className="textarea-field min-h-[170px]" value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Describe place, mic, weather, handling, and decisions…" data-testid="textarea-project-notes" /></label><div className="grid sm:grid-cols-3 gap-3"><div className="p-3 bg-[hsl(var(--muted))] rounded"><div className="eyebrow">Source</div><div className="font-mono-value text-[11px] mt-2 truncate">{source.name}</div></div><div className="p-3 bg-[hsl(var(--muted))] rounded"><div className="eyebrow">Format</div><div className="font-mono-value text-[11px] mt-2">{source.sampleRate / 1000} kHz / {source.channels.length} ch</div></div><div className="p-3 bg-[hsl(var(--muted))] rounded"><div className="eyebrow">Duration</div><div className="font-mono-value text-[11px] mt-2">{formatTime(source.duration)}</div></div></div></div></section><section className="panel"><div className="panel-header"><div className="section-title">Local-first guarantees</div></div><div className="panel-body grid sm:grid-cols-2 gap-3 text-[12px]"><div className="border rounded p-3"><Check size={15} color="hsl(var(--primary))" /><div className="font-semibold mt-2">Original is immutable</div><div className="text-muted-foreground mt-1 leading-relaxed">All processing renders from a preserved source array. No destructive overwrite occurs.</div></div><div className="border rounded p-3"><Check size={15} color="hsl(var(--primary))" /><div className="font-semibold mt-2">No network required</div><div className="text-muted-foreground mt-1 leading-relaxed">WAV parsing, DSP estimates, playback, persistence, and export happen in this tab.</div></div><button type="button" className="quiet-btn justify-self-start" onClick={() => setModal('settings')} data-testid="button-project-settings"><Settings size={14} /> Storage settings</button></div></section></div>;
+function ProjectPanel({ title, notes, setTitle, setNotes, source, sourceChannelCount, save, setModal }: { title: string; notes: string; setTitle: (value: string) => void; setNotes: (value: string) => void; source: AudioSource; sourceChannelCount: number; save: () => void; setModal: (value: 'export' | 'help' | 'settings' | null) => void }) {
+  return <div className="space-y-4"><section className="panel"><div className="panel-header"><div><div className="section-title">Project metadata</div><div className="text-[10px] text-muted-foreground mt-1">Stored only in this browser on this device</div></div><button type="button" className="primary-btn" onClick={save} data-testid="button-project-save"><Save size={14} /> Save locally</button></div><div className="panel-body space-y-5 max-w-[740px]"><label><span className="field-label">Project title</span><input className="input-field text-[16px]" value={title} onChange={(event) => setTitle(event.target.value)} data-testid="input-project-title" /></label><label><span className="field-label">Field notes</span><textarea className="textarea-field min-h-[170px]" value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Describe place, mic, weather, handling, and decisions…" data-testid="textarea-project-notes" /></label><div className="grid sm:grid-cols-3 gap-3"><div className="p-3 bg-[hsl(var(--muted))] rounded"><div className="eyebrow">Source</div><div className="font-mono-value text-[11px] mt-2 truncate">{source.name}</div></div><div className="p-3 bg-[hsl(var(--muted))] rounded"><div className="eyebrow">Format</div><div className="font-mono-value text-[11px] mt-2">{source.sampleRate / 1000} kHz / {sourceChannelCount} ch</div></div><div className="p-3 bg-[hsl(var(--muted))] rounded"><div className="eyebrow">Duration</div><div className="font-mono-value text-[11px] mt-2">{formatTime(source.duration)}</div></div></div></div></section><section className="panel"><div className="panel-header"><div className="section-title">Local-first guarantees</div></div><div className="panel-body grid sm:grid-cols-2 gap-3 text-[12px]"><div className="border rounded p-3"><Check size={15} color="hsl(var(--primary))" /><div className="font-semibold mt-2">Original is immutable</div><div className="text-muted-foreground mt-1 leading-relaxed">All processing reads from the original local file. No destructive overwrite occurs.</div></div><div className="border rounded p-3"><Check size={15} color="hsl(var(--primary))" /><div className="font-semibold mt-2">No network required</div><div className="text-muted-foreground mt-1 leading-relaxed">WAV parsing, DSP estimates, playback, persistence, and export happen in this tab.</div></div><button type="button" className="quiet-btn justify-self-start" onClick={() => setModal('settings')} data-testid="button-project-settings"><Settings size={14} /> Storage settings</button></div></section></div>;
 }
 
 function ExportModal({ onClose, onExport, title }: { onClose: () => void; onExport: () => void; title: string }) {
