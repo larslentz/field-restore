@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, ty
 import { Activity, ArrowDown, ArrowUp, Check, ChevronDown, CircleHelp, Download, FileAudio, FolderOpen, Gauge, Info, Keyboard, Layers3, Menu, Pause, Play, Plus, Redo2, RotateCcw, Save, Settings, Square, Trash2, Undo2, Waves, X, ZoomIn, ZoomOut } from 'lucide-react';
 import { createDemoAudio, downloadBlob, encodeWav, parseWav, type AudioSource } from '@/lib/audio';
 import { decodeChannels, loadProject, projectFromSource, saveProject } from '@/lib/persistence';
-import { AUTOMATIC_DC_REMOVAL, makeDefaultChain, makeModule, MODULE_LABELS, renderChain, withoutLegacyDcModules, type EditModule, type ModuleType } from '@/lib/edit-chain';
+import { makeDefaultChain, makeModule, makeProcessingChain, makeRestorationReport, MODULE_LABELS, renderChain, withoutLegacyDcModules, type EditModule, type ModuleType } from '@/lib/edit-chain';
 import { analyzeLoudness, type LoudnessStats } from '@/lib/loudness';
 import { createPlaybackRangePlan } from '@/lib/playback-range';
 import { calculateSpectrogram, type SpectrogramData } from '@/lib/spectrogram';
@@ -191,7 +191,7 @@ function App() {
   const scheduledNodesRef = useRef<AudioBufferSourceNode[]>([]);
   const playbackSessionRef = useRef(0);
 
-  const processingModules = useMemo(() => [AUTOMATIC_DC_REMOVAL, ...withoutLegacyDcModules(modules)], [modules]);
+  const processingModules = useMemo(() => makeProcessingChain(modules), [modules]);
   const currentChannels = useMemo(() => largeSource ? [] : renderChain(source.channels, processingModules, source.sampleRate), [largeSource, source.channels, source.sampleRate, processingModules]);
   const currentSource = useMemo<AudioSource>(() => ({ ...source, channels: currentChannels }), [source, currentChannels]);
   const duration = source.duration;
@@ -901,7 +901,15 @@ function App() {
     } else {
       downloadBlob(encodeWav(currentSource), `${safeName || 'field-restore'}-rx.wav`);
     }
-    const report = { tool: 'Field Restore', version: 'local preview', source: source.name, sampleRate: source.sampleRate, channels: sourceChannelCount, duration: duration, format: '32-bit IEEE float WAV', container: largeSource && largeSource.metadata.frameCount * sourceChannelCount * 4 + 36 > 0xffffffff ? 'RF64' : 'RIFF', automaticDcOffsetRemoval: true, modules, selection: [selectionStart, selectionEnd], exportedAt: new Date().toISOString(), limitations: ['Automatic DC offset removal is always applied before editable modules.', 'Edits are conservative sample-domain approximations in this browser build.', 'Original source remains immutable; export reflects automatic DC correction and enabled modules.'] };
+    const report = makeRestorationReport({
+      source: source.name,
+      sampleRate: source.sampleRate,
+      channels: sourceChannelCount,
+      duration,
+      container: largeSource && largeSource.metadata.frameCount * sourceChannelCount * 4 + 36 > 0xffffffff ? 'RF64' : 'RIFF',
+      modules,
+      selection: [selectionStart, selectionEnd],
+    });
     downloadBlob(new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' }), `${safeName || 'field-restore'}-restoration-report.json`);
     setOperationStatus(''); setModal(null); setSavedStatus('WAV + report exported');
   };

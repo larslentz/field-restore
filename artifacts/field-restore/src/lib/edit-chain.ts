@@ -52,6 +52,44 @@ export const AUTOMATIC_DC_REMOVAL: EditModule = {
 export const withoutLegacyDcModules = (modules: EditModule[]): EditModule[] =>
   modules.filter((module) => module.type !== 'dc');
 
+export const makeProcessingChain = (modules: EditModule[]): EditModule[] => [
+  AUTOMATIC_DC_REMOVAL,
+  ...withoutLegacyDcModules(modules),
+];
+
+export interface RestorationReportInput {
+  source: string;
+  sampleRate: number;
+  channels: number;
+  duration: number;
+  container: 'RIFF' | 'RF64';
+  modules: EditModule[];
+  selection: [number, number];
+  exportedAt?: string;
+}
+
+export function makeRestorationReport(input: RestorationReportInput) {
+  return {
+    tool: 'Field Restore',
+    version: 'local preview',
+    source: input.source,
+    sampleRate: input.sampleRate,
+    channels: input.channels,
+    duration: input.duration,
+    format: '32-bit IEEE float WAV',
+    container: input.container,
+    automaticDcOffsetRemoval: true,
+    modules: withoutLegacyDcModules(input.modules),
+    selection: input.selection,
+    exportedAt: input.exportedAt ?? new Date().toISOString(),
+    limitations: [
+      'Automatic DC offset removal is always applied before editable modules.',
+      'Edits are conservative sample-domain approximations in this browser build.',
+      'Original source remains immutable; export reflects automatic DC correction and enabled modules.',
+    ],
+  };
+}
+
 const dbToAmp = (db: number) => 10 ** (db / 20);
 
 interface Biquad {

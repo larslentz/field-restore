@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { makeProcessingChain } from './edit-chain.ts';
 import { createStreamingEditChain } from './streaming-edit-chain.ts';
 
 const sampleRate = 48000;
@@ -45,4 +46,19 @@ test('restoring warmed state makes repeated selection loops deterministic', () =
   processor.restore(warmed);
   const second = processor.process(selection, selectionStart);
   first.forEach((channel, index) => assert.deepEqual(channel, second[index]));
+});
+
+test('file-backed processing includes one automatic DC stage after legacy normalization', () => {
+  const legacyModules = [
+    { id: 'legacy-dc', type: 'dc', name: 'Legacy DC', enabled: true, params: { mode: 'Auto', amount: 0 } },
+    { id: 'gain', type: 'gain', name: 'Gain', enabled: true, params: { db: 0 } },
+  ];
+  const processingModules = makeProcessingChain(legacyModules);
+  assert.equal(processingModules.filter((module) => module.type === 'dc').length, 1);
+  assert.equal(processingModules[0].id, 'automatic-dc-removal');
+
+  const constant = [Float32Array.from({ length: 4096 }, () => 0.2)];
+  const output = createStreamingEditChain(processingModules, sampleRate, 4096).process(constant, 0);
+  const tailMean = output[0].slice(-512).reduce((sum, value) => sum + value, 0) / 512;
+  assert.ok(Math.abs(tailMean) < 0.001, `expected DC-corrected tail, received ${tailMean}`);
 });
