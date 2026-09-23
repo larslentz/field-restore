@@ -31,6 +31,8 @@ const SPECTROGRAM_MIN_CEILING_DB = -60;
 const SPECTROGRAM_MAX_CEILING_DB = 24;
 const SPECTROGRAM_DATA_FLOOR_DB = -180;
 const SPECTROGRAM_DATA_CEILING_DB = 0;
+const SPECTROGRAM_DATA_HEIGHT = 256;
+const SPECTROGRAM_DISPLAY_HEIGHT = 110;
 const EMPTY_STATS: LoudnessStats = { truePeakDbtp: -Infinity, integratedLufs: -Infinity, loudnessRangeLu: 0, maxShortTermLufs: -Infinity };
 const EMPTY_SPECTROGRAM = { width: 480, height: 110, values: new Float32Array(480 * 110) };
 const SPECTROGRAM_PALETTES: Record<SpectrogramPaletteId, { label: string; description: string; stops: Array<[number, string]> }> = {
@@ -177,10 +179,10 @@ function App() {
   const spectrogramFloorDb = spectrogramCeilingDb - 85;
   const memorySpectrograms = useMemo(
     () => ({
-      left: largeSource || !currentChannels[0] ? EMPTY_SPECTROGRAM : calculateSpectrogram([currentChannels[0]], source.sampleRate, viewStart, viewDuration, 480, 110, spectrogramMinFrequency, spectrogramMaxFrequency, SPECTROGRAM_DATA_FLOOR_DB, SPECTROGRAM_DATA_CEILING_DB),
-      right: largeSource || !currentChannels[0] ? EMPTY_SPECTROGRAM : calculateSpectrogram([currentChannels[1] ?? currentChannels[0]], source.sampleRate, viewStart, viewDuration, 480, 110, spectrogramMinFrequency, spectrogramMaxFrequency, SPECTROGRAM_DATA_FLOOR_DB, SPECTROGRAM_DATA_CEILING_DB),
+      left: largeSource || !currentChannels[0] ? EMPTY_SPECTROGRAM : calculateSpectrogram([currentChannels[0]], source.sampleRate, viewStart, viewDuration, 480, SPECTROGRAM_DATA_HEIGHT, 0, source.sampleRate / 2, SPECTROGRAM_DATA_FLOOR_DB, SPECTROGRAM_DATA_CEILING_DB),
+      right: largeSource || !currentChannels[0] ? EMPTY_SPECTROGRAM : calculateSpectrogram([currentChannels[1] ?? currentChannels[0]], source.sampleRate, viewStart, viewDuration, 480, SPECTROGRAM_DATA_HEIGHT, 0, source.sampleRate / 2, SPECTROGRAM_DATA_FLOOR_DB, SPECTROGRAM_DATA_CEILING_DB),
     }),
-    [currentChannels, largeSource, source.sampleRate, spectrogramMaxFrequency, spectrogramMinFrequency, viewDuration, viewStart],
+    [currentChannels, largeSource, source.sampleRate, viewDuration, viewStart],
   );
   const spectrograms = largeSource ? largeSpectrograms : memorySpectrograms;
   const memoryOriginalStats = useMemo(() => largeSource ? EMPTY_STATS : analyzeLoudness(source.channels, source.sampleRate), [largeSource, source.channels, source.sampleRate]);
@@ -279,9 +281,9 @@ function App() {
       startSeconds: viewStart,
       durationSeconds: viewDuration,
       width: 256,
-      height: 110,
-      minimumFrequency: spectrogramMinFrequency,
-      maximumFrequency: Math.min(spectrogramMaxFrequency, metadata.sampleRate / 2),
+      height: SPECTROGRAM_DATA_HEIGHT,
+      minimumFrequency: 0,
+      maximumFrequency: metadata.sampleRate / 2,
       floorDb: SPECTROGRAM_DATA_FLOOR_DB,
       ceilingDb: SPECTROGRAM_DATA_CEILING_DB,
       // Stateful filters settle within this bounded prefix; keeping it fixed
@@ -316,7 +318,7 @@ function App() {
       leftJob.cancel();
       rightJob.cancel();
     };
-  }, [largeSource, modules, spectrogramMaxFrequency, spectrogramMinFrequency, viewDuration, viewStart]);
+  }, [largeSource, modules, viewDuration, viewStart]);
 
   useEffect(() => {
     if (!largeSource) return;
@@ -999,20 +1001,30 @@ function App() {
     const drawSpectrogramPane = (spectrogram: typeof spectrograms.left, top: number) => {
       const imageCanvas = document.createElement('canvas');
       imageCanvas.width = spectrogram.width;
-      imageCanvas.height = spectrogram.height;
+      imageCanvas.height = SPECTROGRAM_DISPLAY_HEIGHT;
       const imageContext = imageCanvas.getContext('2d');
       if (imageContext) {
-        const image = imageContext.createImageData(spectrogram.width, spectrogram.height);
-        for (let index = 0; index < spectrogram.values.length; index += 1) {
-          const storedIntensity = spectrogram.values[index];
-          const decibels = SPECTROGRAM_DATA_FLOOR_DB + storedIntensity * (SPECTROGRAM_DATA_CEILING_DB - SPECTROGRAM_DATA_FLOOR_DB);
-          const intensity = Math.max(0, Math.min(1, (decibels - spectrogramFloorDb) / (spectrogramCeilingDb - spectrogramFloorDb)));
-          const [red, green, blue] = spectrogramColor(intensity, spectrogramPalette);
-          const pixel = index * 4;
-          image.data[pixel] = red;
-          image.data[pixel + 1] = green;
-          image.data[pixel + 2] = blue;
-          image.data[pixel + 3] = 255;
+        const image = imageContext.createImageData(spectrogram.width, SPECTROGRAM_DISPLAY_HEIGHT);
+        const nyquist = source.sampleRate / 2;
+        for (let row = 0; row < SPECTROGRAM_DISPLAY_HEIGHT; row += 1) {
+          const frequency = spectrogramMaxFrequency - (row / Math.max(1, SPECTROGRAM_DISPLAY_HEIGHT - 1)) * (spectrogramMaxFrequency - spectrogramMinFrequency);
+          const sourceRowPosition = Math.max(0, Math.min(spectrogram.height - 1, (1 - frequency / nyquist) * (spectrogram.height - 1)));
+          const lowerRow = Math.floor(sourceRowPosition);
+          const upperRow = Math.min(spectrogram.height - 1, lowerRow + 1);
+          const rowBlend = sourceRowPosition - lowerRow;
+          for (let column = 0; column < spectrogram.width; column += 1) {
+            const lower = spectrogram.values[lowerRow * spectrogram.width + column] ?? 0;
+            const upper = spectrogram.values[upperRow * spectrogram.width + column] ?? lower;
+            const storedIntensity = lower + (upper - lower) * rowBlend;
+            const decibels = SPECTROGRAM_DATA_FLOOR_DB + storedIntensity * (SPECTROGRAM_DATA_CEILING_DB - SPECTROGRAM_DATA_FLOOR_DB);
+            const intensity = Math.max(0, Math.min(1, (decibels - spectrogramFloorDb) / (spectrogramCeilingDb - spectrogramFloorDb)));
+            const [red, green, blue] = spectrogramColor(intensity, spectrogramPalette);
+            const pixel = (row * spectrogram.width + column) * 4;
+            image.data[pixel] = red;
+            image.data[pixel + 1] = green;
+            image.data[pixel + 2] = blue;
+            image.data[pixel + 3] = 255;
+          }
         }
         imageContext.putImageData(image, 0, 0);
         context.imageSmoothingEnabled = true;
