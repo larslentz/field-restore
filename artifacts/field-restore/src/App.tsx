@@ -1296,6 +1296,12 @@ function App() {
             <span className="chip hidden sm:inline-flex"><span className="w-1.5 h-1.5 bg-[#d8ed55] rounded-full" />{savedStatus}</span>
              <span className="dc-status hidden lg:inline-flex" data-testid="status-dc-removal"><Check size={12} />DC offset removed automatically</span>
           </div>
+          {(analysisStatus || spectrogramStatus || operationStatus) && (() => {
+            const backgroundStatus = analysisStatus || spectrogramStatus;
+            const visibleStatus = backgroundStatus || operationStatus;
+            const visibleProgress = analysisStatus ? analysisProgress : spectrogramStatus ? spectrogramProgress : operationProgress;
+            return <div className="topbar-work-status" role="status" data-testid="status-background-work" data-progress={visibleProgress}><span className="truncate">{operationPaused && backgroundStatus ? `${visibleStatus} · paused` : visibleStatus}</span><div className="h-1.5 flex-1 bg-[hsl(var(--muted))] rounded overflow-hidden"><div className="h-full bg-[hsl(var(--primary))]" style={{ width: `${Math.max(4, visibleProgress * 100)}%` }} /></div><span className="font-mono-value">{Math.round(visibleProgress * 100)}%</span>{backgroundStatus && <><button type="button" className="quiet-btn !py-1" onClick={operationPaused ? resumeBackgroundWork : pauseBackgroundWork} data-testid="button-analysis-pause">{operationPaused ? <Play size={12} /> : <Pause size={12} />}{operationPaused ? 'Resume' : 'Pause'}</button><button type="button" className="icon-btn !h-7 !min-w-7" onClick={cancelBackgroundWork} aria-label="Cancel background analysis" data-testid="button-analysis-cancel"><X size={13} /></button></>}</div>;
+          })()}
           <div className="flex items-center gap-1.5">
             <button type="button" className="icon-btn" onClick={undo} disabled={!undoStack.length} aria-label="Undo last edit" data-testid="button-undo"><Undo2 size={16} /></button>
             <button type="button" className="icon-btn" onClick={redo} disabled={!redoStack.length} aria-label="Redo last edit" data-testid="button-redo"><Redo2 size={16} /></button>
@@ -1320,16 +1326,6 @@ function App() {
            )}
           <div className="workspace-grid">
             <div className="min-w-0 space-y-4">
-              <div className="workspace-toolbar">
-                <div className="work-status-slot">
-                  {(analysisStatus || spectrogramStatus || operationStatus) && (() => {
-                    const backgroundStatus = analysisStatus || spectrogramStatus;
-                    const visibleStatus = backgroundStatus || operationStatus;
-                    const visibleProgress = analysisStatus ? analysisProgress : spectrogramStatus ? spectrogramProgress : operationProgress;
-                    return <div className="work-status-card border rounded-md px-3 text-[11px] flex items-center gap-3 bg-[hsl(var(--card))]" role="status" data-testid="status-background-work" data-progress={visibleProgress}><span>{operationPaused && backgroundStatus ? `${visibleStatus} · paused` : visibleStatus}</span><div className="h-1.5 flex-1 max-w-56 bg-[hsl(var(--muted))] rounded overflow-hidden"><div className="h-full bg-[hsl(var(--primary))]" style={{ width: `${Math.max(4, visibleProgress * 100)}%` }} /></div><span className="font-mono-value">{Math.round(visibleProgress * 100)}%</span>{backgroundStatus && <><button type="button" className="quiet-btn !py-1" onClick={operationPaused ? resumeBackgroundWork : pauseBackgroundWork} data-testid="button-analysis-pause">{operationPaused ? <Play size={12} /> : <Pause size={12} />}{operationPaused ? 'Resume' : 'Pause'}</button><button type="button" className="icon-btn !h-7 !min-w-7" onClick={cancelBackgroundWork} aria-label="Cancel background analysis" data-testid="button-analysis-cancel"><X size={13} /></button></>}</div>;
-                  })()}
-                </div>
-              </div>
               {activeTab === 'project' ? (
                 <ProjectPanel title={title} notes={notes} setTitle={setTitle} setNotes={setNotes} source={source} sourceChannelCount={sourceChannelCount} save={() => void save()} setModal={setModal} />
               ) : activeTab === 'analyze' ? (

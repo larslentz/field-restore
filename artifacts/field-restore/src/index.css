@@ -173,9 +173,7 @@
 .main-shell { min-width: 0; flex: 1; display: flex; flex-direction: column; }
 .topbar { height: 58px; flex: 0 0 58px; border-bottom: 1px solid hsl(var(--border)); display: flex; align-items: center; justify-content: space-between; padding: 0 24px; background: hsl(var(--card)); }
 .main-content { min-height: 0; flex: 1; overflow: auto; padding: 18px 24px 26px; }
-.workspace-toolbar { min-height: 46px; }
-.work-status-slot { min-width: 0; flex: 1; height: 46px; }
-.work-status-card { width: 100%; height: 46px; }
+.topbar-work-status { min-width: 240px; max-width: 520px; height: 38px; margin: 0 16px; padding: 0 10px; border: 1px solid hsl(var(--border)); border-radius: 6px; background: hsl(var(--background)); display: flex; align-items: center; gap: 9px; font-size: 10px; }
 .workspace-grid { max-width: 1660px; margin: 0 auto; }
 .panel { background: hsl(var(--card)); border: 1px solid hsl(var(--card-border)); border-radius: 8px; box-shadow: var(--shadow-subtle); }
 .panel-header { padding: 14px 16px; border-bottom: 1px solid hsl(var(--border)); display: flex; align-items: center; justify-content: space-between; gap: 12px; }
@@ -260,6 +258,7 @@
 .empty-state { padding: 34px 20px; text-align: center; color: hsl(var(--muted-foreground)); }
 @media (max-width: 1100px) {
   .main-content { padding-left: 15px; padding-right: 15px; }
+  .topbar-work-status { position: absolute; left: 50%; transform: translateX(-50%); width: min(420px, 46vw); }
   .spectrogram-panel-header { align-items: flex-start; }
   .spectrogram-header-actions { flex-direction: column; align-items: flex-end; gap: 6px; }
   .signal-stats-bar { grid-template-columns: 1fr; }
@@ -270,6 +269,7 @@
   .sidebar-shell .brand-copy, .sidebar-shell .nav-label, .sidebar-shell .sidebar-meta, .sidebar-shell .sidebar-title { display: none; }
   .nav-item { justify-content: center; padding: 10px 0; }
   .topbar { padding: 0 14px; }
+  .topbar-work-status { position: fixed; top: 66px; left: 70px; right: 10px; z-index: 30; width: auto; max-width: none; margin: 0; transform: none; box-shadow: var(--shadow-subtle); }
   .spectrogram-panel-header { flex-direction: column; }
   .spectrogram-header-actions { width: 100%; flex-direction: row; align-items: center; justify-content: space-between; }
   .waveform-canvas { height: 330px; }
@@ -280,6 +280,7 @@
 @media (max-width: 560px) {
   .main-content { padding: 10px; }
   .topbar { height: 52px; flex-basis: 52px; }
+  .topbar-work-status { top: 60px; }
   .waveform-canvas { height: 280px; }
   .spectrogram-header-actions { align-items: flex-start; flex-direction: column; }
   .transport { flex-wrap: wrap; }
