@@ -215,7 +215,7 @@
 .spectrogram-header-actions { display: flex; align-items: center; gap: 12px; flex: 0 0 auto; }
 .spectrogram-tabs .tab { padding: 7px 10px; font-size: 11px; }
 .waveform-wrap { position: relative; overflow: hidden; border: 1px solid hsl(var(--border)); border-radius: 6px; background: #17242c; }
-.waveform-canvas { display: block; width: 100%; height: 390px; cursor: crosshair; }
+.waveform-canvas { display: block; width: 100%; height: 480px; cursor: crosshair; }
 .timeline-canvas { display: block; width: 100%; height: 26px; background: hsl(var(--card)); }
 .transport { display: flex; align-items: center; gap: 8px; padding: 10px 12px; background: hsl(var(--secondary)); color: hsl(var(--secondary-foreground)); border-radius: 6px; }
 .transport .icon-btn { color: hsl(var(--secondary-foreground)); }
@@ -272,7 +272,7 @@
   .topbar-work-status { position: fixed; top: 66px; left: 70px; right: 10px; z-index: 30; width: auto; max-width: none; margin: 0; transform: none; box-shadow: var(--shadow-subtle); }
   .spectrogram-panel-header { flex-direction: column; }
   .spectrogram-header-actions { width: 100%; flex-direction: row; align-items: center; justify-content: space-between; }
-  .waveform-canvas { height: 330px; }
+  .waveform-canvas { height: 400px; }
   .signal-stats-groups { grid-template-columns: 1fr; }
   .signal-stats-group { border-right: 0; border-bottom: 1px solid hsl(var(--border)); }
   .signal-stats-group:last-child { border-bottom: 0; }
@@ -281,7 +281,7 @@
   .main-content { padding: 10px; }
   .topbar { height: 52px; flex-basis: 52px; }
   .topbar-work-status { top: 60px; }
-  .waveform-canvas { height: 280px; }
+  .waveform-canvas { height: 330px; }
   .spectrogram-header-actions { align-items: flex-start; flex-direction: column; }
   .transport { flex-wrap: wrap; }
   .transport .time-readout { order: -1; width: 100%; }
