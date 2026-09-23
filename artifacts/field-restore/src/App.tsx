@@ -152,7 +152,7 @@ function App() {
   const animationRef = useRef<number | null>(null);
   const playHeadRef = useRef(0);
   const selectionRef = useRef<[number, number]>([4.1, 7.8]);
-  const pointerDragRef = useRef<{ start: number; current: number } | null>(null);
+  const pointerDragRef = useRef<{ start: number; current: number; startClientX: number; moved: boolean } | null>(null);
   const frequencyDragRef = useRef<{ startY: number; startMaximum: number } | null>(null);
   const levelDragRef = useRef<{ startY: number; startCeiling: number } | null>(null);
   const timeDragRef = useRef<{ startX: number; startCenter: number; viewDuration: number; plotWidth: number } | null>(null);
@@ -882,10 +882,8 @@ function App() {
       return;
     }
     const time = canvasPointToTime(event);
-    pointerDragRef.current = { start: time, current: time };
+    pointerDragRef.current = { start: time, current: time, startClientX: event.clientX, moved: false };
     event.currentTarget.setPointerCapture(event.pointerId);
-    selectionRef.current = [time, time];
-    setSelection([time, time]);
     seekTo(time);
   };
   const onCanvasPointerMove = (event: ReactPointerEvent<HTMLCanvasElement>) => {
@@ -909,6 +907,10 @@ function App() {
       return;
     }
     if (!pointerDragRef.current) return;
+    if (!pointerDragRef.current.moved) {
+      if (Math.abs(event.clientX - pointerDragRef.current.startClientX) < 3) return;
+      pointerDragRef.current.moved = true;
+    }
     const time = canvasPointToTime(event);
     pointerDragRef.current.current = time;
     selectionRef.current = [Math.min(pointerDragRef.current.start, time), Math.max(pointerDragRef.current.start, time)];
@@ -928,6 +930,10 @@ function App() {
       return;
     }
     if (!pointerDragRef.current) return;
+    if (!pointerDragRef.current.moved) {
+      pointerDragRef.current = null;
+      return;
+    }
     const time = canvasPointToTime(event);
     const start = pointerDragRef.current.start;
     const selectionStartTime = Math.min(start, time);
