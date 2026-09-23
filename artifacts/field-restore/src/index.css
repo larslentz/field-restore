@@ -183,6 +183,8 @@
 .eyebrow { font-size: 10px; line-height: 1; text-transform: uppercase; letter-spacing: .12em; font-weight: 700; color: hsl(var(--muted-foreground)); }
 .section-title { font-size: 13px; font-weight: 700; letter-spacing: -.01em; }
 .chip { display: inline-flex; align-items: center; gap: 5px; border: 1px solid hsl(var(--border)); border-radius: 999px; padding: 4px 8px; font-size: 11px; color: hsl(var(--muted-foreground)); background: hsl(var(--background)); }
+.dc-status { align-items: center; gap: 5px; color: hsl(var(--muted-foreground)); font-size: 10px; white-space: nowrap; }
+.dc-status svg { color: hsl(var(--primary)); }
 .icon-btn { height: 30px; min-width: 30px; display: inline-grid; place-items: center; border-radius: 5px; border: 1px solid transparent; color: hsl(var(--muted-foreground)); background: transparent; transition: background .16s ease, color .16s ease, transform .16s ease; }
 .icon-btn:hover { background: hsl(var(--muted)); color: hsl(var(--foreground)); }
 .icon-btn:active { transform: translateY(1px); }

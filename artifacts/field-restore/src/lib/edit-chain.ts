@@ -32,7 +32,6 @@ export const makeModule = (type: ModuleType, options?: { name?: string; params?:
 
 export const makeDefaultChain = (): EditModule[] => [
   makeModule('gain', { name: 'Gain', params: { db: 0 } }),
-  makeModule('dc', { name: 'DC Offset Removal', params: { mode: 'Auto', amount: 0 } }),
   makeModule('wind', { name: 'Low Rumble Removal', params: { cutoff: 55.5, q: 0.38 } }),
   makeModule('hum', { name: 'Hum Removal', params: { mode: 'Adaptive', frequency: 60, reduction: 12 } }),
   makeModule('wind', { name: 'Wind / Rumble', params: { cutoff: 100, q: 0.7 } }),
@@ -41,6 +40,17 @@ export const makeDefaultChain = (): EditModule[] => [
   makeModule('fade', { name: 'Fade Out', params: { in: 0, out: 7 } }),
   makeModule('gain', { name: 'Gain', params: { db: 0 } }),
 ];
+
+export const AUTOMATIC_DC_REMOVAL: EditModule = {
+  id: 'automatic-dc-removal',
+  type: 'dc',
+  name: 'Automatic DC Offset Removal',
+  enabled: true,
+  params: { mode: 'Auto', amount: 0 },
+};
+
+export const withoutLegacyDcModules = (modules: EditModule[]): EditModule[] =>
+  modules.filter((module) => module.type !== 'dc');
 
 const dbToAmp = (db: number) => 10 ** (db / 20);
 

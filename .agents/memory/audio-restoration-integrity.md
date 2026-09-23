@@ -14,3 +14,9 @@ For file-backed recordings, carry DSP state across sequential chunks and restore
 **Why:** Resetting filters per chunk creates boundary artifacts and inconsistent analysis/export, while weak relinking can silently apply restoration decisions to a different recording.
 
 **How to apply:** Use bounded chunk readers with stateful processors for playback, analysis, and export; use a bounded content fingerprint plus parsed format metadata for restore and relink checks.
+
+DC offset removal is a mandatory hidden baseline stage, not an editable module. Apply it before user edits in previews, analysis, processed playback, and exports; absorb legacy saved DC modules to prevent duplicate correction.
+
+**Why:** DC correction is required for every recording and must not be bypassed, deleted, or applied twice when older projects are restored.
+
+**How to apply:** Keep the original source immutable for A/B comparison, identify processed output as automatically DC-corrected, and record the baseline stage in restoration reports.

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, ty
 import { Activity, ArrowDown, ArrowUp, Check, ChevronDown, CircleHelp, Download, FileAudio, FolderOpen, Gauge, Info, Keyboard, Layers3, Menu, Pause, Play, Plus, Redo2, RotateCcw, Save, Settings, Square, Trash2, Undo2, Waves, X, ZoomIn, ZoomOut } from 'lucide-react';
 import { createDemoAudio, downloadBlob, encodeWav, parseWav, type AudioSource } from '@/lib/audio';
 import { decodeChannels, loadProject, projectFromSource, saveProject } from '@/lib/persistence';
-import { makeDefaultChain, makeModule, MODULE_LABELS, renderChain, type EditModule, type ModuleType } from '@/lib/edit-chain';
+import { AUTOMATIC_DC_REMOVAL, makeDefaultChain, makeModule, MODULE_LABELS, renderChain, withoutLegacyDcModules, type EditModule, type ModuleType } from '@/lib/edit-chain';
 import { analyzeLoudness, type LoudnessStats } from '@/lib/loudness';
 import { createPlaybackRangePlan } from '@/lib/playback-range';
 import { calculateSpectrogram, type SpectrogramData } from '@/lib/spectrogram';
@@ -29,7 +29,7 @@ type SpectrogramView = {
   durationSeconds: number;
 };
 
-const MODULE_TYPES: ModuleType[] = ['gain', 'fade', 'eq', 'dc', 'hum', 'wind', 'region', 'ambient'];
+const MODULE_TYPES: ModuleType[] = ['gain', 'fade', 'eq', 'hum', 'wind', 'region', 'ambient'];
 const SPECTROGRAM_LEFT = 48;
 const SPECTROGRAM_RIGHT = 72;
 const SPECTROGRAM_BOTTOM = 28;
@@ -191,7 +191,8 @@ function App() {
   const scheduledNodesRef = useRef<AudioBufferSourceNode[]>([]);
   const playbackSessionRef = useRef(0);
 
-  const currentChannels = useMemo(() => largeSource ? [] : renderChain(source.channels, modules, source.sampleRate), [largeSource, source.channels, source.sampleRate, modules]);
+  const processingModules = useMemo(() => [AUTOMATIC_DC_REMOVAL, ...withoutLegacyDcModules(modules)], [modules]);
+  const currentChannels = useMemo(() => largeSource ? [] : renderChain(source.channels, processingModules, source.sampleRate), [largeSource, source.channels, source.sampleRate, processingModules]);
   const currentSource = useMemo<AudioSource>(() => ({ ...source, channels: currentChannels }), [source, currentChannels]);
   const duration = source.duration;
   const sourceChannelCount = largeSource?.metadata.channels ?? Number(pendingRelink?.source.channels ?? source.channels.length);
@@ -251,7 +252,7 @@ function App() {
     const { file, metadata, fingerprint } = verified;
     setLargeSource({ file, metadata, fingerprint, fileHandle: record.fileHandle });
     setSource({ channels: [], sampleRate: metadata.sampleRate, duration: metadata.frameCount / metadata.sampleRate, name: file.name });
-    setModules(record.modules);
+    setModules(withoutLegacyDcModules(record.modules));
     setMarkers(record.markers);
     setRegions(record.regions);
     setTitle(record.title);
@@ -269,12 +270,12 @@ function App() {
     if (saved?.originalBase64?.length && saved.originalLength) {
       const channels = decodeChannels(saved.originalBase64, saved.originalLength);
       const next: AudioSource = { channels, sampleRate: saved.sampleRate, duration: channels[0].length / saved.sampleRate, name: saved.sourceName };
-      setSource(next); setTitle(saved.title); setNotes(saved.notes); setModules(saved.modules); setMarkers(saved.markers); setRegions(saved.regions);
+      setSource(next); setTitle(saved.title); setNotes(saved.notes); setModules(withoutLegacyDcModules(saved.modules)); setMarkers(saved.markers); setRegions(saved.regions);
       setSavedStatus(`Restored ${new Date(saved.savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
     } else if (saved?.original?.length) {
       const channels = saved.original.map((channel) => new Float32Array(channel));
       const next: AudioSource = { channels, sampleRate: saved.sampleRate, duration: channels[0].length / saved.sampleRate, name: saved.sourceName };
-      setSource(next); setTitle(saved.title); setNotes(saved.notes); setModules(saved.modules); setMarkers(saved.markers); setRegions(saved.regions);
+      setSource(next); setTitle(saved.title); setNotes(saved.notes); setModules(withoutLegacyDcModules(saved.modules)); setMarkers(saved.markers); setRegions(saved.regions);
       setSavedStatus(`Restored ${new Date(saved.savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
     }
     void listProjects().then(async (projects) => {
@@ -338,11 +339,11 @@ function App() {
       setSpectrogramProgress(0);
       setOperationPaused(false);
       const leftJob = startWorkerJob<SpectrogramData>(
-        { kind: 'spectrogram', file, metadata, modules, options: { ...options, channelIndex: 0 } },
+        { kind: 'spectrogram', file, metadata, modules: processingModules, options: { ...options, channelIndex: 0 } },
         (fraction) => { if (generation === spectrogramGenerationRef.current) setSpectrogramProgress(fraction / 2); },
       );
       const rightJob = startWorkerJob<SpectrogramData>(
-        { kind: 'spectrogram', file, metadata, modules, options: { ...options, channelIndex: Math.min(1, metadata.channels - 1) } },
+        { kind: 'spectrogram', file, metadata, modules: processingModules, options: { ...options, channelIndex: Math.min(1, metadata.channels - 1) } },
         (fraction) => { if (generation === spectrogramGenerationRef.current) setSpectrogramProgress(0.5 + fraction / 2); },
       );
       jobs = [leftJob, rightJob];
@@ -371,7 +372,7 @@ function App() {
         jobs.forEach((job) => job.cancel());
       }
     };
-  }, [largeSource, modules, viewDuration, viewStart]);
+  }, [largeSource, processingModules, viewDuration, viewStart]);
 
   useEffect(() => {
     if (!largeSource) return;
@@ -409,7 +410,7 @@ function App() {
         kind: 'loudness',
         file,
         metadata: selectionMetadata,
-        modules,
+        modules: processingModules,
         frameOffset: selectionStartFrame,
         sourceFrameCount: metadata.frameCount,
         warmup: selectionWarmStart < selectionStartFrame
@@ -425,7 +426,7 @@ function App() {
       if (generation !== analysisGenerationRef.current) throw new DOMException('Stale analysis.', 'AbortError');
       setLargeOriginalStats(stats);
       setAnalysisStatus('Analyzing processed recording');
-      return run({ kind: 'loudness', file, metadata, modules });
+      return run({ kind: 'loudness', file, metadata, modules: processingModules });
     }).then((stats) => {
       if (generation === analysisGenerationRef.current) {
         setLargeCurrentStats(stats);
@@ -441,7 +442,7 @@ function App() {
       if (generation === analysisGenerationRef.current) analysisGenerationRef.current += 1;
       analysisJobRef.current?.cancel();
     };
-  }, [largeSource, modules, selectionEnd, selectionStart]);
+  }, [largeSource, processingModules, selectionEnd, selectionStart]);
 
   const pauseBackgroundWork = useCallback(() => {
     backgroundPausedRef.current = true;
@@ -562,7 +563,7 @@ function App() {
     const playbackStart = nextFrame / metadata.sampleRate;
     const chunkFrames = Math.max(4096, Math.floor(metadata.sampleRate * 4));
     const warmStart = monitor === 'current' ? Math.max(0, nextFrame - Math.floor(metadata.sampleRate * 2)) : nextFrame;
-    const processor = createStreamingEditChain(modules, metadata.sampleRate, metadata.frameCount, warmStart);
+    const processor = createStreamingEditChain(processingModules, metadata.sampleRate, metadata.frameCount, warmStart);
     if (monitor === 'current' && warmStart < nextFrame) {
       const warmup = await readFrames(file, metadata, warmStart, nextFrame - warmStart);
       processor.process(warmup, warmStart);
@@ -635,7 +636,7 @@ function App() {
       animationRef.current = requestAnimationFrame(tick);
     };
     animationRef.current = requestAnimationFrame(tick);
-  }, [duration, largeSource, loop, modules, monitor, rate, stopPlayback]);
+  }, [duration, largeSource, loop, monitor, processingModules, rate, stopPlayback]);
 
   useEffect(() => {
     playHeadRef.current = playHead;
@@ -729,7 +730,7 @@ function App() {
        const relinkMatches = savedProject
          && isVerifiedRelink(savedProject.source.fingerprint, fingerprint);
       if (relinkMatches) {
-        setModules(savedProject.modules);
+        setModules(withoutLegacyDcModules(savedProject.modules));
         setMarkers(savedProject.markers);
         setRegions(savedProject.regions);
         setTitle(savedProject.title);
@@ -875,7 +876,7 @@ function App() {
         await withLargeExportLeaveWarning(async () => {
           const writable = await handle.createWritable();
           const { file, metadata } = largeSource;
-          const processor = createStreamingEditChain(modules, metadata.sampleRate, metadata.frameCount, 0);
+          const processor = createStreamingEditChain(processingModules, metadata.sampleRate, metadata.frameCount, 0);
           setOperationStatus('Exporting file-backed WAV');
           await writeFloat32WavChunks(writable, {
             channels: metadata.channels,
@@ -900,7 +901,7 @@ function App() {
     } else {
       downloadBlob(encodeWav(currentSource), `${safeName || 'field-restore'}-rx.wav`);
     }
-    const report = { tool: 'Field Restore', version: 'local preview', source: source.name, sampleRate: source.sampleRate, channels: sourceChannelCount, duration: duration, format: '32-bit IEEE float WAV', container: largeSource && largeSource.metadata.frameCount * sourceChannelCount * 4 + 36 > 0xffffffff ? 'RF64' : 'RIFF', modules, selection: [selectionStart, selectionEnd], exportedAt: new Date().toISOString(), limitations: ['Edits are conservative sample-domain approximations in this browser build.', 'Original source remains immutable; export reflects enabled modules only.'] };
+    const report = { tool: 'Field Restore', version: 'local preview', source: source.name, sampleRate: source.sampleRate, channels: sourceChannelCount, duration: duration, format: '32-bit IEEE float WAV', container: largeSource && largeSource.metadata.frameCount * sourceChannelCount * 4 + 36 > 0xffffffff ? 'RF64' : 'RIFF', automaticDcOffsetRemoval: true, modules, selection: [selectionStart, selectionEnd], exportedAt: new Date().toISOString(), limitations: ['Automatic DC offset removal is always applied before editable modules.', 'Edits are conservative sample-domain approximations in this browser build.', 'Original source remains immutable; export reflects automatic DC correction and enabled modules.'] };
     downloadBlob(new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' }), `${safeName || 'field-restore'}-restoration-report.json`);
     setOperationStatus(''); setModal(null); setSavedStatus('WAV + report exported');
   };
@@ -1285,6 +1286,7 @@ function App() {
             <button type="button" className="icon-btn md:hidden" aria-label="Open navigation" data-testid="button-menu"><Menu size={16} /></button>
             <div className="min-w-0"><div className="eyebrow">Current recording</div><div className="font-semibold text-[14px] mt-1 truncate max-w-[340px]" data-testid="text-source-name">{source.name}</div></div>
             <span className="chip hidden sm:inline-flex"><span className="w-1.5 h-1.5 bg-[#d8ed55] rounded-full" />{savedStatus}</span>
+             <span className="dc-status hidden lg:inline-flex" data-testid="status-dc-removal"><Check size={12} />DC offset removed automatically</span>
           </div>
           <div className="flex items-center gap-1.5">
             <button type="button" className="icon-btn" onClick={undo} disabled={!undoStack.length} aria-label="Undo last edit" data-testid="button-undo"><Undo2 size={16} /></button>
@@ -1370,7 +1372,7 @@ function App() {
                     <div className="ml-auto flex flex-wrap items-center justify-end gap-2"><span className="text-[10px] opacity-60">PRESET</span><select className="transport-select border border-white/15 rounded px-2 py-1 text-[11px] max-w-[210px]" value="" onChange={(event) => { if (event.target.value === 'common-field') { commitModules(makeDefaultChain()); setSavedStatus('Common Field Recording Adjustments preset loaded'); } }} aria-label="Load local preset" data-testid="select-local-preset"><option value="" disabled>Load preset…</option><option value="common-field">Common Field Recording Adjustments</option></select><span className="h-5 w-px bg-white/15 mx-1" /><span className="text-[10px] opacity-60">MONITOR</span><select className="transport-select border border-white/15 rounded px-2 py-1 text-[11px]" value={monitor} onChange={(event) => setMonitor(event.target.value as MonitorMode)} aria-label="Monitor source" data-testid="select-monitor"><option value="current">Current</option><option value="original">Original A/B</option></select><select className="transport-select border border-white/15 rounded px-2 py-1 text-[11px]" value={rate} onChange={(event) => setRate(Number(event.target.value))} aria-label="Playback rate" data-testid="select-playback-rate"><option value="0.5">0.5×</option><option value="1">1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option></select></div>
                   </section>
                   <section className="panel">
-                    <div className="panel-header"><div className="flex items-center gap-2"><Layers3 size={16} color="hsl(var(--accent))" /><div><div className="section-title">Non-destructive edit chain</div><div className="text-[10px] text-muted-foreground mt-0.5">{modules.filter((module) => module.enabled).length} enabled · original stays untouched</div></div></div><div className="relative"><button type="button" className="primary-btn" onClick={() => setModuleMenu(!moduleMenu)} data-testid="button-add-module"><Plus size={14} /> Add module <ChevronDown size={13} /></button>{moduleMenu && <div className="absolute right-0 top-10 z-20 w-52 p-1 bg-[hsl(var(--card))] border border-[hsl(var(--border))] rounded-md shadow-lg">{MODULE_TYPES.map((type) => <button type="button" key={type} className="w-full text-left px-3 py-2 rounded text-[12px] hover:bg-[hsl(var(--muted))]" onClick={() => addModule(type)} data-testid={`menu-module-${type}`}>{MODULE_LABELS[type]}<span className="block text-[10px] text-muted-foreground">{type === 'hum' ? 'conservative notch estimate' : type === 'ambient' ? 'blend local texture' : 'sample-domain pass'}</span></button>)}</div>}</div></div>
+                    <div className="panel-header"><div className="flex items-center gap-2"><Layers3 size={16} color="hsl(var(--accent))" /><div><div className="section-title">Non-destructive edit chain</div><div className="text-[10px] text-muted-foreground mt-0.5">{modules.filter((module) => module.enabled).length} enabled · automatic DC correction applied first · original stays untouched</div></div></div><div className="relative"><button type="button" className="primary-btn" onClick={() => setModuleMenu(!moduleMenu)} data-testid="button-add-module"><Plus size={14} /> Add module <ChevronDown size={13} /></button>{moduleMenu && <div className="absolute right-0 top-10 z-20 w-52 p-1 bg-[hsl(var(--card))] border border-[hsl(var(--border))] rounded-md shadow-lg">{MODULE_TYPES.map((type) => <button type="button" key={type} className="w-full text-left px-3 py-2 rounded text-[12px] hover:bg-[hsl(var(--muted))]" onClick={() => addModule(type)} data-testid={`menu-module-${type}`}>{MODULE_LABELS[type]}<span className="block text-[10px] text-muted-foreground">{type === 'hum' ? 'conservative notch estimate' : type === 'ambient' ? 'blend local texture' : 'sample-domain pass'}</span></button>)}</div>}</div></div>
                     <div className="panel-body">
                       {modules.length === 0 ? <div className="empty-state border border-dashed rounded-md"><Layers3 size={20} className="mx-auto mb-2 opacity-45" /><div className="text-[12px] font-semibold text-foreground">No edits in the chain</div><div className="text-[11px] mt-1">Add a conservative module. Every change stays reversible.</div></div> : modules.map((module, index) => <ModuleCard key={module.id} module={module} index={index} total={modules.length} collapsed={!showAllModules} updateModule={updateModule} updateParams={updateParams} deleteModule={deleteModule} duplicateModule={duplicateModule} moveModule={moveModule} />)}
                       <div className="flex items-center justify-between pt-2"><button type="button" className="quiet-btn" onClick={() => setShowAllModules(!showAllModules)} data-testid="button-chain-toggle">{showAllModules ? 'Collapse details' : 'Expand details'}</button><div className="font-mono-value text-[10px] text-muted-foreground">processing is local / reversible</div></div>
