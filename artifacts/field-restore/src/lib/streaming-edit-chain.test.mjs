@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { makeProcessingChain } from './edit-chain.ts';
+import { makeProcessingChain, renderChain } from './edit-chain.ts';
 import { createStreamingEditChain } from './streaming-edit-chain.ts';
 
 const sampleRate = 48000;
@@ -32,6 +32,23 @@ test('sequential chunks equal one streaming pass across boundaries', () => {
   chunked.forEach((channel, channelIndex) => {
     for (let i = 0; i < totalFrames; i += 1) assert.equal(channel[i], whole[channelIndex][i]);
   });
+});
+
+test('in-memory and file-backed routes produce equivalent restored audio', () => {
+  const input = source();
+  const processingModules = makeProcessingChain(modules);
+  const inMemory = renderChain(input, processingModules, sampleRate, { totalFrames });
+  const fileBacked = createStreamingEditChain(processingModules, sampleRate, totalFrames).process(input, 0);
+  let greatestDifference = 0;
+
+  inMemory.forEach((channel, channelIndex) => channel.forEach((sample, frame) => {
+    greatestDifference = Math.max(greatestDifference, Math.abs(sample - fileBacked[channelIndex][frame]));
+  }));
+
+  assert.ok(
+    greatestDifference <= 1e-6,
+    `expected route outputs within tolerance, greatest difference was ${greatestDifference}`,
+  );
 });
 
 test('restoring warmed state makes repeated selection loops deterministic', () => {

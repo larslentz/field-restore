@@ -91,6 +91,7 @@ export function makeRestorationReport(input: RestorationReportInput) {
 }
 
 const dbToAmp = (db: number) => 10 ** (db / 20);
+export const AUTOMATIC_DC_BLOCKER_POLE = 0.995;
 
 interface Biquad {
   b0: number;
@@ -170,9 +171,18 @@ export function applyModule(input: ChannelData, module: EditModule, sampleRate: 
     }));
   } else if (module.type === 'dc') {
     output.forEach((channel) => {
-      const amount = p.mode === 'Auto'
-        ? channel.reduce((sum, sample) => sum + sample, 0) / Math.max(1, channel.length)
-        : Number(p.amount) / 1000;
+      if (p.mode === 'Auto') {
+        let previousInput = 0;
+        let previousOutput = 0;
+        channel.forEach((sample, i) => {
+          const value = sample - previousInput + AUTOMATIC_DC_BLOCKER_POLE * previousOutput;
+          previousInput = sample;
+          previousOutput = value;
+          channel[i] = Math.max(-1, Math.min(1, value));
+        });
+        return;
+      }
+      const amount = Number(p.amount) / 1000;
       channel.forEach((sample, i) => { channel[i] = Math.max(-1, Math.min(1, sample - amount)); });
     });
   } else if (module.type === 'eq') {

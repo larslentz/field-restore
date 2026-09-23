@@ -1,5 +1,5 @@
 import type { ChannelData } from './audio';
-import type { EditModule } from './edit-chain';
+import { AUTOMATIC_DC_BLOCKER_POLE, type EditModule } from './edit-chain';
 
 interface FilterState {
   x1: number;
@@ -172,7 +172,7 @@ export class StreamingEditChain {
           if (p.mode === 'Auto') {
             // A leaky DC blocker, unlike a chunk mean, has continuous history.
             const x = finite(sample);
-            const y = x - state.dcX[c] + 0.995 * state.dcY[c];
+            const y = x - state.dcX[c] + AUTOMATIC_DC_BLOCKER_POLE * state.dcY[c];
             state.dcX[c] = x; state.dcY[c] = y; value = y;
           } else value = sample - (Number(p.amount) || 0) / 1000;
           channel[i] = clamp(finite(value));
