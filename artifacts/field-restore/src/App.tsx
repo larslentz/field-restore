@@ -8,7 +8,7 @@ import { createPlaybackRangePlan } from '@/lib/playback-range';
 import { calculateSpectrogram, type SpectrogramData } from '@/lib/spectrogram';
 import { fingerprintWav, parseWavMetadata, readFrames, writeFloat32WavChunks, type WavMetadata } from '@/lib/large-wav';
 import { isVerifiedRelink, openVerifiedFileHandle } from '@/lib/file-access';
-import { listProjects, loadProject as loadProjectV2, saveProject as saveProjectV2, type ProjectRecord } from '@/lib/project-store';
+import { listProjects, loadProject as loadProjectV2, queryFileHandlePermission, requestFileHandlePermission, saveProject as saveProjectV2, type ProjectRecord } from '@/lib/project-store';
 import { createStreamingEditChain } from '@/lib/streaming-edit-chain';
 import { startWorkerJob, type WorkerJob } from '@/lib/worker-analysis';
 import type { LargeAnalysisResult } from '@/lib/large-analysis';
@@ -138,7 +138,9 @@ function App() {
   const [spectrogramRequestId, setSpectrogramRequestId] = useState(0);
   const [spectrogramResultId, setSpectrogramResultId] = useState(0);
   const [projectId, setProjectId] = useState<string | null>(null);
+  const [pendingPermission, setPendingPermission] = useState<ProjectRecord | null>(null);
   const [pendingRelink, setPendingRelink] = useState<ProjectRecord | null>(null);
+  const [isRenewingPermission, setIsRenewingPermission] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -188,6 +190,35 @@ function App() {
   const selectionOriginalStats = largeSource ? largeSelectionOriginalStats : memorySelectionOriginalStats;
   const selectionCurrentStats = largeSource ? largeSelectionCurrentStats : memorySelectionCurrentStats;
 
+  const stageSavedProject = useCallback((record: ProjectRecord) => {
+    setProjectId(null);
+    setTitle(record.source.name.replace(/\.wav$/i, ''));
+    setNotes('');
+    setModules([]);
+    setMarkers([]);
+    setRegions([]);
+    setLargeSource(null);
+    setSource({ channels: [], sampleRate: record.source.sampleRate, duration: Number(record.source.duration ?? 0), name: record.source.name });
+  }, []);
+
+  const restoreVerifiedProject = useCallback((record: ProjectRecord, verified: Awaited<ReturnType<typeof openVerifiedFileHandle>>) => {
+    if (!record.fileHandle || !verified) return false;
+    const { file, metadata, fingerprint } = verified;
+    setLargeSource({ file, metadata, fingerprint, fileHandle: record.fileHandle });
+    setSource({ channels: [], sampleRate: metadata.sampleRate, duration: metadata.frameCount / metadata.sampleRate, name: file.name });
+    setModules(record.modules);
+    setMarkers(record.markers);
+    setRegions(record.regions);
+    setTitle(record.title);
+    setNotes(record.notes);
+    setProjectId(record.id);
+    setPendingPermission(null);
+    setPendingRelink(null);
+    setSelection([0, Math.min(5, metadata.frameCount / metadata.sampleRate)]);
+    setSavedStatus(`Restored file-backed project · ${new Date(record.savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
+    return true;
+  }, []);
+
   useEffect(() => {
     const saved = loadProject();
     if (saved?.originalBase64?.length && saved.originalLength) {
@@ -206,31 +237,35 @@ function App() {
       if (!latest) return;
       const record = await loadProjectV2(latest.id);
       if (!record) return;
-      setProjectId(record.id);
-      setTitle(record.title);
-      setNotes(record.notes);
-      setModules(record.modules);
-      setMarkers(record.markers);
-      setRegions(record.regions);
-       const verified = record.fileHandle
-         ? await openVerifiedFileHandle(record.fileHandle, record.source.fingerprint ?? '')
-         : null;
-       if (record.fileHandle && verified) {
-         const { file, metadata, fingerprint } = verified;
-          setLargeSource({ file, metadata, fingerprint, fileHandle: record.fileHandle });
-          setSource({ channels: [], sampleRate: metadata.sampleRate, duration: metadata.frameCount / metadata.sampleRate, name: file.name });
-          setSelection([0, Math.min(5, metadata.frameCount / metadata.sampleRate)]);
-          setSavedStatus(`Restored file-backed project · ${new Date(record.savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
+       stageSavedProject(record);
+       if (!record.fileHandle) {
+         setPendingRelink(record);
+         setSavedStatus('Saved project loaded · relink source WAV');
          return;
-      } else {
-        setPendingRelink(record);
-        setSource({ channels: [], sampleRate: record.source.sampleRate, duration: Number(record.source.duration ?? 0), name: record.source.name });
-        setSavedStatus('Saved project loaded · relink source WAV');
-      }
+       }
+       let permission: PermissionState;
+       try {
+         permission = await queryFileHandlePermission(record.fileHandle);
+       } catch {
+         setPendingRelink(record);
+         setSavedStatus('Saved project loaded · relink source WAV');
+         return;
+       }
+       if (permission === 'prompt') {
+         setPendingPermission(record);
+         setSavedStatus('Saved project loaded · file access needed');
+         return;
+       }
+       if (permission === 'granted') {
+         const verified = await openVerifiedFileHandle(record.fileHandle, record.source.fingerprint ?? '');
+         if (restoreVerifiedProject(record, verified)) return;
+       }
+       setPendingRelink(record);
+       setSavedStatus('Saved project loaded · relink source WAV');
     }).catch(() => {
       // Legacy localStorage restoration remains available when IndexedDB is unavailable.
     });
-  }, []);
+  }, [restoreVerifiedProject, stageSavedProject]);
 
   useEffect(() => {
     if (!largeSource) return;
@@ -631,15 +666,17 @@ function App() {
         setSource(parsed);
         setSavedStatus('Imported · not saved');
       }
-       const relinkMatches = pendingRelink
-         && isVerifiedRelink(pendingRelink.source.fingerprint, fingerprint);
+       const savedProject = pendingRelink ?? pendingPermission;
+       const relinkMatches = savedProject
+         && isVerifiedRelink(savedProject.source.fingerprint, fingerprint);
       if (relinkMatches) {
-        setModules(pendingRelink.modules);
-        setMarkers(pendingRelink.markers);
-        setRegions(pendingRelink.regions);
-        setTitle(pendingRelink.title);
-        setNotes(pendingRelink.notes);
-        setProjectId(pendingRelink.id);
+        setModules(savedProject.modules);
+        setMarkers(savedProject.markers);
+        setRegions(savedProject.regions);
+        setTitle(savedProject.title);
+        setNotes(savedProject.notes);
+        setProjectId(savedProject.id);
+        setPendingPermission(null);
         setPendingRelink(null);
         setSavedStatus('Source relinked · project restored');
       } else {
@@ -647,7 +684,7 @@ function App() {
       }
       setSelection([0, Math.min(metadata.frameCount / metadata.sampleRate, 5)]); setOperationStatus('');
     } catch (caught) { setError(caught instanceof Error ? caught.message : 'Unable to read this WAV file.'); }
-  }, [pendingRelink, stopPlayback]);
+  }, [pendingPermission, pendingRelink, stopPlayback]);
 
   const pickWavFile = useCallback(async () => {
     const picker = (window as typeof window & {
@@ -661,6 +698,33 @@ function App() {
       if ((caught as Error).name !== 'AbortError') setError(caught instanceof Error ? caught.message : 'Unable to open this WAV file.');
     }
   }, [importWavFile]);
+
+  const renewSavedFilePermission = useCallback(async () => {
+    const record = pendingPermission;
+    if (!record?.fileHandle) return;
+    setIsRenewingPermission(true);
+    setError('');
+    try {
+      const permission = await requestFileHandlePermission(record.fileHandle);
+      if (permission !== 'granted') {
+        setPendingPermission(null);
+        setPendingRelink(record);
+        setSavedStatus('File access denied · relink source WAV');
+        return;
+      }
+      const verified = await openVerifiedFileHandle(record.fileHandle, record.source.fingerprint ?? '');
+      if (!restoreVerifiedProject(record, verified)) {
+        setPendingPermission(null);
+        setPendingRelink(record);
+        setSavedStatus('Saved source changed · relink source WAV');
+        setError('The saved file no longer matches this project. Relink the original WAV to restore its edits.');
+      }
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Unable to renew access to the saved WAV file.');
+    } finally {
+      setIsRenewingPermission(false);
+    }
+  }, [pendingPermission, restoreVerifiedProject]);
 
   const importFile = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -1110,6 +1174,17 @@ function App() {
         </header>
         <main className="main-content scrollbar-thin">
           {error && <div className="max-w-[1660px] mx-auto mb-3 border border-[#d79c88] bg-[#fff0e9] text-[#8e3a2b] rounded-md px-3 py-2 text-[12px] flex items-center justify-between" role="alert" data-testid="status-error"><span>{error}</span><button type="button" className="icon-btn" onClick={() => setError('')} aria-label="Dismiss error"><X size={14} /></button></div>}
+           {pendingPermission && (
+             <div className="max-w-[1660px] mx-auto mb-3 border border-[hsl(var(--border))] bg-[hsl(var(--card))] rounded-md px-3 py-2.5 text-[12px] flex flex-wrap items-center gap-3" role="status" data-testid="status-file-permission">
+               <div className="min-w-0 flex-1">
+                 <div className="font-semibold">Allow access to restore this saved project</div>
+                 <div className="text-muted-foreground mt-0.5">Field Restore will reopen “{pendingPermission.source.name}”, verify it matches the saved recording, then restore your edits.</div>
+               </div>
+               <button type="button" className="primary-btn" onClick={() => void renewSavedFilePermission()} disabled={isRenewingPermission} data-testid="button-renew-file-permission">
+                 <FolderOpen size={14} /> {isRenewingPermission ? 'Requesting access…' : 'Allow file access'}
+               </button>
+             </div>
+           )}
           {(analysisStatus || spectrogramStatus || operationStatus) && (() => {
             const backgroundStatus = analysisStatus || spectrogramStatus;
             const visibleStatus = backgroundStatus || operationStatus;
