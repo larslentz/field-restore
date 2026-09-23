@@ -10,7 +10,7 @@ import { fingerprintWav, parseWavMetadata, readFrames, withLargeExportLeaveWarni
 import { isVerifiedRelink, openVerifiedFileHandle } from '@/lib/file-access';
 import { listProjects, loadProject as loadProjectV2, queryFileHandlePermission, requestFileHandlePermission, saveProject as saveProjectV2, type ProjectRecord } from '@/lib/project-store';
 import { createStreamingEditChain } from '@/lib/streaming-edit-chain';
-import { anchoredLevelScaleCeiling } from '@/lib/spectrogram-scale';
+import { anchoredLevelScaleCeiling, anchoredTimeViewStart } from '@/lib/spectrogram-scale';
 import { SPECTROGRAM_DATA_HEIGHT, SPECTROGRAM_FFT_SIZE } from '@/lib/spectrogram-resolution';
 import { startWorkerJob, type WorkerJob } from '@/lib/worker-analysis';
 import type { LargeAnalysisResult } from '@/lib/large-analysis';
@@ -163,7 +163,12 @@ function App() {
     paneHeight: number;
     span: number;
   } | null>(null);
-  const timeDragRef = useRef<{ startX: number; startCenter: number; viewDuration: number; plotWidth: number } | null>(null);
+  const timeDragRef = useRef<{
+    grabbedTime: number;
+    plotLeft: number;
+    plotWidth: number;
+    viewDuration: number;
+  } | null>(null);
   const dragDepthRef = useRef(0);
   const analysisJobRef = useRef<WorkerJob<LargeAnalysisResult> | null>(null);
   const spectrogramJobRef = useRef<Array<WorkerJob<SpectrogramData>>>([]);
@@ -874,11 +879,13 @@ function App() {
     const localY = event.clientY - bounds.top;
     const graphBottom = bounds.height - SPECTROGRAM_BOTTOM;
     if (localY >= graphBottom && localX > SPECTROGRAM_LEFT && localX < bounds.width - SPECTROGRAM_RIGHT) {
+      const plotWidth = Math.max(1, bounds.width - SPECTROGRAM_LEFT - SPECTROGRAM_RIGHT);
+      const pointerX = Math.max(0, Math.min(plotWidth, localX - SPECTROGRAM_LEFT));
       timeDragRef.current = {
-        startX: event.clientX,
-        startCenter: viewStart + viewDuration / 2,
+        grabbedTime: viewStart + (pointerX / plotWidth) * viewDuration,
+        plotLeft: SPECTROGRAM_LEFT,
+        plotWidth,
         viewDuration,
-        plotWidth: Math.max(1, bounds.width - SPECTROGRAM_LEFT - SPECTROGRAM_RIGHT),
       };
       setTimeViewCenter(viewStart + viewDuration / 2);
       event.currentTarget.setPointerCapture(event.pointerId);
@@ -911,9 +918,16 @@ function App() {
   };
   const onCanvasPointerMove = (event: ReactPointerEvent<HTMLCanvasElement>) => {
     if (timeDragRef.current) {
-      const deltaTime = -((event.clientX - timeDragRef.current.startX) / timeDragRef.current.plotWidth) * timeDragRef.current.viewDuration;
-      const halfView = timeDragRef.current.viewDuration / 2;
-      setTimeViewCenter(Math.max(halfView, Math.min(duration - halfView, timeDragRef.current.startCenter + deltaTime)));
+      const bounds = event.currentTarget.getBoundingClientRect();
+      const pointerX = event.clientX - bounds.left - timeDragRef.current.plotLeft;
+      const nextViewStart = anchoredTimeViewStart(
+        timeDragRef.current.grabbedTime,
+        pointerX,
+        timeDragRef.current.plotWidth,
+        timeDragRef.current.viewDuration,
+        duration,
+      );
+      setTimeViewCenter(nextViewStart + timeDragRef.current.viewDuration / 2);
       return;
     }
     if (frequencyDragRef.current) {
@@ -989,7 +1003,7 @@ function App() {
       const factor = event.deltaY > 0 ? 1 / 1.25 : 1.25;
       const nextZoom = Math.max(1, Math.min(16, zoom * factor));
       const nextViewDuration = duration / nextZoom;
-      const nextViewStart = Math.max(0, Math.min(duration - nextViewDuration, pointerTime - pointerRatio * nextViewDuration));
+      const nextViewStart = anchoredTimeViewStart(pointerTime, x - SPECTROGRAM_LEFT, plotWidth, nextViewDuration, duration);
       setTimeViewCenter(nextViewStart + nextViewDuration / 2);
       setZoom(nextZoom);
     } else if (x <= SPECTROGRAM_LEFT) {
