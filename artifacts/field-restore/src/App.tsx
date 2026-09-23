@@ -27,6 +27,8 @@ const SPECTROGRAM_LEFT = 48;
 const SPECTROGRAM_RIGHT = 72;
 const SPECTROGRAM_BOTTOM = 28;
 const SPECTROGRAM_SCALE_DIVISIONS = 5;
+const SPECTROGRAM_MIN_CEILING_DB = -60;
+const SPECTROGRAM_MAX_CEILING_DB = 24;
 const EMPTY_STATS: LoudnessStats = { truePeakDbtp: -Infinity, integratedLufs: -Infinity, loudnessRangeLu: 0, maxShortTermLufs: -Infinity };
 const EMPTY_SPECTROGRAM = { width: 480, height: 110, values: new Float32Array(480 * 110) };
 const SPECTROGRAM_PALETTES: Record<SpectrogramPaletteId, { label: string; description: string; stops: Array<[number, string]> }> = {
@@ -833,7 +835,7 @@ function App() {
     if (levelDragRef.current) {
       const deltaDb = -(event.clientY - levelDragRef.current.startY) * 0.25;
       const nextCeiling = Math.round(levelDragRef.current.startCeiling + deltaDb);
-      setSpectrogramCeilingDb(Math.max(-60, Math.min(0, nextCeiling)));
+      setSpectrogramCeilingDb(Math.max(SPECTROGRAM_MIN_CEILING_DB, Math.min(SPECTROGRAM_MAX_CEILING_DB, nextCeiling)));
       return;
     }
     if (!pointerDragRef.current) return;
@@ -903,7 +905,7 @@ function App() {
       event.preventDefault();
       event.stopPropagation();
       const direction = event.deltaY > 0 ? -1 : 1;
-      setSpectrogramCeilingDb((value) => Math.max(-60, Math.min(0, value + direction * 2)));
+      setSpectrogramCeilingDb((value) => Math.max(SPECTROGRAM_MIN_CEILING_DB, Math.min(SPECTROGRAM_MAX_CEILING_DB, value + direction * 2)));
     }
   }, [duration, source.sampleRate, spectrogramMaxFrequency, spectrogramMinFrequency, viewDuration, viewStart, zoom]);
 
@@ -1010,7 +1012,8 @@ function App() {
       for (let tick = 0; tick <= SPECTROGRAM_SCALE_DIVISIONS; tick += 1) {
         const decibels = spectrogramCeilingDb - (tick / SPECTROGRAM_SCALE_DIVISIONS) * (spectrogramCeilingDb - spectrogramFloorDb);
         const y = top + (tick / SPECTROGRAM_SCALE_DIVISIONS) * paneHeight;
-        context.fillText(`${Math.round(decibels)}`, graphRight + 19, Math.max(top + 10, Math.min(top + paneHeight - 3, y + 3)));
+        const levelLabel = Math.round(decibels);
+        context.fillText(levelLabel > 0 ? `+${levelLabel}` : `${levelLabel}`, graphRight + 19, Math.max(top + 10, Math.min(top + paneHeight - 3, y + 3)));
       }
     }
     context.textAlign = 'left';
