@@ -11,6 +11,7 @@ import { isVerifiedRelink, openVerifiedFileHandle } from '@/lib/file-access';
 import { listProjects, loadProject as loadProjectV2, queryFileHandlePermission, requestFileHandlePermission, saveProject as saveProjectV2, type ProjectRecord } from '@/lib/project-store';
 import { createStreamingEditChain } from '@/lib/streaming-edit-chain';
 import { anchoredLevelScaleCeiling } from '@/lib/spectrogram-scale';
+import { SPECTROGRAM_DATA_HEIGHT, SPECTROGRAM_FFT_SIZE } from '@/lib/spectrogram-resolution';
 import { startWorkerJob, type WorkerJob } from '@/lib/worker-analysis';
 import type { LargeAnalysisResult } from '@/lib/large-analysis';
 import './index.css';
@@ -33,7 +34,6 @@ const SPECTROGRAM_DATA_FLOOR_DB = -180;
 const SPECTROGRAM_DATA_CEILING_DB = 0;
 const SPECTROGRAM_MIN_LEVEL_SPAN_DB = 10;
 const SPECTROGRAM_MAX_LEVEL_SPAN_DB = 180;
-const SPECTROGRAM_DATA_HEIGHT = 256;
 const SPECTROGRAM_DISPLAY_HEIGHT = 110;
 const EMPTY_STATS: LoudnessStats = { truePeakDbtp: -Infinity, integratedLufs: -Infinity, loudnessRangeLu: 0, maxShortTermLufs: -Infinity };
 const EMPTY_SPECTROGRAM = { width: 480, height: 110, values: new Float32Array(480 * 110) };
@@ -187,8 +187,8 @@ function App() {
   const spectrogramFloorDb = spectrogramCeilingDb - spectrogramLevelSpanDb;
   const memorySpectrograms = useMemo(
     () => ({
-      left: largeSource || !currentChannels[0] ? EMPTY_SPECTROGRAM : calculateSpectrogram([currentChannels[0]], source.sampleRate, viewStart, viewDuration, 480, SPECTROGRAM_DATA_HEIGHT, 0, source.sampleRate / 2, SPECTROGRAM_DATA_FLOOR_DB, SPECTROGRAM_DATA_CEILING_DB),
-      right: largeSource || !currentChannels[0] ? EMPTY_SPECTROGRAM : calculateSpectrogram([currentChannels[1] ?? currentChannels[0]], source.sampleRate, viewStart, viewDuration, 480, SPECTROGRAM_DATA_HEIGHT, 0, source.sampleRate / 2, SPECTROGRAM_DATA_FLOOR_DB, SPECTROGRAM_DATA_CEILING_DB),
+      left: largeSource || !currentChannels[0] ? EMPTY_SPECTROGRAM : calculateSpectrogram([currentChannels[0]], source.sampleRate, viewStart, viewDuration, 480, SPECTROGRAM_DATA_HEIGHT, 0, source.sampleRate / 2, SPECTROGRAM_DATA_FLOOR_DB, SPECTROGRAM_DATA_CEILING_DB, SPECTROGRAM_FFT_SIZE),
+      right: largeSource || !currentChannels[0] ? EMPTY_SPECTROGRAM : calculateSpectrogram([currentChannels[1] ?? currentChannels[0]], source.sampleRate, viewStart, viewDuration, 480, SPECTROGRAM_DATA_HEIGHT, 0, source.sampleRate / 2, SPECTROGRAM_DATA_FLOOR_DB, SPECTROGRAM_DATA_CEILING_DB, SPECTROGRAM_FFT_SIZE),
     }),
     [currentChannels, largeSource, source.sampleRate, viewDuration, viewStart],
   );
@@ -294,6 +294,7 @@ function App() {
       maximumFrequency: metadata.sampleRate / 2,
       floorDb: SPECTROGRAM_DATA_FLOOR_DB,
       ceilingDb: SPECTROGRAM_DATA_CEILING_DB,
+      fftSize: SPECTROGRAM_FFT_SIZE,
       // Stateful filters settle within this bounded prefix; keeping it fixed
       // avoids multiplying half a second of DSP by every visible column.
       warmupFrames: 2048,

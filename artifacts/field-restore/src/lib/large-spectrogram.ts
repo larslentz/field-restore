@@ -1,5 +1,6 @@
 import { readFrames, type WavMetadata } from './large-wav';
 import type { SpectrogramData } from './spectrogram';
+import { SPECTROGRAM_FFT_SIZE, validateSpectrogramFftSize } from './spectrogram-resolution';
 
 export interface FileSpectrogramOptions {
   startSeconds?: number;
@@ -10,6 +11,7 @@ export interface FileSpectrogramOptions {
   maximumFrequency?: number;
   floorDb?: number;
   ceilingDb?: number;
+  fftSize?: number;
   /** The channel to render. If omitted, the first channel is rendered. */
   channelIndex?: number;
   signal?: AbortSignal;
@@ -61,7 +63,7 @@ function fft(real: Float64Array, imaginary: Float64Array): void {
 }
 
 /**
- * Creates a spectrogram directly from a file. A single 1024-frame slice is
+ * Creates a spectrogram directly from a file. A single bounded FFT slice is
  * fetched for each column; the complete recording is never held in memory.
  */
 export async function calculateFileSpectrogram(
@@ -94,7 +96,7 @@ export async function calculateFileSpectrogram(
     throw new RangeError('Spectrogram channel is outside the WAV channel range.');
   }
 
-  const fftSize = 1024;
+  const fftSize = validateSpectrogramFftSize(options.fftSize ?? SPECTROGRAM_FFT_SIZE);
   const half = fftSize / 2;
   const startFrame = Math.max(0, Math.floor(startSeconds * metadata.sampleRate));
   const viewFrames = Math.max(1, Math.floor(durationSeconds * metadata.sampleRate));

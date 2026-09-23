@@ -1,1 +1,2 @@
 - [Audio restoration integrity](audio-restoration-integrity.md) — keep processing local, non-destructive, stereo-linked by default, and explicit about DSP estimates.
+- [Spectrogram resolution budget](spectrogram-resolution-budget.md) — retain full-band detail for instant axis zoom while keeping processed previews within an interactive budget.

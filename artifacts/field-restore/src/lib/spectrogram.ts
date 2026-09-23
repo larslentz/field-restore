@@ -1,3 +1,5 @@
+import { SPECTROGRAM_FFT_SIZE, validateSpectrogramFftSize } from './spectrogram-resolution';
+
 export interface SpectrogramData {
   width: number;
   height: number;
@@ -51,8 +53,9 @@ export function calculateSpectrogram(
   maximumFrequency = 20000,
   floorDb = -105,
   ceilingDb = -20,
+  fftSize = SPECTROGRAM_FFT_SIZE,
 ): SpectrogramData {
-  const fftSize = 1024;
+  validateSpectrogramFftSize(fftSize);
   const availableFrames = channels[0]?.length ?? 0;
   const startFrame = Math.max(0, Math.floor(startSeconds * sampleRate));
   const viewFrames = Math.max(1, Math.floor(durationSeconds * sampleRate));
@@ -60,6 +63,10 @@ export function calculateSpectrogram(
   const real = new Float64Array(fftSize);
   const imaginary = new Float64Array(fftSize);
   const magnitudes = new Float64Array(fftSize / 2 + 1);
+  const window = new Float64Array(fftSize);
+  for (let index = 0; index < fftSize; index += 1) {
+    window[index] = 0.5 - 0.5 * Math.cos(2 * Math.PI * index / (fftSize - 1));
+  }
   const channelCount = Math.max(1, channels.length);
   for (let column = 0; column < width; column += 1) {
     const centerFrame = startFrame + Math.floor(((column + 0.5) / width) * viewFrames);
@@ -72,8 +79,7 @@ export function calculateSpectrogram(
       for (let index = 0; index < fftSize; index += 1) {
         const frame = windowStart + index;
         const sample = frame >= 0 && frame < availableFrames ? channel[frame] ?? 0 : 0;
-        const hann = 0.5 - 0.5 * Math.cos(2 * Math.PI * index / (fftSize - 1));
-        real[index] = sample * hann;
+        real[index] = sample * window[index];
       }
       fft(real, imaginary);
       for (let bin = 0; bin < magnitudes.length; bin += 1) {
