@@ -1320,7 +1320,7 @@ function App() {
            )}
           <div className="workspace-grid">
             <div className="min-w-0 space-y-4">
-              <div className="workspace-toolbar flex items-center justify-between gap-3">
+              <div className="workspace-toolbar">
                 <div className="work-status-slot">
                   {(analysisStatus || spectrogramStatus || operationStatus) && (() => {
                     const backgroundStatus = analysisStatus || spectrogramStatus;
@@ -1328,9 +1328,6 @@ function App() {
                     const visibleProgress = analysisStatus ? analysisProgress : spectrogramStatus ? spectrogramProgress : operationProgress;
                     return <div className="work-status-card border rounded-md px-3 text-[11px] flex items-center gap-3 bg-[hsl(var(--card))]" role="status" data-testid="status-background-work" data-progress={visibleProgress}><span>{operationPaused && backgroundStatus ? `${visibleStatus} · paused` : visibleStatus}</span><div className="h-1.5 flex-1 max-w-56 bg-[hsl(var(--muted))] rounded overflow-hidden"><div className="h-full bg-[hsl(var(--primary))]" style={{ width: `${Math.max(4, visibleProgress * 100)}%` }} /></div><span className="font-mono-value">{Math.round(visibleProgress * 100)}%</span>{backgroundStatus && <><button type="button" className="quiet-btn !py-1" onClick={operationPaused ? resumeBackgroundWork : pauseBackgroundWork} data-testid="button-analysis-pause">{operationPaused ? <Play size={12} /> : <Pause size={12} />}{operationPaused ? 'Resume' : 'Pause'}</button><button type="button" className="icon-btn !h-7 !min-w-7" onClick={cancelBackgroundWork} aria-label="Cancel background analysis" data-testid="button-analysis-cancel"><X size={13} /></button></>}</div>;
                   })()}
-                </div>
-                <div className="flex bg-[hsl(var(--muted))] rounded-md p-0.5" role="tablist" aria-label="Workspace view">
-                  {(['edit', 'analyze', 'project'] as ViewTab[]).map((tab) => <button key={tab} type="button" className={`tab rounded ${activeTab === tab ? 'active bg-[hsl(var(--card))]' : ''}`} onClick={() => setActiveTab(tab)} role="tab" aria-selected={activeTab === tab} data-testid={`tab-${tab}`}>{tab[0].toUpperCase() + tab.slice(1)}</button>)}
                 </div>
               </div>
               {activeTab === 'project' ? (
@@ -1340,9 +1337,14 @@ function App() {
               ) : (
                 <>
                   <section className="panel instrument-grid" aria-label="Spectrogram editor">
-                    <div className="panel-header">
+                    <div className="panel-header spectrogram-panel-header">
                       <div className="flex items-center gap-3"><Waves size={17} color="hsl(var(--primary))" /><div><div className="section-title">Spectrogram / selection</div><div className="text-[10px] text-muted-foreground mt-0.5">Drag to select · scroll/drag the bottom time axis · scroll/drag the left frequency axis · scroll/drag the right dB axis</div></div></div>
-                      <div className="flex items-center gap-1"><button type="button" className="icon-btn" onClick={() => { setTimeViewCenter(viewStart + viewDuration / 2); setZoom(Math.max(1, zoom / 1.8)); }} aria-label="Zoom out" data-testid="button-zoom-out"><ZoomOut size={15} /></button><span className="font-mono-value text-[10px] text-muted-foreground w-12 text-center">{zoom.toFixed(1)}×</span><button type="button" className="icon-btn" onClick={() => { setTimeViewCenter(viewStart + viewDuration / 2); setZoom(Math.min(16, zoom * 1.8)); }} aria-label="Zoom in" data-testid="button-zoom-in"><ZoomIn size={15} /></button><button type="button" className="quiet-btn ml-2 !py-[5px]" onClick={() => { setZoom(1); setTimeViewCenter(null); }} data-testid="button-fit">Fit</button></div>
+                      <div className="spectrogram-header-actions">
+                        <div className="spectrogram-tabs flex bg-[hsl(var(--muted))] rounded-md p-0.5" role="tablist" aria-label="Workspace view">
+                          {(['edit', 'analyze', 'project'] as ViewTab[]).map((tab) => <button key={tab} type="button" className={`tab rounded ${activeTab === tab ? 'active bg-[hsl(var(--card))]' : ''}`} onClick={() => setActiveTab(tab)} role="tab" aria-selected={activeTab === tab} data-testid={`tab-${tab}`}>{tab[0].toUpperCase() + tab.slice(1)}</button>)}
+                        </div>
+                        <div className="flex items-center gap-1"><button type="button" className="icon-btn" onClick={() => { setTimeViewCenter(viewStart + viewDuration / 2); setZoom(Math.max(1, zoom / 1.8)); }} aria-label="Zoom out" data-testid="button-zoom-out"><ZoomOut size={15} /></button><span className="font-mono-value text-[10px] text-muted-foreground w-12 text-center">{zoom.toFixed(1)}×</span><button type="button" className="icon-btn" onClick={() => { setTimeViewCenter(viewStart + viewDuration / 2); setZoom(Math.min(16, zoom * 1.8)); }} aria-label="Zoom in" data-testid="button-zoom-in"><ZoomIn size={15} /></button><button type="button" className="quiet-btn ml-2 !py-[5px]" onClick={() => { setZoom(1); setTimeViewCenter(null); }} data-testid="button-fit">Fit</button></div>
+                      </div>
                     </div>
                     <div className="panel-body !pt-3">
                       <div className="waveform-wrap">
