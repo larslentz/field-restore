@@ -173,8 +173,9 @@
 .main-shell { min-width: 0; flex: 1; display: flex; flex-direction: column; }
 .topbar { height: 58px; flex: 0 0 58px; border-bottom: 1px solid hsl(var(--border)); display: flex; align-items: center; justify-content: space-between; padding: 0 24px; background: hsl(var(--card)); }
 .main-content { min-height: 0; flex: 1; overflow: auto; padding: 18px 24px 26px; }
-.work-status-slot { height: 46px; margin-bottom: 12px; }
-.work-status-card { height: 46px; }
+.workspace-toolbar { min-height: 46px; }
+.work-status-slot { min-width: 0; flex: 1; height: 46px; }
+.work-status-card { width: 100%; height: 46px; }
 .workspace-grid { display: grid; grid-template-columns: minmax(0, 1fr) 324px; gap: 16px; max-width: 1660px; margin: 0 auto; }
 .panel { background: hsl(var(--card)); border: 1px solid hsl(var(--card-border)); border-radius: 8px; box-shadow: var(--shadow-subtle); }
 .panel-header { padding: 14px 16px; border-bottom: 1px solid hsl(var(--border)); display: flex; align-items: center; justify-content: space-between; gap: 12px; }

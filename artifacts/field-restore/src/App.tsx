@@ -1276,18 +1276,17 @@ function App() {
                </button>
              </div>
            )}
-          <div className="work-status-slot">
-            {(analysisStatus || spectrogramStatus || operationStatus) && (() => {
-              const backgroundStatus = analysisStatus || spectrogramStatus;
-              const visibleStatus = backgroundStatus || operationStatus;
-              const visibleProgress = analysisStatus ? analysisProgress : spectrogramStatus ? spectrogramProgress : operationProgress;
-              return <div className="work-status-card max-w-[1660px] mx-auto border rounded-md px-3 text-[11px] flex items-center gap-3 bg-[hsl(var(--card))]" role="status" data-testid="status-background-work" data-progress={visibleProgress}><span>{operationPaused && backgroundStatus ? `${visibleStatus} · paused` : visibleStatus}</span><div className="h-1.5 flex-1 max-w-56 bg-[hsl(var(--muted))] rounded overflow-hidden"><div className="h-full bg-[hsl(var(--primary))]" style={{ width: `${Math.max(4, visibleProgress * 100)}%` }} /></div><span className="font-mono-value">{Math.round(visibleProgress * 100)}%</span>{backgroundStatus && <><button type="button" className="quiet-btn !py-1" onClick={operationPaused ? resumeBackgroundWork : pauseBackgroundWork} data-testid="button-analysis-pause">{operationPaused ? <Play size={12} /> : <Pause size={12} />}{operationPaused ? 'Resume' : 'Pause'}</button><button type="button" className="icon-btn !h-7 !min-w-7" onClick={cancelBackgroundWork} aria-label="Cancel background analysis" data-testid="button-analysis-cancel"><X size={13} /></button></>}</div>;
-            })()}
-          </div>
           <div className="workspace-grid">
             <div className="min-w-0 space-y-4">
-              <div className="flex items-center justify-between">
-                <div><div className="eyebrow">Restoration workspace</div><h1 className="text-[21px] font-bold tracking-[-.03em] mt-1" data-testid="heading-workspace">{activeTab === 'edit' ? 'Listen closely. Change less.' : activeTab === 'analyze' ? 'Evidence before intervention.' : 'Project ledger.'}</h1></div>
+              <div className="workspace-toolbar flex items-center justify-between gap-3">
+                <div className="work-status-slot">
+                  {(analysisStatus || spectrogramStatus || operationStatus) && (() => {
+                    const backgroundStatus = analysisStatus || spectrogramStatus;
+                    const visibleStatus = backgroundStatus || operationStatus;
+                    const visibleProgress = analysisStatus ? analysisProgress : spectrogramStatus ? spectrogramProgress : operationProgress;
+                    return <div className="work-status-card border rounded-md px-3 text-[11px] flex items-center gap-3 bg-[hsl(var(--card))]" role="status" data-testid="status-background-work" data-progress={visibleProgress}><span>{operationPaused && backgroundStatus ? `${visibleStatus} · paused` : visibleStatus}</span><div className="h-1.5 flex-1 max-w-56 bg-[hsl(var(--muted))] rounded overflow-hidden"><div className="h-full bg-[hsl(var(--primary))]" style={{ width: `${Math.max(4, visibleProgress * 100)}%` }} /></div><span className="font-mono-value">{Math.round(visibleProgress * 100)}%</span>{backgroundStatus && <><button type="button" className="quiet-btn !py-1" onClick={operationPaused ? resumeBackgroundWork : pauseBackgroundWork} data-testid="button-analysis-pause">{operationPaused ? <Play size={12} /> : <Pause size={12} />}{operationPaused ? 'Resume' : 'Pause'}</button><button type="button" className="icon-btn !h-7 !min-w-7" onClick={cancelBackgroundWork} aria-label="Cancel background analysis" data-testid="button-analysis-cancel"><X size={13} /></button></>}</div>;
+                  })()}
+                </div>
                 <div className="flex bg-[hsl(var(--muted))] rounded-md p-0.5" role="tablist" aria-label="Workspace view">
                   {(['edit', 'analyze', 'project'] as ViewTab[]).map((tab) => <button key={tab} type="button" className={`tab rounded ${activeTab === tab ? 'active bg-[hsl(var(--card))]' : ''}`} onClick={() => setActiveTab(tab)} role="tab" aria-selected={activeTab === tab} data-testid={`tab-${tab}`}>{tab[0].toUpperCase() + tab.slice(1)}</button>)}
                 </div>
