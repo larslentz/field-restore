@@ -4,6 +4,7 @@ import { createDemoAudio, downloadBlob, encodeWav, parseWav, type AudioSource } 
 import { decodeChannels, loadProject, projectFromSource, saveProject } from '@/lib/persistence';
 import { makeDefaultChain, makeModule, MODULE_LABELS, renderChain, type EditModule, type ModuleType } from '@/lib/edit-chain';
 import { analyzeLoudness, type LoudnessStats } from '@/lib/loudness';
+import { createPlaybackRangePlan } from '@/lib/playback-range';
 import { calculateSpectrogram } from '@/lib/spectrogram';
 import './index.css';
 
@@ -142,40 +143,38 @@ function App() {
       audioSourceRef.current.disconnect();
     }
     if (animationRef.current) cancelAnimationFrame(animationRef.current);
-    const [selectedA, selectedB] = selectionRef.current;
-    const selectedStart = Math.max(0, Math.min(selectedA, selectedB));
-    const selectedEnd = Math.min(duration, Math.max(selectedA, selectedB));
-    const hasSelection = selectedEnd - selectedStart >= .01;
-    const selectionStartFrame = hasSelection ? Math.max(0, Math.floor(selectedStart * source.sampleRate)) : 0;
-    const selectionEndFrame = hasSelection ? Math.min(channels[0]?.length ?? 0, Math.ceil(selectedEnd * source.sampleRate)) : channels[0]?.length ?? 0;
-    const bufferLength = Math.max(1, selectionEndFrame - selectionStartFrame);
+    const plan = createPlaybackRangePlan({
+      duration,
+      loop,
+      sampleRate: source.sampleRate,
+      selection: selectionRef.current,
+      startPosition,
+      totalFrames: channels[0]?.length ?? 0,
+    });
+    const bufferLength = Math.max(1, plan.bufferEndFrame - plan.bufferStartFrame);
     const buffer = context.createBuffer(channels.length, bufferLength, source.sampleRate);
-    channels.forEach((channel, index) => buffer.getChannelData(index).set(channel.subarray(selectionStartFrame, selectionEndFrame)));
+    channels.forEach((channel, index) => buffer.getChannelData(index).set(channel.subarray(plan.bufferStartFrame, plan.bufferEndFrame)));
     const node = context.createBufferSource();
     node.buffer = buffer; node.playbackRate.value = rate; node.connect(context.destination);
-    const loopStart = hasSelection ? selectedStart : Math.min(startPosition, Math.max(0, duration - .01));
-    const loopEnd = hasSelection ? selectedEnd : duration;
-    const startAt = hasSelection ? selectedStart : Math.min(startPosition, Math.max(0, duration - .01));
-    const bufferStartOffset = hasSelection ? 0 : startAt;
     const startedAt = context.currentTime;
     node.loop = loop;
-    node.loopStart = hasSelection ? 0 : loopStart;
-    node.loopEnd = hasSelection ? buffer.duration : loopEnd;
+    node.loopStart = plan.bufferLoopStart;
+    node.loopEnd = plan.bufferLoopEnd;
     node.onended = () => {
       if (!loop && audioSourceRef.current === node) {
-        playHeadRef.current = loopEnd;
-        setPlayHead(loopEnd);
+        playHeadRef.current = plan.timelineEnd;
+        setPlayHead(plan.timelineEnd);
         setIsPlaying(false);
         audioSourceRef.current = null;
       }
     };
-    node.start(0, bufferStartOffset);
+    node.start(0, plan.bufferStartOffset);
     audioSourceRef.current = node; setIsPlaying(true);
     const tick = () => {
       if (audioSourceRef.current !== node) return;
       const elapsed = (context.currentTime - startedAt) * rate;
-      const next = Math.min(loopEnd, startAt + elapsed);
-      const position = loop ? loopStart + (elapsed % Math.max(.01, loopEnd - loopStart)) : next;
+      const next = Math.min(plan.timelineEnd, plan.timelineStart + elapsed);
+      const position = loop ? plan.timelineStart + (elapsed % Math.max(.01, plan.timelineEnd - plan.timelineStart)) : next;
       playHeadRef.current = position;
       setPlayHead(position);
       animationRef.current = requestAnimationFrame(tick);
