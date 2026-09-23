@@ -131,6 +131,10 @@ function App() {
   const [analysisProgress, setAnalysisProgress] = useState(0);
   const [spectrogramStatus, setSpectrogramStatus] = useState('');
   const [spectrogramProgress, setSpectrogramProgress] = useState(0);
+  const [analysisRequestId, setAnalysisRequestId] = useState(0);
+  const [analysisResultId, setAnalysisResultId] = useState(0);
+  const [spectrogramRequestId, setSpectrogramRequestId] = useState(0);
+  const [spectrogramResultId, setSpectrogramResultId] = useState(0);
   const [projectId, setProjectId] = useState<string | null>(null);
   const [pendingRelink, setPendingRelink] = useState<ProjectRecord | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -228,6 +232,7 @@ function App() {
   useEffect(() => {
     if (!largeSource) return;
     const generation = ++spectrogramGenerationRef.current;
+    setSpectrogramRequestId(generation);
     spectrogramJobRef.current.forEach((job) => job.cancel());
     const { file, metadata } = largeSource;
     const options = {
@@ -256,6 +261,7 @@ function App() {
     Promise.all([leftJob.promise, rightJob.promise]).then(([left, right]) => {
       if (generation === spectrogramGenerationRef.current) {
         setLargeSpectrograms({ left, right });
+        setSpectrogramResultId(generation);
         setSpectrogramStatus('');
         setSpectrogramProgress(1);
         spectrogramJobRef.current = [];
@@ -274,6 +280,7 @@ function App() {
     if (!largeSource) return;
     analysisJobRef.current?.cancel();
     const generation = ++analysisGenerationRef.current;
+    setAnalysisRequestId(generation);
     const { file, metadata } = largeSource;
     const selectionStartFrame = Math.max(0, Math.floor(selectionStart * metadata.sampleRate));
     const selectionFrames = Math.max(1, Math.min(metadata.frameCount - selectionStartFrame, Math.ceil((selectionEnd - selectionStart) * metadata.sampleRate)));
@@ -325,6 +332,7 @@ function App() {
     }).then((stats) => {
       if (generation === analysisGenerationRef.current) {
         setLargeCurrentStats(stats);
+        setAnalysisResultId(generation);
         setAnalysisStatus('');
         setAnalysisProgress(1);
         analysisJobRef.current = null;
@@ -1088,7 +1096,7 @@ function App() {
             const backgroundStatus = analysisStatus || spectrogramStatus;
             const visibleStatus = backgroundStatus || operationStatus;
             const visibleProgress = analysisStatus ? analysisProgress : spectrogramStatus ? spectrogramProgress : operationProgress;
-            return <div className="max-w-[1660px] mx-auto mb-3 border rounded-md px-3 py-2 text-[11px] flex items-center gap-3 bg-[hsl(var(--card))]" role="status"><span>{operationPaused && backgroundStatus ? `${visibleStatus} · paused` : visibleStatus}</span><div className="h-1.5 flex-1 max-w-56 bg-[hsl(var(--muted))] rounded overflow-hidden"><div className="h-full bg-[hsl(var(--primary))]" style={{ width: `${Math.max(4, visibleProgress * 100)}%` }} /></div><span className="font-mono-value">{Math.round(visibleProgress * 100)}%</span>{backgroundStatus && <><button type="button" className="quiet-btn !py-1" onClick={operationPaused ? resumeBackgroundWork : pauseBackgroundWork} data-testid="button-analysis-pause">{operationPaused ? <Play size={12} /> : <Pause size={12} />}{operationPaused ? 'Resume' : 'Pause'}</button><button type="button" className="icon-btn !h-7 !min-w-7" onClick={cancelBackgroundWork} aria-label="Cancel background analysis" data-testid="button-analysis-cancel"><X size={13} /></button></>}</div>;
+            return <div className="max-w-[1660px] mx-auto mb-3 border rounded-md px-3 py-2 text-[11px] flex items-center gap-3 bg-[hsl(var(--card))]" role="status" data-testid="status-background-work" data-progress={visibleProgress}><span>{operationPaused && backgroundStatus ? `${visibleStatus} · paused` : visibleStatus}</span><div className="h-1.5 flex-1 max-w-56 bg-[hsl(var(--muted))] rounded overflow-hidden"><div className="h-full bg-[hsl(var(--primary))]" style={{ width: `${Math.max(4, visibleProgress * 100)}%` }} /></div><span className="font-mono-value">{Math.round(visibleProgress * 100)}%</span>{backgroundStatus && <><button type="button" className="quiet-btn !py-1" onClick={operationPaused ? resumeBackgroundWork : pauseBackgroundWork} data-testid="button-analysis-pause">{operationPaused ? <Play size={12} /> : <Pause size={12} />}{operationPaused ? 'Resume' : 'Pause'}</button><button type="button" className="icon-btn !h-7 !min-w-7" onClick={cancelBackgroundWork} aria-label="Cancel background analysis" data-testid="button-analysis-cancel"><X size={13} /></button></>}</div>;
           })()}
           <div className="workspace-grid">
             <div className="min-w-0 space-y-4">
@@ -1111,7 +1119,7 @@ function App() {
                     </div>
                     <div className="panel-body !pt-3">
                       <div className="waveform-wrap">
-                        <canvas ref={canvasRef} className="waveform-canvas" onPointerDown={onCanvasPointerDown} onPointerMove={onCanvasPointerMove} onPointerUp={onCanvasPointerUp} onPointerCancel={onCanvasPointerUp} aria-label={`Interactive spectrogram from ${spectrogramMinFrequency / 1000} to ${spectrogramMaxFrequency / 1000} kilohertz with ${spectrogramFloorDb} to ${spectrogramCeilingDb} decibel scale`} data-testid="canvas-spectrogram" />
+                        <canvas ref={canvasRef} className="waveform-canvas" onPointerDown={onCanvasPointerDown} onPointerMove={onCanvasPointerMove} onPointerUp={onCanvasPointerUp} onPointerCancel={onCanvasPointerUp} aria-label={`Interactive spectrogram from ${spectrogramMinFrequency / 1000} to ${spectrogramMaxFrequency / 1000} kilohertz with ${spectrogramFloorDb} to ${spectrogramCeilingDb} decibel scale`} data-testid="canvas-spectrogram" data-request-id={spectrogramRequestId} data-result-id={spectrogramResultId} />
                       </div>
                       <div className="flex flex-wrap items-center justify-between gap-3 mt-3">
                         <div className="flex items-center gap-2 text-[11px] text-muted-foreground"><span className="inline-block w-3 h-3 rounded-sm" style={{ background: spectrogramColorCss(0.08, spectrogramPalette) }} /> low energy <span className="inline-block w-3 h-3 rounded-sm ml-2" style={{ background: spectrogramColorCss(0.92, spectrogramPalette) }} /> high energy <span className="inline-block w-3 h-3 rounded-sm bg-[#ff8a4c] ml-2" /> playhead</div>
@@ -1138,7 +1146,7 @@ function App() {
               )}
             </div>
             <aside className="space-y-4">
-              <section className="panel">
+              <section className="panel" data-testid="panel-signal-statistics" data-request-id={analysisRequestId} data-result-id={analysisResultId}>
                 <div className="panel-header"><div className="flex items-center gap-2"><Gauge size={15} color="hsl(var(--primary))" /><div className="section-title">Signal statistics</div></div><span className="chip">estimate</span></div>
                 <div className="panel-body !pb-3"><div className="text-[10px] text-muted-foreground uppercase tracking-wider mb-2">Current / full file</div><StatsGrid stats={currentStats} /><div className="text-[10px] text-muted-foreground uppercase tracking-wider mt-4 mb-2">Selection · {formatTime(selectionEnd - selectionStart)}</div><StatsGrid stats={selectionCurrentStats} /></div>
                 <div className="px-4 pb-4 text-[10px] leading-relaxed text-muted-foreground"><Info size={12} className="inline mr-1 -mt-0.5" />Local BS.1770-style K-weighting and gating; true peak uses 4× interpolation. Values are practical estimates, not certified meter readings.</div>
