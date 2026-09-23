@@ -20,6 +20,28 @@ export interface WavProgress {
   (completed: number, total: number): void;
 }
 
+interface BeforeUnloadTarget {
+  addEventListener(type: 'beforeunload', listener: (event: BeforeUnloadEvent) => void): void;
+  removeEventListener(type: 'beforeunload', listener: (event: BeforeUnloadEvent) => void): void;
+}
+
+/** Warn while an operation can leave a partially written large export behind. */
+export async function withLargeExportLeaveWarning<T>(
+  operation: () => Promise<T>,
+  target: BeforeUnloadTarget = window,
+): Promise<T> {
+  const warnBeforeUnload = (event: BeforeUnloadEvent) => {
+    event.preventDefault();
+    event.returnValue = '';
+  };
+  target.addEventListener('beforeunload', warnBeforeUnload);
+  try {
+    return await operation();
+  } finally {
+    target.removeEventListener('beforeunload', warnBeforeUnload);
+  }
+}
+
 function id(view: DataView, at: number) {
   return String.fromCharCode(view.getUint8(at), view.getUint8(at + 1), view.getUint8(at + 2), view.getUint8(at + 3));
 }

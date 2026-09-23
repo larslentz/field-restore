@@ -6,7 +6,7 @@ import { makeDefaultChain, makeModule, MODULE_LABELS, renderChain, type EditModu
 import { analyzeLoudness, type LoudnessStats } from '@/lib/loudness';
 import { createPlaybackRangePlan } from '@/lib/playback-range';
 import { calculateSpectrogram, type SpectrogramData } from '@/lib/spectrogram';
-import { fingerprintWav, parseWavMetadata, readFrames, writeFloat32WavChunks, type WavMetadata } from '@/lib/large-wav';
+import { fingerprintWav, parseWavMetadata, readFrames, withLargeExportLeaveWarning, writeFloat32WavChunks, type WavMetadata } from '@/lib/large-wav';
 import { isVerifiedRelink, openVerifiedFileHandle } from '@/lib/file-access';
 import { listProjects, loadProject as loadProjectV2, queryFileHandlePermission, requestFileHandlePermission, saveProject as saveProjectV2, type ProjectRecord } from '@/lib/project-store';
 import { createStreamingEditChain } from '@/lib/streaming-edit-chain';
@@ -819,18 +819,20 @@ function App() {
       exportJobRef.current = controller;
       try {
         const handle = await picker({ suggestedName: `${safeName || 'field-restore'}-rx.wav`, types: [{ description: 'WAV audio', accept: { 'audio/wav': ['.wav'] } }] });
-        const writable = await handle.createWritable();
-        const { file, metadata } = largeSource;
-        const processor = createStreamingEditChain(modules, metadata.sampleRate, metadata.frameCount, 0);
-        setOperationStatus('Exporting file-backed WAV');
-        await writeFloat32WavChunks(writable, {
-          channels: metadata.channels,
-          sampleRate: metadata.sampleRate,
-          frameCount: metadata.frameCount,
-          signal: controller.signal,
-          readFrames: (start, count, signal) => readFrames(file, metadata, start, count, { signal }),
-          processFrames: (channels, start) => processor.process(channels, start),
-          onProgress: (completed, total) => setOperationProgress(completed / total),
+        await withLargeExportLeaveWarning(async () => {
+          const writable = await handle.createWritable();
+          const { file, metadata } = largeSource;
+          const processor = createStreamingEditChain(modules, metadata.sampleRate, metadata.frameCount, 0);
+          setOperationStatus('Exporting file-backed WAV');
+          await writeFloat32WavChunks(writable, {
+            channels: metadata.channels,
+            sampleRate: metadata.sampleRate,
+            frameCount: metadata.frameCount,
+            signal: controller.signal,
+            readFrames: (start, count, signal) => readFrames(file, metadata, start, count, { signal }),
+            processFrames: (channels, start) => processor.process(channels, start),
+            onProgress: (completed, total) => setOperationProgress(completed / total),
+          });
         });
       } catch (caught) {
         const cancelledAtPicker = (caught as Error).name === 'AbortError';
@@ -839,6 +841,8 @@ function App() {
           : caught instanceof Error ? caught.message : 'Export incomplete: unable to export this recording.');
         setOperationStatus('');
         return;
+      } finally {
+        if (exportJobRef.current === controller) exportJobRef.current = null;
       }
     } else {
       downloadBlob(encodeWav(currentSource), `${safeName || 'field-restore'}-rx.wav`);

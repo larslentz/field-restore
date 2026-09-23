@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { generateFloat32WavHeader, parseWavMetadata, readFrames, writeFloat32WavChunks } from './large-wav.ts';
+import { generateFloat32WavHeader, parseWavMetadata, readFrames, withLargeExportLeaveWarning, writeFloat32WavChunks } from './large-wav.ts';
 
 const text = (bytes, start, length) => String.fromCharCode(...bytes.slice(start, start + length));
 
@@ -106,4 +106,59 @@ test('aborts and reports an incomplete export when cancellation interrupts strea
     readFrames: async () => [new Float32Array(2)],
   }), /Export incomplete: Export was cancelled/);
   assert.equal(aborted, true);
+});
+
+function beforeUnloadTarget() {
+  let listener;
+  return {
+    target: {
+      addEventListener(type, next) {
+        assert.equal(type, 'beforeunload');
+        listener = next;
+      },
+      removeEventListener(type, current) {
+        assert.equal(type, 'beforeunload');
+        if (listener === current) listener = undefined;
+      },
+    },
+    dispatch() {
+      let prevented = false;
+      const event = {
+        preventDefault() { prevented = true; },
+        returnValue: undefined,
+      };
+      listener?.(event);
+      return { prevented, returnValue: event.returnValue };
+    },
+    isRegistered() {
+      return listener !== undefined;
+    },
+  };
+}
+
+test('warns before leaving only while a large export is active', async () => {
+  const lifecycle = beforeUnloadTarget();
+  let finish;
+  const operation = withLargeExportLeaveWarning(
+    () => new Promise((resolve) => { finish = resolve; }),
+    lifecycle.target,
+  );
+
+  assert.equal(lifecycle.isRegistered(), true);
+  assert.deepEqual(lifecycle.dispatch(), { prevented: true, returnValue: '' });
+
+  finish('complete');
+  assert.equal(await operation, 'complete');
+  assert.equal(lifecycle.isRegistered(), false);
+  assert.deepEqual(lifecycle.dispatch(), { prevented: false, returnValue: undefined });
+});
+
+test('removes the leave warning immediately after a failed large export', async () => {
+  const lifecycle = beforeUnloadTarget();
+  await assert.rejects(
+    withLargeExportLeaveWarning(async () => { throw new Error('write failed'); }, lifecycle.target),
+    /write failed/,
+  );
+  assert.equal(lifecycle.isRegistered(), false);
+  assert.deepEqual(lifecycle.dispatch(), { prevented: false, returnValue: undefined });
 });
