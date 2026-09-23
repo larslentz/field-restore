@@ -168,6 +168,8 @@ function App() {
     plotLeft: number;
     plotWidth: number;
     viewDuration: number;
+    startClientX: number;
+    moved: boolean;
   } | null>(null);
   const dragDepthRef = useRef(0);
   const analysisJobRef = useRef<WorkerJob<LargeAnalysisResult> | null>(null);
@@ -886,8 +888,9 @@ function App() {
         plotLeft: SPECTROGRAM_LEFT,
         plotWidth,
         viewDuration,
+        startClientX: event.clientX,
+        moved: false,
       };
-      setTimeViewCenter(viewStart + viewDuration / 2);
       event.currentTarget.setPointerCapture(event.pointerId);
       return;
     }
@@ -918,6 +921,10 @@ function App() {
   };
   const onCanvasPointerMove = (event: ReactPointerEvent<HTMLCanvasElement>) => {
     if (timeDragRef.current) {
+      if (!timeDragRef.current.moved) {
+        if (Math.abs(event.clientX - timeDragRef.current.startClientX) < 3) return;
+        timeDragRef.current.moved = true;
+      }
       const bounds = event.currentTarget.getBoundingClientRect();
       const pointerX = event.clientX - bounds.left - timeDragRef.current.plotLeft;
       const nextViewStart = anchoredTimeViewStart(
@@ -1269,12 +1276,14 @@ function App() {
                </button>
              </div>
            )}
-          {(analysisStatus || spectrogramStatus || operationStatus) && (() => {
-            const backgroundStatus = analysisStatus || spectrogramStatus;
-            const visibleStatus = backgroundStatus || operationStatus;
-            const visibleProgress = analysisStatus ? analysisProgress : spectrogramStatus ? spectrogramProgress : operationProgress;
-            return <div className="max-w-[1660px] mx-auto mb-3 border rounded-md px-3 py-2 text-[11px] flex items-center gap-3 bg-[hsl(var(--card))]" role="status" data-testid="status-background-work" data-progress={visibleProgress}><span>{operationPaused && backgroundStatus ? `${visibleStatus} · paused` : visibleStatus}</span><div className="h-1.5 flex-1 max-w-56 bg-[hsl(var(--muted))] rounded overflow-hidden"><div className="h-full bg-[hsl(var(--primary))]" style={{ width: `${Math.max(4, visibleProgress * 100)}%` }} /></div><span className="font-mono-value">{Math.round(visibleProgress * 100)}%</span>{backgroundStatus && <><button type="button" className="quiet-btn !py-1" onClick={operationPaused ? resumeBackgroundWork : pauseBackgroundWork} data-testid="button-analysis-pause">{operationPaused ? <Play size={12} /> : <Pause size={12} />}{operationPaused ? 'Resume' : 'Pause'}</button><button type="button" className="icon-btn !h-7 !min-w-7" onClick={cancelBackgroundWork} aria-label="Cancel background analysis" data-testid="button-analysis-cancel"><X size={13} /></button></>}</div>;
-          })()}
+          <div className="work-status-slot">
+            {(analysisStatus || spectrogramStatus || operationStatus) && (() => {
+              const backgroundStatus = analysisStatus || spectrogramStatus;
+              const visibleStatus = backgroundStatus || operationStatus;
+              const visibleProgress = analysisStatus ? analysisProgress : spectrogramStatus ? spectrogramProgress : operationProgress;
+              return <div className="work-status-card max-w-[1660px] mx-auto border rounded-md px-3 text-[11px] flex items-center gap-3 bg-[hsl(var(--card))]" role="status" data-testid="status-background-work" data-progress={visibleProgress}><span>{operationPaused && backgroundStatus ? `${visibleStatus} · paused` : visibleStatus}</span><div className="h-1.5 flex-1 max-w-56 bg-[hsl(var(--muted))] rounded overflow-hidden"><div className="h-full bg-[hsl(var(--primary))]" style={{ width: `${Math.max(4, visibleProgress * 100)}%` }} /></div><span className="font-mono-value">{Math.round(visibleProgress * 100)}%</span>{backgroundStatus && <><button type="button" className="quiet-btn !py-1" onClick={operationPaused ? resumeBackgroundWork : pauseBackgroundWork} data-testid="button-analysis-pause">{operationPaused ? <Play size={12} /> : <Pause size={12} />}{operationPaused ? 'Resume' : 'Pause'}</button><button type="button" className="icon-btn !h-7 !min-w-7" onClick={cancelBackgroundWork} aria-label="Cancel background analysis" data-testid="button-analysis-cancel"><X size={13} /></button></>}</div>;
+            })()}
+          </div>
           <div className="workspace-grid">
             <div className="min-w-0 space-y-4">
               <div className="flex items-center justify-between">
