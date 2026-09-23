@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent as ReactDragEvent, type PointerEvent as ReactPointerEvent } from 'react';
-import { Activity, ArrowDown, ArrowUp, AudioLines, Check, ChevronDown, CircleHelp, Download, FileAudio, FolderOpen, Gauge, Info, Keyboard, Layers3, Menu, Pause, Play, Plus, Redo2, RotateCcw, Save, Settings, Square, Trash2, Undo2, Waves, X, ZoomIn, ZoomOut } from 'lucide-react';
+import { Activity, ArrowDown, ArrowUp, Check, ChevronDown, CircleHelp, Download, FileAudio, FolderOpen, Gauge, Info, Keyboard, Layers3, Menu, Pause, Play, Plus, Redo2, RotateCcw, Save, Settings, Square, Trash2, Undo2, Waves, X, ZoomIn, ZoomOut } from 'lucide-react';
 import { createDemoAudio, downloadBlob, encodeWav, parseWav, type AudioSource } from '@/lib/audio';
 import { decodeChannels, loadProject, projectFromSource, saveProject } from '@/lib/persistence';
 import { makeDefaultChain, makeModule, MODULE_LABELS, renderChain, type EditModule, type ModuleType } from '@/lib/edit-chain';
@@ -30,7 +30,6 @@ type SpectrogramView = {
 };
 
 const MODULE_TYPES: ModuleType[] = ['gain', 'fade', 'eq', 'dc', 'hum', 'wind', 'region', 'ambient'];
-const colorForMarker = '#d8ed55';
 const SPECTROGRAM_LEFT = 48;
 const SPECTROGRAM_RIGHT = 72;
 const SPECTROGRAM_BOTTOM = 28;
@@ -107,7 +106,7 @@ function App() {
   const [undoStack, setUndoStack] = useState<EditModule[][]>([]);
   const [redoStack, setRedoStack] = useState<EditModule[][]>([]);
   const [selection, setSelection] = useState<[number, number]>([4.1, 7.8]);
-  const [markers, setMarkers] = useState<Marker[]>([{ id: 'm-1', time: 7.8, label: 'transient', color: colorForMarker }]);
+  const [markers, setMarkers] = useState<Marker[]>([]);
   const [regions, setRegions] = useState<Region[]>([]);
   const [activeTab, setActiveTab] = useState<ViewTab>('edit');
   const [zoom, setZoom] = useState(1);
@@ -1176,20 +1175,6 @@ function App() {
     const selectedRight = graphLeft + ((selectionEnd - viewStart) / viewDuration) * graphWidth;
     context.fillStyle = 'rgba(214, 237, 85, .13)'; context.fillRect(selectedLeft, 0, Math.max(2, selectedRight - selectedLeft), graphBottom);
     context.strokeStyle = 'rgba(216, 237, 85, .5)'; context.strokeRect(selectedLeft, 0, Math.max(2, selectedRight - selectedLeft), graphBottom);
-    markers.forEach((marker) => {
-      const x = graphLeft + ((marker.time - viewStart) / viewDuration) * graphWidth;
-      if (x >= graphLeft && x <= graphRight) {
-        context.strokeStyle = 'rgba(216, 237, 85, .55)';
-        context.setLineDash([3, 4]);
-        context.beginPath(); context.moveTo(x, 0); context.lineTo(x, graphBottom); context.stroke();
-        context.setLineDash([]);
-        context.fillStyle = marker.color;
-        context.beginPath(); context.moveTo(x - 4, 2); context.lineTo(x + 4, 2); context.lineTo(x, 9); context.closePath(); context.fill();
-        context.font = '9px "Space Mono", monospace';
-        context.textAlign = 'left';
-        context.fillText(marker.label, Math.min(graphRight - 70, x + 6), 11);
-      }
-    });
     const headX = graphLeft + ((playHead - viewStart) / viewDuration) * graphWidth; context.strokeStyle = '#ff8a4c'; context.lineWidth = 2; context.beginPath(); context.moveTo(headX, 0); context.lineTo(headX, graphBottom); context.stroke();
 
     context.fillStyle = '#f2f4e8'; context.font = '10px "Space Mono", monospace'; context.textAlign = 'left';
@@ -1239,7 +1224,7 @@ function App() {
     context.textAlign = 'center';
     context.fillText('LEVEL (dB)', 0, 0);
     context.restore();
-  }, [activeTab, markers, playHead, selectionEnd, selectionStart, sourceChannelCount, spectrogramCeilingDb, spectrogramFloorDb, spectrogramMaxFrequency, spectrogramMinFrequency, spectrogramPalette, spectrograms, viewDuration, viewStart]);
+  }, [activeTab, playHead, selectionEnd, selectionStart, sourceChannelCount, spectrogramCeilingDb, spectrogramFloorDb, spectrogramMaxFrequency, spectrogramMinFrequency, spectrogramPalette, spectrograms, viewDuration, viewStart]);
 
   useEffect(() => {
     const keyHandler = (event: KeyboardEvent) => {
@@ -1250,9 +1235,6 @@ function App() {
     };
     window.addEventListener('keydown', keyHandler); return () => window.removeEventListener('keydown', keyHandler);
   }, [play, redo, undo]);
-
-  const addMarker = () => setMarkers((items) => [...items, { id: `marker-${Date.now()}`, time: selectionStart, label: `mark ${items.length + 1}`, color: colorForMarker }]);
-  const addRegion = () => selectionEnd - selectionStart > .01 && setRegions((items) => [...items, { id: `region-${Date.now()}`, start: selectionStart, end: selectionEnd, label: `region ${items.length + 1}` }]);
 
   return (
     <div
@@ -1286,7 +1268,7 @@ function App() {
         <div className="px-3 mt-8 sidebar-title eyebrow text-[#91a69d]">Session</div>
         <div className="px-3 mt-2 space-y-1">
           <button type="button" className="nav-item" onClick={() => void pickWavFile()} data-testid="nav-import"><FileAudio size={15} /><span className="nav-label">Import WAV</span></button>
-          <button type="button" className="nav-item" onClick={() => { stopPlayback(); setLargeSource(null); setSource(createDemoAudio()); setModules(makeDefaultChain()); setSelection([4.1, 7.8]); setMarkers([{ id: 'm-1', time: 7.8, label: 'transient', color: colorForMarker }]); setRegions([]); setTitle('Coastal dawn / north bluff'); setSavedStatus('Demo source loaded'); }} data-testid="nav-demo"><Waves size={15} /><span className="nav-label">Load demo source</span></button>
+          <button type="button" className="nav-item" onClick={() => { stopPlayback(); setLargeSource(null); setSource(createDemoAudio()); setModules(makeDefaultChain()); setSelection([4.1, 7.8]); setMarkers([]); setRegions([]); setTitle('Coastal dawn / north bluff'); setSavedStatus('Demo source loaded'); }} data-testid="nav-demo"><Waves size={15} /><span className="nav-label">Load demo source</span></button>
           <button type="button" className="nav-item" onClick={save} data-testid="nav-save"><Save size={15} /><span className="nav-label">Save locally</span></button>
           <button type="button" className="nav-item" onClick={() => setModal('export')} data-testid="nav-export"><Download size={15} /><span className="nav-label">Export</span></button>
         </div>
@@ -1362,6 +1344,23 @@ function App() {
                       </div>
                     </div>
                   </section>
+                   <section className="panel signal-stats-bar" data-testid="panel-signal-statistics" data-request-id={analysisRequestId} data-result-id={analysisResultId}>
+                     <div className="signal-stats-heading">
+                       <div className="flex items-center gap-2"><Gauge size={15} color="hsl(var(--primary))" /><div className="section-title">Signal statistics</div></div>
+                       <span className="chip">estimate</span>
+                     </div>
+                     <div className="signal-stats-groups">
+                       <div className="signal-stats-group">
+                         <div className="signal-stats-label">Current / full file</div>
+                         <StatsGrid stats={currentStats} />
+                       </div>
+                       <div className="signal-stats-group">
+                         <div className="signal-stats-label">Selection · {formatTime(selectionEnd - selectionStart)}</div>
+                         <StatsGrid stats={selectionCurrentStats} />
+                       </div>
+                     </div>
+                     <div className="signal-stats-note"><Info size={12} />Local BS.1770-style estimates with 4× true-peak interpolation; not certified meter readings.</div>
+                   </section>
                   <section className="transport" aria-label="Audio transport">
                     <button type="button" className="icon-btn !bg-[#d8ed55] !text-[#18231f] !rounded-full" onClick={play} aria-label={isPlaying ? 'Pause playback' : 'Play playback'} data-testid="button-play">{isPlaying ? <Pause size={16} fill="currentColor" /> : <Play size={16} fill="currentColor" />}</button>
                     <button type="button" className="icon-btn" onClick={() => { stopPlayback(); setPlayHead(0); }} aria-label="Stop and return to start" data-testid="button-stop"><Square size={14} fill="currentColor" /></button>
@@ -1380,22 +1379,6 @@ function App() {
                 </>
               )}
             </div>
-            <aside className="space-y-4">
-              <section className="panel" data-testid="panel-signal-statistics" data-request-id={analysisRequestId} data-result-id={analysisResultId}>
-                <div className="panel-header"><div className="flex items-center gap-2"><Gauge size={15} color="hsl(var(--primary))" /><div className="section-title">Signal statistics</div></div><span className="chip">estimate</span></div>
-                <div className="panel-body !pb-3"><div className="text-[10px] text-muted-foreground uppercase tracking-wider mb-2">Current / full file</div><StatsGrid stats={currentStats} /><div className="text-[10px] text-muted-foreground uppercase tracking-wider mt-4 mb-2">Selection · {formatTime(selectionEnd - selectionStart)}</div><StatsGrid stats={selectionCurrentStats} /></div>
-                <div className="px-4 pb-4 text-[10px] leading-relaxed text-muted-foreground"><Info size={12} className="inline mr-1 -mt-0.5" />Local BS.1770-style K-weighting and gating; true peak uses 4× interpolation. Values are practical estimates, not certified meter readings.</div>
-              </section>
-              <section className="panel">
-                <div className="panel-header"><div className="flex items-center gap-2"><AudioLines size={15} color="hsl(var(--accent))" /><div className="section-title">Markers & regions</div></div><span className="font-mono-value text-[10px] text-muted-foreground">{markers.length + regions.length}</span></div>
-                <div className="panel-body !pt-2">
-                  {markers.map((marker) => <div key={marker.id} className="flex items-center gap-2 py-2 border-b border-[hsl(var(--border))]"><span className="w-2 h-2 rounded-full bg-[#d8ed55]" /><input className="input-field !border-0 !p-0 !bg-transparent flex-1" value={marker.label} onChange={(event) => setMarkers((items) => items.map((item) => item.id === marker.id ? { ...item, label: event.target.value } : item))} aria-label={`Marker label ${marker.label}`} data-testid={`input-marker-${marker.id}`} /><span className="font-mono-value text-[10px] text-muted-foreground">{formatTime(marker.time)}</span><button type="button" className="icon-btn !h-6 !min-w-6" onClick={() => setMarkers((items) => items.filter((item) => item.id !== marker.id))} aria-label={`Delete marker ${marker.label}`} data-testid={`button-delete-marker-${marker.id}`}><Trash2 size={12} /></button></div>)}
-                  {regions.map((region) => <div key={region.id} className="flex items-center gap-2 py-2 border-b border-[hsl(var(--border))]"><span className="w-2 h-2 rounded-sm bg-[#ff8a4c]" /><input className="input-field !border-0 !p-0 !bg-transparent flex-1 min-w-0" value={region.label} onChange={(event) => setRegions((items) => items.map((item) => item.id === region.id ? { ...item, label: event.target.value } : item))} aria-label={`Region label ${region.label}`} data-testid={`input-region-${region.id}`} /><span className="font-mono-value text-[10px] text-muted-foreground">{formatTime(region.end - region.start)}</span><button type="button" className="icon-btn !h-6 !min-w-6" onClick={() => setRegions((items) => items.filter((item) => item.id !== region.id))} aria-label={`Delete region ${region.label}`} data-testid={`button-delete-region-${region.id}`}><Trash2 size={12} /></button></div>)}
-                  {!markers.length && !regions.length && <div className="text-[11px] text-muted-foreground py-3">Select a range, then add a marker or region.</div>}
-                  <div className="flex gap-2 pt-3"><button type="button" className="quiet-btn flex-1 !py-1.5" onClick={addMarker} data-testid="button-add-marker"><Plus size={12} /> Marker</button><button type="button" className="quiet-btn flex-1 !py-1.5" onClick={addRegion} disabled={selectionEnd - selectionStart < .01} data-testid="button-add-region"><Plus size={12} /> Region</button></div>
-                </div>
-              </section>
-            </aside>
           </div>
         </main>
       </section>
