@@ -16,6 +16,7 @@ import './index.css';
 
 type ViewTab = 'edit' | 'analyze' | 'project';
 type MonitorMode = 'current' | 'original';
+type SpectrogramPaletteId = 'cyan-orange' | 'field-restore' | 'magma' | 'grayscale';
 type Marker = { id: string; time: number; label: string; color: string };
 type Region = { id: string; start: number; end: number; label: string };
 type LargeSource = { file: File; metadata: WavMetadata; fingerprint: string; fileHandle?: FileSystemFileHandle };
@@ -28,20 +29,49 @@ const SPECTROGRAM_BOTTOM = 28;
 const SPECTROGRAM_SCALE_DIVISIONS = 5;
 const EMPTY_STATS: LoudnessStats = { truePeakDbtp: -Infinity, integratedLufs: -Infinity, loudnessRangeLu: 0, maxShortTermLufs: -Infinity };
 const EMPTY_SPECTROGRAM = { width: 480, height: 110, values: new Float32Array(480 * 110) };
+const SPECTROGRAM_PALETTES: Record<SpectrogramPaletteId, { label: string; description: string; stops: Array<[number, string]> }> = {
+  'cyan-orange': {
+    label: 'Cyan → orange',
+    description: 'Cool detail with warm peaks',
+    stops: [[0, '#071018'], [0.2, '#0a2943'], [0.4, '#075e78'], [0.58, '#09a4b1'], [0.73, '#7bd1be'], [0.86, '#e5cf72'], [1, '#f1873f']],
+  },
+  'field-restore': {
+    label: 'Field Restore',
+    description: 'Original blue, green, and amber scale',
+    stops: [[0, '#0e1b26'], [0.35, '#2d6570'], [0.55, '#547b7b'], [0.72, '#989a56'], [1, '#f0a12e']],
+  },
+  magma: {
+    label: 'Magma',
+    description: 'Dark violet through coral and gold',
+    stops: [[0, '#09071b'], [0.24, '#32115d'], [0.48, '#7b2382'], [0.7, '#d64d68'], [0.86, '#f58b4b'], [1, '#f8df8b']],
+  },
+  grayscale: {
+    label: 'Grayscale',
+    description: 'Neutral monochrome contrast',
+    stops: [[0, '#090d10'], [0.35, '#303b42'], [0.68, '#87949a'], [1, '#f2f4ed']],
+  },
+};
 
-function spectrogramColor(intensity: number) {
-  const red = intensity < 0.55 ? 14 + intensity * 90 : 64 + (intensity - 0.55) * 425;
-  const green = intensity < 0.45 ? 27 + intensity * 210 : 121 + (intensity - 0.45) * 205;
-  const blue = intensity < 0.5 ? 38 + intensity * 170 : 123 - (intensity - 0.5) * 210;
-  return [
-    Math.max(0, Math.min(255, red)),
-    Math.max(0, Math.min(255, green)),
-    Math.max(0, Math.min(255, blue)),
-  ] as const;
+function hexToRgb(hex: string) {
+  const value = Number.parseInt(hex.slice(1), 16);
+  return [value >> 16, (value >> 8) & 255, value & 255] as const;
 }
 
-function spectrogramColorCss(intensity: number) {
-  const [red, green, blue] = spectrogramColor(intensity);
+function spectrogramColor(intensity: number, paletteId: SpectrogramPaletteId) {
+  const stops = SPECTROGRAM_PALETTES[paletteId].stops;
+  const value = Math.max(0, Math.min(1, intensity));
+  const upperIndex = stops.findIndex(([position]) => position >= value);
+  if (upperIndex <= 0) return hexToRgb(stops[0][1]);
+  const [lowerPosition, lowerHex] = stops[upperIndex - 1];
+  const [upperPosition, upperHex] = stops[upperIndex];
+  const amount = (value - lowerPosition) / Math.max(0.0001, upperPosition - lowerPosition);
+  const lower = hexToRgb(lowerHex);
+  const upper = hexToRgb(upperHex);
+  return lower.map((channel, index) => Math.round(channel + (upper[index] - channel) * amount)) as unknown as readonly [number, number, number];
+}
+
+function spectrogramColorCss(intensity: number, paletteId: SpectrogramPaletteId) {
+  const [red, green, blue] = spectrogramColor(intensity, paletteId);
   return `rgb(${red}, ${green}, ${blue})`;
 }
 
@@ -83,6 +113,10 @@ function App() {
   const [spectrogramMinFrequency, setSpectrogramMinFrequency] = useState(0);
   const [spectrogramMaxFrequency, setSpectrogramMaxFrequency] = useState(20000);
   const [spectrogramCeilingDb, setSpectrogramCeilingDb] = useState(-20);
+  const [spectrogramPalette, setSpectrogramPalette] = useState<SpectrogramPaletteId>(() => {
+    const saved = localStorage.getItem('field-restore-spectrogram-palette');
+    return saved && saved in SPECTROGRAM_PALETTES ? saved as SpectrogramPaletteId : 'cyan-orange';
+  });
   const [timeViewCenter, setTimeViewCenter] = useState<number | null>(null);
   const [largeSource, setLargeSource] = useState<LargeSource | null>(null);
   const [largeSpectrograms, setLargeSpectrograms] = useState<{ left: SpectrogramData; right: SpectrogramData }>({ left: EMPTY_SPECTROGRAM, right: EMPTY_SPECTROGRAM });
@@ -878,7 +912,7 @@ function App() {
         const image = imageContext.createImageData(spectrogram.width, spectrogram.height);
         for (let index = 0; index < spectrogram.values.length; index += 1) {
           const intensity = spectrogram.values[index];
-          const [red, green, blue] = spectrogramColor(intensity);
+          const [red, green, blue] = spectrogramColor(intensity, spectrogramPalette);
           const pixel = index * 4;
           image.data[pixel] = red;
           image.data[pixel + 1] = green;
@@ -942,9 +976,9 @@ function App() {
     context.textAlign = 'left';
     for (const top of [0, paneHeight]) {
       const gradient = context.createLinearGradient(0, top + 3, 0, top + paneHeight - 3);
-      gradient.addColorStop(0, spectrogramColorCss(1));
-      gradient.addColorStop(0.5, spectrogramColorCss(0.5));
-      gradient.addColorStop(1, spectrogramColorCss(0));
+      gradient.addColorStop(0, spectrogramColorCss(1, spectrogramPalette));
+      gradient.addColorStop(0.5, spectrogramColorCss(0.5, spectrogramPalette));
+      gradient.addColorStop(1, spectrogramColorCss(0, spectrogramPalette));
       context.fillStyle = gradient;
       context.fillRect(graphRight + 6, top + 3, 9, paneHeight - 6);
       context.strokeStyle = 'rgba(242, 244, 232, .35)';
@@ -974,7 +1008,7 @@ function App() {
     context.textAlign = 'center';
     context.fillText('LEVEL (dB)', 0, 0);
     context.restore();
-  }, [activeTab, markers, playHead, selectionEnd, selectionStart, sourceChannelCount, spectrogramCeilingDb, spectrogramFloorDb, spectrogramMaxFrequency, spectrogramMinFrequency, spectrograms, viewDuration, viewStart]);
+  }, [activeTab, markers, playHead, selectionEnd, selectionStart, sourceChannelCount, spectrogramCeilingDb, spectrogramFloorDb, spectrogramMaxFrequency, spectrogramMinFrequency, spectrogramPalette, spectrograms, viewDuration, viewStart]);
 
   useEffect(() => {
     const keyHandler = (event: KeyboardEvent) => {
@@ -1080,7 +1114,7 @@ function App() {
                         <canvas ref={canvasRef} className="waveform-canvas" onPointerDown={onCanvasPointerDown} onPointerMove={onCanvasPointerMove} onPointerUp={onCanvasPointerUp} onPointerCancel={onCanvasPointerUp} aria-label={`Interactive spectrogram from ${spectrogramMinFrequency / 1000} to ${spectrogramMaxFrequency / 1000} kilohertz with ${spectrogramFloorDb} to ${spectrogramCeilingDb} decibel scale`} data-testid="canvas-spectrogram" />
                       </div>
                       <div className="flex flex-wrap items-center justify-between gap-3 mt-3">
-                        <div className="flex items-center gap-2 text-[11px] text-muted-foreground"><span className="inline-block w-3 h-3 rounded-sm bg-[#142b38]" /> low energy <span className="inline-block w-3 h-3 rounded-sm bg-[#d8ed55] ml-2" /> high energy <span className="inline-block w-3 h-3 rounded-sm bg-[#ff8a4c] ml-2" /> playhead</div>
+                        <div className="flex items-center gap-2 text-[11px] text-muted-foreground"><span className="inline-block w-3 h-3 rounded-sm" style={{ background: spectrogramColorCss(0.08, spectrogramPalette) }} /> low energy <span className="inline-block w-3 h-3 rounded-sm ml-2" style={{ background: spectrogramColorCss(0.92, spectrogramPalette) }} /> high energy <span className="inline-block w-3 h-3 rounded-sm bg-[#ff8a4c] ml-2" /> playhead</div>
                         <div className="font-mono-value text-[11px]" data-testid="text-selection-time">{formatTime(selectionStart, true)} — {formatTime(selectionEnd, true)} <span className="text-muted-foreground">({(selectionEnd - selectionStart).toFixed(3)} s selected)</span></div>
                       </div>
                     </div>
@@ -1129,7 +1163,7 @@ function App() {
       <input ref={fileRef} type="file" accept=".wav,audio/wav" onChange={importFile} className="hidden" data-testid="input-import-wav" />
       {modal === 'export' && <ExportModal onClose={() => setModal(null)} onExport={exportAudio} title={title} />}
       {modal === 'help' && <HelpModal onClose={() => setModal(null)} />}
-      {modal === 'settings' && <SettingsModal onClose={() => setModal(null)} />}
+      {modal === 'settings' && <SettingsModal onClose={() => setModal(null)} spectrogramPalette={spectrogramPalette} onSpectrogramPaletteChange={(palette) => { setSpectrogramPalette(palette); localStorage.setItem('field-restore-spectrogram-palette', palette); }} />}
     </div>
   );
 }
@@ -1257,10 +1291,10 @@ function HelpModal({ onClose }: { onClose: () => void }) {
   return <div className="modal-backdrop"><div className="modal-card" role="dialog" aria-modal="true" aria-labelledby="help-title"><div className="modal-header"><div><div className="eyebrow">Field notes</div><h2 id="help-title" className="text-[17px] font-bold mt-1">A quiet tool for noisy places</h2></div><button type="button" className="icon-btn" onClick={onClose} aria-label="Close help" data-testid="button-close-help"><X size={16} /></button></div><div className="modal-body"><p className="text-[12px] leading-relaxed text-muted-foreground">Field Restore intentionally favors small, reversible moves. Import a WAV, select a moment, listen against the original, and keep an ear on the source—not just the meters.</p><div className="mt-4"><div className="eyebrow mb-2">Keyboard</div><div className="help-row"><span className="keycap">Space</span><span>Play / pause</span></div><div className="help-row"><span className="keycap">⌘ Z</span><span>Undo chain edit</span></div><div className="help-row"><span className="keycap">⇧⌘ Z</span><span>Redo chain edit</span></div><div className="help-row"><span className="keycap">Esc</span><span>Close a dialog or menu</span></div></div><div className="mt-5 p-3 bg-[hsl(var(--muted))] rounded text-[11px] leading-relaxed"><Keyboard size={14} className="inline mr-2 -mt-0.5" />For critical work, verify the exported WAV in a second application. Browser DSP here is conservative and deliberately labeled as an estimate.</div></div><div className="modal-footer"><button type="button" className="primary-btn" onClick={onClose} data-testid="button-done-help">Back to work</button></div></div></div>;
 }
 
-function SettingsModal({ onClose }: { onClose: () => void }) {
+function SettingsModal({ onClose, spectrogramPalette, onSpectrogramPaletteChange }: { onClose: () => void; spectrogramPalette: SpectrogramPaletteId; onSpectrogramPaletteChange: (palette: SpectrogramPaletteId) => void }) {
   const [dark, setDark] = useState(() => document.documentElement.classList.contains('dark'));
   const toggleTheme = () => { const next = !dark; setDark(next); document.documentElement.classList.toggle('dark', next); localStorage.setItem('field-restore-theme', next ? 'dark' : 'light'); };
-  return <div className="modal-backdrop"><div className="modal-card" role="dialog" aria-modal="true" aria-labelledby="settings-title"><div className="modal-header"><div><div className="eyebrow">Instrument settings</div><h2 id="settings-title" className="text-[17px] font-bold mt-1">Preferences</h2></div><button type="button" className="icon-btn" onClick={onClose} aria-label="Close settings" data-testid="button-close-settings"><X size={16} /></button></div><div className="modal-body space-y-4"><div className="flex items-center justify-between border rounded p-3"><div><div className="text-[12px] font-semibold">Darkroom contrast</div><div className="text-[11px] text-muted-foreground mt-1">Switch to a darker monitoring surface.</div></div><button type="button" className={`quiet-btn ${dark ? '!bg-[hsl(var(--primary))] !text-[hsl(var(--primary-foreground))]' : ''}`} onClick={toggleTheme} aria-pressed={dark} data-testid="button-toggle-theme">{dark ? 'On' : 'Off'}</button></div><div className="border rounded p-3 text-[11px] leading-relaxed text-muted-foreground"><RotateCcw size={14} className="inline mr-2 -mt-0.5" />Project storage uses browser localStorage. Clear site data in browser settings to remove it. No audio or metadata leaves this device.</div></div><div className="modal-footer"><button type="button" className="primary-btn" onClick={onClose} data-testid="button-done-settings">Done</button></div></div></div>;
+  return <div className="modal-backdrop"><div className="modal-card" role="dialog" aria-modal="true" aria-labelledby="settings-title"><div className="modal-header"><div><div className="eyebrow">Instrument settings</div><h2 id="settings-title" className="text-[17px] font-bold mt-1">Preferences</h2></div><button type="button" className="icon-btn" onClick={onClose} aria-label="Close settings" data-testid="button-close-settings"><X size={16} /></button></div><div className="modal-body space-y-4"><div className="flex items-center justify-between border rounded p-3"><div><div className="text-[12px] font-semibold">Darkroom contrast</div><div className="text-[11px] text-muted-foreground mt-1">Switch to a darker monitoring surface.</div></div><button type="button" className={`quiet-btn ${dark ? '!bg-[hsl(var(--primary))] !text-[hsl(var(--primary-foreground))]' : ''}`} onClick={toggleTheme} aria-pressed={dark} data-testid="button-toggle-theme">{dark ? 'On' : 'Off'}</button></div><fieldset><legend className="field-label">Spectrogram color scale</legend><div className="palette-grid">{(Object.entries(SPECTROGRAM_PALETTES) as Array<[SpectrogramPaletteId, typeof SPECTROGRAM_PALETTES[SpectrogramPaletteId]]>).map(([id, palette]) => <button key={id} type="button" className={`palette-option ${spectrogramPalette === id ? 'selected' : ''}`} onClick={() => onSpectrogramPaletteChange(id)} aria-pressed={spectrogramPalette === id} data-testid={`button-palette-${id}`}><span className="palette-swatch" style={{ background: `linear-gradient(90deg, ${palette.stops.map(([position, color]) => `${color} ${position * 100}%`).join(', ')})` }} /><span><strong>{palette.label}</strong><small>{palette.description}</small></span>{spectrogramPalette === id && <Check size={14} />}</button>)}</div></fieldset><div className="border rounded p-3 text-[11px] leading-relaxed text-muted-foreground"><RotateCcw size={14} className="inline mr-2 -mt-0.5" />Project storage uses browser localStorage. Clear site data in browser settings to remove it. No audio or metadata leaves this device.</div></div><div className="modal-footer"><button type="button" className="primary-btn" onClick={onClose} data-testid="button-done-settings">Done</button></div></div></div>;
 }
 
 export default App;
