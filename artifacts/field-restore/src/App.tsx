@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent as ReactDragEvent, type PointerEvent as ReactPointerEvent } from 'react';
-import { Activity, ArrowDown, ArrowUp, Check, ChevronDown, CircleHelp, Download, FileAudio, FolderOpen, Gauge, Info, Keyboard, Layers3, Menu, PanelRightOpen, Pause, Play, Plus, Redo2, RotateCcw, Save, Settings, Square, Trash2, Undo2, Waves, X, ZoomIn, ZoomOut } from 'lucide-react';
+import { Activity, ArrowDown, ArrowUp, Check, ChevronDown, CircleHelp, Download, FileAudio, FolderOpen, Gauge, GripVertical, Info, Keyboard, Layers3, Menu, PanelRightOpen, Pause, Play, Plus, Redo2, RotateCcw, Save, Settings, Square, Trash2, Undo2, Waves, X, ZoomIn, ZoomOut } from 'lucide-react';
 import { createDemoAudio, downloadBlob, encodeWav, parseWav, type AudioSource } from '@/lib/audio';
 import { decodeChannels, loadProject, projectFromSource, saveProject } from '@/lib/persistence';
 import { makeDefaultChain, makeModule, makeProcessingChain, makeRestorationReport, MODULE_LABELS, renderChain, withoutLegacyDcModules, type EditModule, type ModuleType } from '@/lib/edit-chain';
@@ -127,6 +127,8 @@ function App() {
   const [monitor, setMonitor] = useState<MonitorMode>('current');
   const [moduleMenu, setModuleMenu] = useState(false);
   const [selectedModuleId, setSelectedModuleId] = useState<string | null>(null);
+  const [draggedModuleId, setDraggedModuleId] = useState<string | null>(null);
+  const [moduleDropTarget, setModuleDropTarget] = useState<{ id: string; edge: 'before' | 'after' } | null>(null);
   const [chainDrawerOpen, setChainDrawerOpen] = useState(false);
   const [modal, setModal] = useState<'export' | 'help' | 'settings' | null>(null);
   const [title, setTitle] = useState('Coastal dawn / north bluff');
@@ -724,6 +726,22 @@ function App() {
     if (destination < 0 || destination >= modules.length) return;
     const next = [...modules]; [next[index], next[destination]] = [next[destination], next[index]]; commitModules(next);
   };
+  const dropModule = (targetId: string, edge: 'before' | 'after') => {
+    if (!draggedModuleId) return;
+    const sourceIndex = modules.findIndex((module) => module.id === draggedModuleId);
+    const targetIndex = modules.findIndex((module) => module.id === targetId);
+    if (sourceIndex < 0 || targetIndex < 0) return;
+    let insertionIndex = targetIndex + (edge === 'after' ? 1 : 0);
+    const next = [...modules];
+    const [movedModule] = next.splice(sourceIndex, 1);
+    if (sourceIndex < insertionIndex) insertionIndex -= 1;
+    if (insertionIndex !== sourceIndex) {
+      next.splice(insertionIndex, 0, movedModule);
+      commitModules(next);
+    }
+    setDraggedModuleId(null);
+    setModuleDropTarget(null);
+  };
   const undo = () => {
     const previous = undoStack.at(-1); if (!previous) return;
     setRedoStack((stack) => [...stack, modules]); setModules(previous); setUndoStack((stack) => stack.slice(0, -1));
@@ -827,23 +845,27 @@ function App() {
   };
 
   const onDragEnter = (event: ReactDragEvent<HTMLDivElement>) => {
+    if (!event.dataTransfer.types.includes('Files')) return;
     event.preventDefault();
     dragDepthRef.current += 1;
-    if (event.dataTransfer.types.includes('Files')) setIsDraggingWav(true);
+    setIsDraggingWav(true);
   };
 
   const onDragOver = (event: ReactDragEvent<HTMLDivElement>) => {
+    if (!event.dataTransfer.types.includes('Files')) return;
     event.preventDefault();
     event.dataTransfer.dropEffect = 'copy';
   };
 
   const onDragLeave = (event: ReactDragEvent<HTMLDivElement>) => {
+    if (!event.dataTransfer.types.includes('Files')) return;
     event.preventDefault();
     dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
     if (dragDepthRef.current === 0) setIsDraggingWav(false);
   };
 
   const onDrop = (event: ReactDragEvent<HTMLDivElement>) => {
+    if (!event.dataTransfer.types.includes('Files')) return;
     event.preventDefault();
     dragDepthRef.current = 0;
     setIsDraggingWav(false);
@@ -1322,7 +1344,41 @@ function App() {
           </div>
           <div className="sidebar-chain-list">
             {modules.length === 0 ? <div className="sidebar-chain-empty">No edits yet</div> : modules.map((module, index) => (
-              <div key={module.id} className={`sidebar-chain-row ${module.enabled ? '' : 'bypassed'} ${selectedModuleId === module.id && chainDrawerOpen ? 'selected' : ''}`}>
+              <div
+                key={module.id}
+                data-testid={`sidebar-module-${module.id}`}
+                className={`sidebar-chain-row ${module.enabled ? '' : 'bypassed'} ${selectedModuleId === module.id && chainDrawerOpen ? 'selected' : ''} ${draggedModuleId === module.id ? 'dragging' : ''} ${moduleDropTarget?.id === module.id ? `drop-${moduleDropTarget.edge}` : ''}`}
+                onDragOver={(event) => {
+                  if (!draggedModuleId || draggedModuleId === module.id) return;
+                  event.preventDefault();
+                  event.dataTransfer.dropEffect = 'move';
+                  const bounds = event.currentTarget.getBoundingClientRect();
+                  setModuleDropTarget({ id: module.id, edge: event.clientY < bounds.top + bounds.height / 2 ? 'before' : 'after' });
+                }}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  const edge = moduleDropTarget?.id === module.id ? moduleDropTarget.edge : 'before';
+                  dropModule(module.id, edge);
+                }}
+              >
+                <span
+                  className="sidebar-drag-handle"
+                  data-testid={`drag-module-${module.id}`}
+                  draggable
+                  title={`Drag to reorder ${module.name}`}
+                  aria-hidden="true"
+                  onDragStart={(event) => {
+                    setDraggedModuleId(module.id);
+                    event.dataTransfer.effectAllowed = 'move';
+                    event.dataTransfer.setData('text/plain', module.id);
+                  }}
+                  onDragEnd={() => {
+                    setDraggedModuleId(null);
+                    setModuleDropTarget(null);
+                  }}
+                >
+                  <GripVertical size={12} />
+                </span>
                 <button type="button" className="sidebar-chain-select" onClick={() => { setSelectedModuleId(module.id); setChainDrawerOpen(true); }} data-testid={`button-open-module-${module.id}`}>
                   <span className="module-index">{String(index + 1).padStart(2, '0')}</span><span className="module-dot" />
                   <span className="sidebar-chain-copy"><strong>{module.name}</strong><small>{moduleSummary(module)}</small></span>

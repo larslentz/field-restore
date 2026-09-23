@@ -211,9 +211,16 @@
 .sidebar-module-menu button, .drawer-module-menu button { padding: 7px 9px; border-radius: 4px; text-align: left; font-size: 11px; }
 .sidebar-module-menu button:hover, .drawer-module-menu button:hover { background: hsl(var(--muted)); }
 .sidebar-chain-list { min-height: 0; overflow-y: auto; display: grid; align-content: start; gap: 4px; padding-right: 2px; }
-.sidebar-chain-row { display: flex; align-items: center; border: 1px solid transparent; border-radius: 5px; color: #dbe5dc; }
+.sidebar-chain-row { position: relative; display: flex; align-items: center; border: 1px solid transparent; border-radius: 5px; color: #dbe5dc; transition: opacity .12s ease, background .12s ease; }
 .sidebar-chain-row:hover, .sidebar-chain-row.selected { background: hsl(var(--sidebar-accent)); border-color: #43555c; }
 .sidebar-chain-row.bypassed { opacity: .55; }
+.sidebar-chain-row.dragging { opacity: .3; }
+.sidebar-chain-row.drop-before::before, .sidebar-chain-row.drop-after::after { content: ''; position: absolute; z-index: 2; left: 4px; right: 4px; height: 2px; border-radius: 2px; background: hsl(var(--sidebar-primary)); box-shadow: 0 0 0 1px hsl(var(--sidebar)), 0 0 8px rgba(183, 221, 47, .55); pointer-events: none; }
+.sidebar-chain-row.drop-before::before { top: -4px; }
+.sidebar-chain-row.drop-after::after { bottom: -4px; }
+.sidebar-drag-handle { width: 18px; align-self: stretch; flex: 0 0 18px; display: grid; place-items: center; color: #829890; cursor: grab; touch-action: none; }
+.sidebar-drag-handle:hover { color: #d8ed55; }
+.sidebar-drag-handle:active { cursor: grabbing; }
 .sidebar-chain-select { min-width: 0; flex: 1; display: flex; align-items: center; gap: 6px; padding: 7px 3px 7px 7px; text-align: left; }
 .sidebar-chain-copy { min-width: 0; display: grid; gap: 2px; }
 .sidebar-chain-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
