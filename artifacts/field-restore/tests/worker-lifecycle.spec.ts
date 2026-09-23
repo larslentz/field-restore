@@ -1,5 +1,5 @@
 import { expect, test, type Locator } from '@playwright/test';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, open } from 'node:fs/promises';
 import path from 'node:path';
 
 const fixtureDir = path.join(import.meta.dirname, '.fixtures');
@@ -7,9 +7,9 @@ const wavPath = path.join(fixtureDir, 'large-worker-lifecycle.wav');
 
 async function createLargeWav() {
   const sampleRate = 8_000;
-  const channels = 1;
+  const channels = 2;
   const bytesPerSample = 1;
-  const dataSize = 64 * 1024 * 1024 + sampleRate;
+  const dataSize = 64 * 1024 * 1024 + sampleRate * channels;
   const header = Buffer.alloc(44);
   header.write('RIFF', 0);
   header.writeUInt32LE(dataSize + 36, 4);
@@ -24,9 +24,14 @@ async function createLargeWav() {
   header.write('data', 36);
   header.writeUInt32LE(dataSize, 40);
 
-  const data = Buffer.alloc(dataSize, 128);
   await mkdir(fixtureDir, { recursive: true });
-  await writeFile(wavPath, Buffer.concat([header, data]));
+  const file = await open(wavPath, 'w');
+  try {
+    await file.write(header, 0, header.length, 0);
+    await file.truncate(header.length + dataSize);
+  } finally {
+    await file.close();
+  }
 }
 
 async function ids(locator: Locator) {
@@ -37,6 +42,49 @@ async function ids(locator: Locator) {
 }
 
 test.beforeAll(createLargeWav);
+
+test('large stereo spectrogram stays interactive and cancels superseded viewports', async ({ page }) => {
+  await page.goto('/');
+  const startedAt = performance.now();
+  await page.getByTestId('input-import-wav').setInputFiles(wavPath);
+  await expect(page.getByTestId('text-source-name')).toHaveText('large-worker-lifecycle.wav');
+
+  const spectrogram = page.getByTestId('canvas-spectrogram');
+  await expect.poll(async () => {
+    const value = await ids(spectrogram);
+    return value.request > 0 && value.result === value.request;
+  }, { timeout: 15_000 }).toBe(true);
+  expect(performance.now() - startedAt).toBeLessThan(15_000);
+
+  // Display-only dB changes must redraw from cached spectral data, not start workers.
+  const beforeDbChange = await ids(spectrogram);
+  const box = await spectrogram.boundingBox();
+  expect(box).not.toBeNull();
+  await page.mouse.move(box!.x + box!.width - 2, box!.y + box!.height / 2);
+  await page.mouse.wheel(0, -100);
+  await expect(spectrogram).toHaveAttribute('aria-label', /-103 to -18 decibel scale/);
+  expect(await ids(spectrogram)).toEqual(beforeDbChange);
+
+  // Record every committed result while one viewport request supersedes another.
+  await spectrogram.evaluate((element) => {
+    const committed = [Number(element.getAttribute('data-result-id'))];
+    new MutationObserver(() => {
+      committed.push(Number(element.getAttribute('data-result-id')));
+    }).observe(element, { attributes: true, attributeFilter: ['data-result-id'] });
+    (window as typeof window & { __spectrogramCommittedResults?: number[] }).__spectrogramCommittedResults = committed;
+  });
+  await page.getByTestId('button-zoom-in').click();
+  await expect.poll(async () => (await ids(spectrogram)).request).toBeGreaterThan(beforeDbChange.request);
+  const supersededRequest = (await ids(spectrogram)).request;
+  await page.getByTestId('button-zoom-in').click();
+  await expect.poll(async () => (await ids(spectrogram)).request).toBeGreaterThan(supersededRequest);
+  const newestRequest = (await ids(spectrogram)).request;
+  await expect.poll(async () => (await ids(spectrogram)).result, { timeout: 15_000 }).toBe(newestRequest);
+  const committedResults = await page.evaluate(
+    () => (window as typeof window & { __spectrogramCommittedResults?: number[] }).__spectrogramCommittedResults ?? [],
+  );
+  expect(committedResults).not.toContain(supersededRequest);
+});
 
 test('cancelled and superseded worker results never reach the UI', async ({ page }) => {
   await page.goto('/');
