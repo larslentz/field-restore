@@ -73,6 +73,7 @@ function App() {
   const [isDraggingWav, setIsDraggingWav] = useState(false);
   const [spectrogramMaxFrequency, setSpectrogramMaxFrequency] = useState(20000);
   const [spectrogramCeilingDb, setSpectrogramCeilingDb] = useState(-20);
+  const [timeViewCenter, setTimeViewCenter] = useState<number | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -82,6 +83,7 @@ function App() {
   const selectionRef = useRef<[number, number]>([4.1, 7.8]);
   const pointerDragRef = useRef<{ start: number; current: number } | null>(null);
   const frequencyDragRef = useRef<{ startY: number; startFrequency: number } | null>(null);
+  const timeDragRef = useRef<{ startX: number; startCenter: number; viewDuration: number; plotWidth: number } | null>(null);
   const dragDepthRef = useRef(0);
 
   const currentChannels = useMemo(() => renderChain(source.channels, modules, source.sampleRate), [source.channels, source.sampleRate, modules]);
@@ -90,7 +92,8 @@ function App() {
   const viewDuration = duration / zoom;
   const selectionStart = Math.min(...selection);
   const selectionEnd = Math.max(...selection);
-  const viewCenter = selectionStart + (selectionEnd - selectionStart) / 2 || duration / 2;
+  const selectionCenter = selectionStart + (selectionEnd - selectionStart) / 2 || duration / 2;
+  const viewCenter = timeViewCenter ?? selectionCenter;
   const viewStart = zoom === 1 ? 0 : Math.max(0, Math.min(duration - viewDuration, viewCenter - viewDuration / 2));
   const spectrogramFloorDb = spectrogramCeilingDb - 85;
   const spectrograms = useMemo(
@@ -310,6 +313,19 @@ function App() {
   const onCanvasPointerDown = (event: ReactPointerEvent<HTMLCanvasElement>) => {
     const bounds = event.currentTarget.getBoundingClientRect();
     const localX = event.clientX - bounds.left;
+    const localY = event.clientY - bounds.top;
+    const graphBottom = bounds.height - SPECTROGRAM_BOTTOM;
+    if (localY >= graphBottom && localX > SPECTROGRAM_LEFT && localX < bounds.width - SPECTROGRAM_RIGHT) {
+      timeDragRef.current = {
+        startX: event.clientX,
+        startCenter: viewStart + viewDuration / 2,
+        viewDuration,
+        plotWidth: Math.max(1, bounds.width - SPECTROGRAM_LEFT - SPECTROGRAM_RIGHT),
+      };
+      setTimeViewCenter(viewStart + viewDuration / 2);
+      event.currentTarget.setPointerCapture(event.pointerId);
+      return;
+    }
     if (localX <= SPECTROGRAM_LEFT) {
       frequencyDragRef.current = { startY: event.clientY, startFrequency: spectrogramMaxFrequency };
       event.currentTarget.setPointerCapture(event.pointerId);
@@ -324,6 +340,12 @@ function App() {
     seekTo(time);
   };
   const onCanvasPointerMove = (event: ReactPointerEvent<HTMLCanvasElement>) => {
+    if (timeDragRef.current) {
+      const deltaTime = -((event.clientX - timeDragRef.current.startX) / timeDragRef.current.plotWidth) * timeDragRef.current.viewDuration;
+      const halfView = timeDragRef.current.viewDuration / 2;
+      setTimeViewCenter(Math.max(halfView, Math.min(duration - halfView, timeDragRef.current.startCenter + deltaTime)));
+      return;
+    }
     if (frequencyDragRef.current) {
       const nyquist = Math.floor(source.sampleRate / 2);
       const deltaFrequency = (event.clientY - frequencyDragRef.current.startY) * 75;
@@ -338,6 +360,10 @@ function App() {
     setSelection([pointerDragRef.current.start, time]);
   };
   const onCanvasPointerUp = (event: ReactPointerEvent<HTMLCanvasElement>) => {
+    if (timeDragRef.current) {
+      timeDragRef.current = null;
+      return;
+    }
     if (frequencyDragRef.current) {
       frequencyDragRef.current = null;
       return;
@@ -357,7 +383,15 @@ function App() {
     if (!canvas || event.deltaY === 0) return;
     const bounds = canvas.getBoundingClientRect();
     const x = event.clientX - bounds.left;
-    if (x <= SPECTROGRAM_LEFT) {
+    const y = event.clientY - bounds.top;
+    const graphBottom = bounds.height - SPECTROGRAM_BOTTOM;
+    if (y >= graphBottom && x > SPECTROGRAM_LEFT && x < bounds.width - SPECTROGRAM_RIGHT) {
+      event.preventDefault();
+      event.stopPropagation();
+      setTimeViewCenter(viewStart + viewDuration / 2);
+      const factor = event.deltaY > 0 ? 1 / 1.25 : 1.25;
+      setZoom((value) => Math.max(1, Math.min(16, value * factor)));
+    } else if (x <= SPECTROGRAM_LEFT) {
       event.preventDefault();
       event.stopPropagation();
       const nyquist = Math.floor(source.sampleRate / 2);
@@ -369,7 +403,7 @@ function App() {
       const direction = event.deltaY > 0 ? -1 : 1;
       setSpectrogramCeilingDb((value) => Math.max(-60, Math.min(0, value + direction * 2)));
     }
-  }, [source.sampleRate]);
+  }, [source.sampleRate, viewDuration, viewStart]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -587,8 +621,8 @@ function App() {
                 <>
                   <section className="panel instrument-grid" aria-label="Spectrogram editor">
                     <div className="panel-header">
-                      <div className="flex items-center gap-3"><Waves size={17} color="hsl(var(--primary))" /><div><div className="section-title">Spectrogram / selection</div><div className="text-[10px] text-muted-foreground mt-0.5">Drag to select · scroll or vertically drag the left frequency axis · scroll the right dB axis</div></div></div>
-                      <div className="flex items-center gap-1"><button type="button" className="icon-btn" onClick={() => setZoom(Math.max(1, zoom / 1.8))} aria-label="Zoom out" data-testid="button-zoom-out"><ZoomOut size={15} /></button><span className="font-mono-value text-[10px] text-muted-foreground w-12 text-center">{zoom.toFixed(1)}×</span><button type="button" className="icon-btn" onClick={() => setZoom(Math.min(16, zoom * 1.8))} aria-label="Zoom in" data-testid="button-zoom-in"><ZoomIn size={15} /></button><button type="button" className="quiet-btn ml-2 !py-[5px]" onClick={() => setZoom(1)} data-testid="button-fit">Fit</button></div>
+                      <div className="flex items-center gap-3"><Waves size={17} color="hsl(var(--primary))" /><div><div className="section-title">Spectrogram / selection</div><div className="text-[10px] text-muted-foreground mt-0.5">Drag to select · scroll/drag the bottom time axis · scroll/drag the left frequency axis · scroll the right dB axis</div></div></div>
+                      <div className="flex items-center gap-1"><button type="button" className="icon-btn" onClick={() => { setTimeViewCenter(viewStart + viewDuration / 2); setZoom(Math.max(1, zoom / 1.8)); }} aria-label="Zoom out" data-testid="button-zoom-out"><ZoomOut size={15} /></button><span className="font-mono-value text-[10px] text-muted-foreground w-12 text-center">{zoom.toFixed(1)}×</span><button type="button" className="icon-btn" onClick={() => { setTimeViewCenter(viewStart + viewDuration / 2); setZoom(Math.min(16, zoom * 1.8)); }} aria-label="Zoom in" data-testid="button-zoom-in"><ZoomIn size={15} /></button><button type="button" className="quiet-btn ml-2 !py-[5px]" onClick={() => { setZoom(1); setTimeViewCenter(null); }} data-testid="button-fit">Fit</button></div>
                     </div>
                     <div className="panel-body !pt-3">
                       <div className="waveform-wrap">
