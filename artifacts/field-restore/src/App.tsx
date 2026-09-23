@@ -6,8 +6,9 @@ import { makeDefaultChain, makeModule, MODULE_LABELS, renderChain, type EditModu
 import { analyzeLoudness, type LoudnessStats } from '@/lib/loudness';
 import { createPlaybackRangePlan } from '@/lib/playback-range';
 import { calculateSpectrogram, type SpectrogramData } from '@/lib/spectrogram';
-import { fingerprintWav, generateFloat32WavHeader, parseWavMetadata, readFrames, type WavMetadata } from '@/lib/large-wav';
-import { listProjects, loadProject as loadProjectV2, queryFileHandlePermission, saveProject as saveProjectV2, type ProjectRecord } from '@/lib/project-store';
+import { fingerprintWav, parseWavMetadata, readFrames, writeFloat32WavChunks, type WavMetadata } from '@/lib/large-wav';
+import { isVerifiedRelink, openVerifiedFileHandle } from '@/lib/file-access';
+import { listProjects, loadProject as loadProjectV2, saveProject as saveProjectV2, type ProjectRecord } from '@/lib/project-store';
 import { createStreamingEditChain } from '@/lib/streaming-edit-chain';
 import { startWorkerJob, type WorkerJob } from '@/lib/worker-analysis';
 import type { LargeAnalysisResult } from '@/lib/large-analysis';
@@ -170,20 +171,16 @@ function App() {
       setModules(record.modules);
       setMarkers(record.markers);
       setRegions(record.regions);
-      if (record.fileHandle && await queryFileHandlePermission(record.fileHandle) === 'granted') {
-        const file = await record.fileHandle.getFile();
-        const metadata = await parseWavMetadata(file, { name: file.name });
-        const fingerprint = await fingerprintWav(file, metadata);
-        if (record.source.fingerprint === fingerprint) {
+       const verified = record.fileHandle
+         ? await openVerifiedFileHandle(record.fileHandle, record.source.fingerprint ?? '')
+         : null;
+       if (record.fileHandle && verified) {
+         const { file, metadata, fingerprint } = verified;
           setLargeSource({ file, metadata, fingerprint, fileHandle: record.fileHandle });
           setSource({ channels: [], sampleRate: metadata.sampleRate, duration: metadata.frameCount / metadata.sampleRate, name: file.name });
           setSelection([0, Math.min(5, metadata.frameCount / metadata.sampleRate)]);
           setSavedStatus(`Restored file-backed project · ${new Date(record.savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
-          return;
-        }
-        setPendingRelink(record);
-        setSource({ channels: [], sampleRate: record.source.sampleRate, duration: Number(record.source.duration ?? 0), name: record.source.name });
-        setSavedStatus('Source changed · relink the original WAV');
+         return;
       } else {
         setPendingRelink(record);
         setSource({ channels: [], sampleRate: record.source.sampleRate, duration: Number(record.source.duration ?? 0), name: record.source.name });
@@ -589,8 +586,8 @@ function App() {
         setSource(parsed);
         setSavedStatus('Imported · not saved');
       }
-      const relinkMatches = pendingRelink
-        && pendingRelink.source.fingerprint === fingerprint;
+       const relinkMatches = pendingRelink
+         && isVerifiedRelink(pendingRelink.source.fingerprint, fingerprint);
       if (relinkMatches) {
         setModules(pendingRelink.modules);
         setMarkers(pendingRelink.markers);
@@ -709,31 +706,22 @@ function App() {
         const handle = await picker({ suggestedName: `${safeName || 'field-restore'}-rx.wav`, types: [{ description: 'WAV audio', accept: { 'audio/wav': ['.wav'] } }] });
         const writable = await handle.createWritable();
         const { file, metadata } = largeSource;
-        const header = generateFloat32WavHeader({ channels: metadata.channels, sampleRate: metadata.sampleRate, frameCount: metadata.frameCount });
-        const headerBuffer = new ArrayBuffer(header.byteLength);
-        new Uint8Array(headerBuffer).set(header);
-        await writable.write(headerBuffer);
-        const chunkFrames = Math.max(4096, Math.floor(metadata.sampleRate * 2));
         const processor = createStreamingEditChain(modules, metadata.sampleRate, metadata.frameCount, 0);
         setOperationStatus('Exporting file-backed WAV');
-        for (let start = 0; start < metadata.frameCount; start += chunkFrames) {
-          if (controller.signal.aborted) throw new DOMException('The operation was aborted.', 'AbortError');
-          const count = Math.min(chunkFrames, metadata.frameCount - start);
-          let channels = await readFrames(file, metadata, start, count, { signal: controller.signal });
-          channels = processor.process(channels, start);
-          const output = new ArrayBuffer(count * metadata.channels * 4);
-          const view = new DataView(output);
-          let offset = 0;
-          for (let frame = 0; frame < count; frame += 1) for (let channel = 0; channel < metadata.channels; channel += 1) {
-            view.setFloat32(offset, Number.isFinite(channels[channel]?.[frame]) ? channels[channel][frame] : 0, true);
-            offset += 4;
-          }
-          await writable.write(output);
-          setOperationProgress((start + count) / metadata.frameCount);
-        }
-        await writable.close();
+        await writeFloat32WavChunks(writable, {
+          channels: metadata.channels,
+          sampleRate: metadata.sampleRate,
+          frameCount: metadata.frameCount,
+          signal: controller.signal,
+          readFrames: (start, count, signal) => readFrames(file, metadata, start, count, { signal }),
+          processFrames: (channels, start) => processor.process(channels, start),
+          onProgress: (completed, total) => setOperationProgress(completed / total),
+        });
       } catch (caught) {
-        if ((caught as Error).name !== 'AbortError') setError(caught instanceof Error ? caught.message : 'Unable to export this recording.');
+        const cancelledAtPicker = (caught as Error).name === 'AbortError';
+        setError(cancelledAtPicker
+          ? 'Export incomplete: no output file was created.'
+          : caught instanceof Error ? caught.message : 'Export incomplete: unable to export this recording.');
         setOperationStatus('');
         return;
       }

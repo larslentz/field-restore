@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { generateFloat32WavHeader, parseWavMetadata, readFrames } from './large-wav.ts';
+import { generateFloat32WavHeader, parseWavMetadata, readFrames, writeFloat32WavChunks } from './large-wav.ts';
 
 const text = (bytes, start, length) => String.fromCharCode(...bytes.slice(start, start + length));
 
@@ -34,10 +34,76 @@ test('parses and range-decodes float WAV without reading the whole source', asyn
   assert.deepEqual(Array.from(channels[1]), [-1]);
 });
 
-test('parses RF64 64-bit frame counts from a compact header fixture', async () => {
-  const header = generateFloat32WavHeader({ channels: 2, sampleRate: 96000, frameCount: 0x20000000n });
-  const metadata = await parseWavMetadata(new Blob([header]), { name: 'hours.rf64.wav' });
+const sparseWav = (header, size) => ({
+  size,
+  slice(start, end) {
+    const length = Math.max(0, end - start);
+    const output = new Uint8Array(length);
+    if (start < header.byteLength) output.set(header.slice(start, Math.min(end, header.byteLength)));
+    return new Blob([output]);
+  },
+});
+
+test('round-trips RF64 header sizes and chunk placement beyond 4 GiB without a giant fixture', async () => {
+  const frames = 0x20000000n;
+  const header = generateFloat32WavHeader({ channels: 2, sampleRate: 96000, frameCount: frames });
+  const metadata = await parseWavMetadata(sparseWav(header, Number(80n + frames * 8n)), { name: 'hours.rf64.wav' });
   assert.equal(metadata.format, 'RF64');
-  assert.equal(metadata.frameCount, 0x20000000);
+  assert.equal(metadata.frameCount, Number(frames));
   assert.equal(metadata.dataLengthBigInt, 0x100000000n);
+  assert.equal(metadata.dataOffset, 80);
+  assert.equal(text(header, 48, 4), 'fmt ');
+  assert.equal(text(header, 72, 4), 'data');
+});
+
+test('keeps the largest valid RIFF below the boundary and switches immediately above it', () => {
+  const maxRiffFrames = (0xffffffffn - 36n) / 8n;
+  assert.equal(text(generateFloat32WavHeader({ channels: 2, sampleRate: 48000, frameCount: maxRiffFrames }), 0, 4), 'RIFF');
+  assert.equal(text(generateFloat32WavHeader({ channels: 2, sampleRate: 48000, frameCount: maxRiffFrames + 1n }), 0, 4), 'RF64');
+});
+
+test('rejects a truncated RF64 data chunk', async () => {
+  const header = generateFloat32WavHeader({ channels: 2, sampleRate: 96000, frameCount: 0x20000000n });
+  await assert.rejects(parseWavMetadata(new Blob([header])), /truncated or incomplete/);
+});
+
+test('aborts and reports an incomplete export when a streamed write fails', async () => {
+  let writes = 0;
+  let aborted = false;
+  let closed = false;
+  const stream = {
+    async write() {
+      writes += 1;
+      if (writes === 3) throw new Error('disk removed');
+    },
+    async close() { closed = true; },
+    async abort() { aborted = true; },
+  };
+  await assert.rejects(writeFloat32WavChunks(stream, {
+    channels: 1,
+    sampleRate: 2,
+    frameCount: 4,
+    chunkFrames: 2,
+    readFrames: async (_start, count) => [new Float32Array(count)],
+  }), /Export incomplete: disk removed/);
+  assert.equal(aborted, true);
+  assert.equal(closed, false);
+});
+
+test('aborts and reports an incomplete export when cancellation interrupts streaming', async () => {
+  const controller = new AbortController();
+  let aborted = false;
+  const stream = {
+    async write() { controller.abort(); },
+    async close() { assert.fail('cancelled export must not close successfully'); },
+    async abort() { aborted = true; },
+  };
+  await assert.rejects(writeFloat32WavChunks(stream, {
+    channels: 1,
+    sampleRate: 2,
+    frameCount: 2,
+    signal: controller.signal,
+    readFrames: async () => [new Float32Array(2)],
+  }), /Export incomplete: Export was cancelled/);
+  assert.equal(aborted, true);
 });

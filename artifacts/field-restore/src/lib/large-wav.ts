@@ -80,6 +80,9 @@ export async function parseWavMetadata(file: Blob, options: { signal?: AbortSign
   if (audioFormat === 3 && bits !== 32) throw new Error('Only IEEE float32 WAV is supported.');
   const lengthBig = dataSize ?? 0n;
   const dataLength = checkedNumber(lengthBig, 'WAV data');
+  if (BigInt(dataOffset) + lengthBig > BigInt(file.size)) {
+    throw new Error('The WAV data chunk is truncated or incomplete.');
+  }
   const frameSize = channels * (bits / 8);
   return { format, audioFormat: audioFormat as 1 | 3, channels, sampleRate, bitsPerSample: bits as WavMetadata['bitsPerSample'], frameSize, frameCount: Math.floor(dataLength / frameSize), dataOffset, dataLength, dataLengthBigInt: lengthBig, name: options.name };
 }
@@ -155,6 +158,69 @@ export function generateFloat32WavHeader(options: Float32HeaderOptions): Uint8Ar
   put(p, 'fmt '); v.setUint32(p + 4, 16, true); v.setUint16(p + 8, 3, true); v.setUint16(p + 10, options.channels, true); v.setUint32(p + 12, options.sampleRate, true); v.setUint32(p + 16, options.sampleRate * options.channels * 4, true); v.setUint16(p + 20, options.channels * 4, true); v.setUint16(p + 22, 32, true); p += 24;
   put(p, 'data'); v.setUint32(p + 4, rf64 ? 0xffffffff : Number(data), true);
   return out;
+}
+
+export interface Float32ChunkWriterOptions {
+  channels: number;
+  sampleRate: number;
+  frameCount: number;
+  readFrames: (startFrame: number, frameCount: number, signal?: AbortSignal) => Promise<Float32Array[]>;
+  processFrames?: (channels: Float32Array[], startFrame: number) => Float32Array[];
+  signal?: AbortSignal;
+  onProgress?: WavProgress;
+  chunkFrames?: number;
+}
+
+function incompleteExportError(error: unknown) {
+  const detail = error instanceof Error && error.name === 'AbortError'
+    ? 'Export was cancelled.'
+    : error instanceof Error && error.message
+      ? error.message
+      : 'The destination could not be written.';
+  return new Error(`Export incomplete: ${detail}`, { cause: error });
+}
+
+/** Streams a file-backed WAV and aborts the destination unless every byte and close succeed. */
+export async function writeFloat32WavChunks(stream: FileSystemWritableFileStream, options: Float32ChunkWriterOptions): Promise<void> {
+  const { channels, sampleRate, frameCount, signal, onProgress } = options;
+  const chunkFrames = Math.max(1, options.chunkFrames ?? Math.max(4096, Math.floor(sampleRate * 2)));
+  try {
+    abort(signal);
+    const header = generateFloat32WavHeader({ channels, sampleRate, frameCount });
+    const headerBuffer = new ArrayBuffer(header.byteLength);
+    new Uint8Array(headerBuffer).set(header);
+    await stream.write(headerBuffer);
+    for (let start = 0; start < frameCount; start += chunkFrames) {
+      abort(signal);
+      const count = Math.min(chunkFrames, frameCount - start);
+      let source = await options.readFrames(start, count, signal);
+      source = options.processFrames?.(source, start) ?? source;
+      if (source.length !== channels || source.some((channel) => channel.length !== count)) {
+        throw new Error('A rendered audio chunk had an unexpected size.');
+      }
+      const output = new ArrayBuffer(count * channels * 4);
+      const view = new DataView(output);
+      let offset = 0;
+      for (let frame = 0; frame < count; frame += 1) {
+        for (let channel = 0; channel < channels; channel += 1) {
+          const sample = source[channel][frame];
+          view.setFloat32(offset, Number.isFinite(sample) ? sample : 0, true);
+          offset += 4;
+        }
+      }
+      await stream.write(output);
+      onProgress?.(start + count, frameCount);
+    }
+    abort(signal);
+    await stream.close();
+  } catch (error) {
+    try {
+      await stream.abort(error);
+    } catch {
+      // Preserve the original write/cancellation failure.
+    }
+    throw incompleteExportError(error);
+  }
 }
 
 export async function writeFloat32Wav(stream: FileSystemWritableFileStream, source: Float32Array[], sampleRate: number, options: { signal?: AbortSignal; onProgress?: WavProgress; frameCount?: number | bigint } = {}) {
