@@ -10,6 +10,7 @@ import { fingerprintWav, parseWavMetadata, readFrames, withLargeExportLeaveWarni
 import { isVerifiedRelink, openVerifiedFileHandle } from '@/lib/file-access';
 import { listProjects, loadProject as loadProjectV2, queryFileHandlePermission, requestFileHandlePermission, saveProject as saveProjectV2, type ProjectRecord } from '@/lib/project-store';
 import { createStreamingEditChain } from '@/lib/streaming-edit-chain';
+import { anchoredLevelScaleCeiling } from '@/lib/spectrogram-scale';
 import { startWorkerJob, type WorkerJob } from '@/lib/worker-analysis';
 import type { LargeAnalysisResult } from '@/lib/large-analysis';
 import './index.css';
@@ -156,7 +157,12 @@ function App() {
   const selectionRef = useRef<[number, number]>([4.1, 7.8]);
   const pointerDragRef = useRef<{ start: number; current: number; startClientX: number; moved: boolean } | null>(null);
   const frequencyDragRef = useRef<{ startY: number; startMaximum: number } | null>(null);
-  const levelDragRef = useRef<{ startY: number; startCeiling: number } | null>(null);
+  const levelDragRef = useRef<{
+    grabbedLevel: number;
+    paneTop: number;
+    paneHeight: number;
+    span: number;
+  } | null>(null);
   const timeDragRef = useRef<{ startX: number; startCenter: number; viewDuration: number; plotWidth: number } | null>(null);
   const dragDepthRef = useRef(0);
   const analysisJobRef = useRef<WorkerJob<LargeAnalysisResult> | null>(null);
@@ -883,8 +889,18 @@ function App() {
       return;
     }
     if (localX >= bounds.width - SPECTROGRAM_RIGHT) {
-      levelDragRef.current = { startY: event.clientY, startCeiling: spectrogramCeilingDb };
-      event.currentTarget.setPointerCapture(event.pointerId);
+      if (localY < graphBottom) {
+        const paneHeight = graphBottom / 2;
+        const paneTop = localY >= paneHeight ? paneHeight : 0;
+        const paneY = Math.max(0, Math.min(paneHeight, localY - paneTop));
+        levelDragRef.current = {
+          grabbedLevel: spectrogramCeilingDb - (paneY / paneHeight) * spectrogramLevelSpanDb,
+          paneTop,
+          paneHeight,
+          span: spectrogramLevelSpanDb,
+        };
+        event.currentTarget.setPointerCapture(event.pointerId);
+      }
       return;
     }
     const time = canvasPointToTime(event);
@@ -907,9 +923,16 @@ function App() {
       return;
     }
     if (levelDragRef.current) {
-      const deltaDb = -(event.clientY - levelDragRef.current.startY) * 0.25;
-      const nextCeiling = Math.round(levelDragRef.current.startCeiling + deltaDb);
-      setSpectrogramCeilingDb(Math.max(SPECTROGRAM_DATA_FLOOR_DB + spectrogramLevelSpanDb, Math.min(SPECTROGRAM_MAX_CEILING_DB, nextCeiling)));
+      const bounds = event.currentTarget.getBoundingClientRect();
+      const paneY = event.clientY - bounds.top - levelDragRef.current.paneTop;
+      setSpectrogramCeilingDb(anchoredLevelScaleCeiling(
+        levelDragRef.current.grabbedLevel,
+        paneY,
+        levelDragRef.current.paneHeight,
+        levelDragRef.current.span,
+        SPECTROGRAM_DATA_FLOOR_DB,
+        SPECTROGRAM_MAX_CEILING_DB,
+      ));
       return;
     }
     if (!pointerDragRef.current) return;
