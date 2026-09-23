@@ -6,11 +6,11 @@ import { makeDefaultChain, makeModule, MODULE_LABELS, renderChain, type EditModu
 import { analyzeLoudness, type LoudnessStats } from '@/lib/loudness';
 import { createPlaybackRangePlan } from '@/lib/playback-range';
 import { calculateSpectrogram, type SpectrogramData } from '@/lib/spectrogram';
-import { calculateFileSpectrogram } from '@/lib/large-spectrogram';
-import { analyzeLargeLoudness } from '@/lib/large-analysis';
 import { fingerprintWav, generateFloat32WavHeader, parseWavMetadata, readFrames, type WavMetadata } from '@/lib/large-wav';
 import { listProjects, loadProject as loadProjectV2, queryFileHandlePermission, saveProject as saveProjectV2, type ProjectRecord } from '@/lib/project-store';
 import { createStreamingEditChain } from '@/lib/streaming-edit-chain';
+import { startWorkerJob, type WorkerJob } from '@/lib/worker-analysis';
+import type { LargeAnalysisResult } from '@/lib/large-analysis';
 import './index.css';
 
 type ViewTab = 'edit' | 'analyze' | 'project';
@@ -91,6 +91,11 @@ function App() {
   const [largeSelectionCurrentStats, setLargeSelectionCurrentStats] = useState<LoudnessStats>(EMPTY_STATS);
   const [operationStatus, setOperationStatus] = useState('');
   const [operationProgress, setOperationProgress] = useState(0);
+  const [operationPaused, setOperationPaused] = useState(false);
+  const [analysisStatus, setAnalysisStatus] = useState('');
+  const [analysisProgress, setAnalysisProgress] = useState(0);
+  const [spectrogramStatus, setSpectrogramStatus] = useState('');
+  const [spectrogramProgress, setSpectrogramProgress] = useState(0);
   const [projectId, setProjectId] = useState<string | null>(null);
   const [pendingRelink, setPendingRelink] = useState<ProjectRecord | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -104,7 +109,12 @@ function App() {
   const frequencyDragRef = useRef<{ startY: number; startMaximum: number } | null>(null);
   const timeDragRef = useRef<{ startX: number; startCenter: number; viewDuration: number; plotWidth: number } | null>(null);
   const dragDepthRef = useRef(0);
-  const largeJobRef = useRef<AbortController | null>(null);
+  const analysisJobRef = useRef<WorkerJob<LargeAnalysisResult> | null>(null);
+  const spectrogramJobRef = useRef<Array<WorkerJob<SpectrogramData>>>([]);
+  const analysisGenerationRef = useRef(0);
+  const spectrogramGenerationRef = useRef(0);
+  const backgroundPausedRef = useRef(false);
+  const exportJobRef = useRef<AbortController | null>(null);
   const scheduledNodesRef = useRef<AudioBufferSourceNode[]>([]);
   const playbackSessionRef = useRef(0);
 
@@ -186,7 +196,8 @@ function App() {
 
   useEffect(() => {
     if (!largeSource) return;
-    const controller = new AbortController();
+    const generation = ++spectrogramGenerationRef.current;
+    spectrogramJobRef.current.forEach((job) => job.cancel());
     const { file, metadata } = largeSource;
     const options = {
       startSeconds: viewStart,
@@ -197,36 +208,45 @@ function App() {
       maximumFrequency: Math.min(spectrogramMaxFrequency, metadata.sampleRate / 2),
       floorDb: spectrogramFloorDb,
       ceilingDb: spectrogramCeilingDb,
-      signal: controller.signal,
       warmupFrames: Math.floor(metadata.sampleRate * 0.5),
-      transform: (channels: Float32Array[], startFrame: number) => createStreamingEditChain(modules, metadata.sampleRate, metadata.frameCount, startFrame).process(channels, startFrame),
     };
-    setOperationStatus('Building visible spectrogram');
-    Promise.all([
-      calculateFileSpectrogram(file, metadata, { ...options, channelIndex: 0 }),
-      calculateFileSpectrogram(file, metadata, { ...options, channelIndex: Math.min(1, metadata.channels - 1) }),
-    ]).then(([left, right]) => {
-      if (!controller.signal.aborted) {
+    setSpectrogramStatus('Building visible spectrogram');
+    setSpectrogramProgress(0);
+    setOperationPaused(false);
+    const leftJob = startWorkerJob<SpectrogramData>(
+      { kind: 'spectrogram', file, metadata, modules, options: { ...options, channelIndex: 0 } },
+      (fraction) => { if (generation === spectrogramGenerationRef.current) setSpectrogramProgress(fraction / 2); },
+    );
+    const rightJob = startWorkerJob<SpectrogramData>(
+      { kind: 'spectrogram', file, metadata, modules, options: { ...options, channelIndex: Math.min(1, metadata.channels - 1) } },
+      (fraction) => { if (generation === spectrogramGenerationRef.current) setSpectrogramProgress(0.5 + fraction / 2); },
+    );
+    spectrogramJobRef.current = [leftJob, rightJob];
+    Promise.all([leftJob.promise, rightJob.promise]).then(([left, right]) => {
+      if (generation === spectrogramGenerationRef.current) {
         setLargeSpectrograms({ left, right });
-        setOperationStatus('');
+        setSpectrogramStatus('');
+        setSpectrogramProgress(1);
+        spectrogramJobRef.current = [];
       }
     }).catch((caught) => {
       if ((caught as Error).name !== 'AbortError') setError(caught instanceof Error ? caught.message : 'Unable to build the visible spectrogram.');
     });
-    return () => controller.abort();
+    return () => {
+      if (generation === spectrogramGenerationRef.current) spectrogramGenerationRef.current += 1;
+      leftJob.cancel();
+      rightJob.cancel();
+    };
   }, [largeSource, modules, spectrogramCeilingDb, spectrogramFloorDb, spectrogramMaxFrequency, spectrogramMinFrequency, viewDuration, viewStart]);
 
   useEffect(() => {
     if (!largeSource) return;
-    largeJobRef.current?.abort();
-    const controller = new AbortController();
-    largeJobRef.current = controller;
+    analysisJobRef.current?.cancel();
+    const generation = ++analysisGenerationRef.current;
     const { file, metadata } = largeSource;
     const selectionStartFrame = Math.max(0, Math.floor(selectionStart * metadata.sampleRate));
     const selectionFrames = Math.max(1, Math.min(metadata.frameCount - selectionStartFrame, Math.ceil((selectionEnd - selectionStart) * metadata.sampleRate)));
     const selectionWarmStart = Math.max(0, selectionStartFrame - Math.floor(metadata.sampleRate * 2));
-    const selectionProcessor = createStreamingEditChain(modules, metadata.sampleRate, metadata.frameCount, selectionWarmStart);
-    const fullProcessor = createStreamingEditChain(modules, metadata.sampleRate, metadata.frameCount, 0);
     const selectionMetadata: WavMetadata = {
       ...metadata,
       dataOffset: metadata.dataOffset + selectionStartFrame * metadata.frameSize,
@@ -234,49 +254,87 @@ function App() {
       dataLength: selectionFrames * metadata.frameSize,
       dataLengthBigInt: BigInt(selectionFrames * metadata.frameSize),
     };
-    setOperationStatus('Analyzing selection');
-    setOperationProgress(0);
-    void analyzeLargeLoudness(file, selectionMetadata, {
-      signal: controller.signal,
-      onProgress: ({ fraction }) => setOperationProgress(fraction),
-    }).then(async (stats) => {
-      if (!controller.signal.aborted) setLargeSelectionOriginalStats(stats);
-      setOperationStatus('Analyzing processed selection');
-      if (selectionWarmStart < selectionStartFrame) {
-        const warmup = await readFrames(file, metadata, selectionWarmStart, selectionStartFrame - selectionWarmStart, { signal: controller.signal });
-        selectionProcessor.process(warmup, selectionWarmStart);
-      }
-      return analyzeLargeLoudness(file, selectionMetadata, {
-        signal: controller.signal,
-        transform: (channels, frame) => selectionProcessor.process(channels, selectionStartFrame + frame),
-        onProgress: ({ fraction }) => setOperationProgress(fraction),
+    setAnalysisStatus('Analyzing selection');
+    setAnalysisProgress(0);
+    setOperationPaused(false);
+    const run = (request: Parameters<typeof startWorkerJob<LargeAnalysisResult>>[0]) => {
+      const job = startWorkerJob<LargeAnalysisResult>(
+        request,
+        (fraction) => { if (generation === analysisGenerationRef.current) setAnalysisProgress(fraction); },
+      );
+      analysisJobRef.current = job;
+      if (backgroundPausedRef.current) job.pause();
+      return job.promise;
+    };
+    void run({ kind: 'loudness', file, metadata: selectionMetadata, frameOffset: selectionStartFrame }).then((stats) => {
+      if (generation !== analysisGenerationRef.current) throw new DOMException('Stale analysis.', 'AbortError');
+      setLargeSelectionOriginalStats(stats);
+      setAnalysisStatus('Analyzing processed selection');
+      return run({
+        kind: 'loudness',
+        file,
+        metadata: selectionMetadata,
+        modules,
+        frameOffset: selectionStartFrame,
+        sourceFrameCount: metadata.frameCount,
+        warmup: selectionWarmStart < selectionStartFrame
+          ? { metadata, startFrame: selectionWarmStart, frameCount: selectionStartFrame - selectionWarmStart }
+          : undefined,
       });
     }).then((stats) => {
-      if (!controller.signal.aborted) setLargeSelectionCurrentStats(stats);
-      setOperationStatus('Analyzing original recording');
-      return analyzeLargeLoudness(file, metadata, {
-        signal: controller.signal,
-        onProgress: ({ fraction }) => setOperationProgress(fraction),
-      });
+      if (generation !== analysisGenerationRef.current) throw new DOMException('Stale analysis.', 'AbortError');
+      setLargeSelectionCurrentStats(stats);
+      setAnalysisStatus('Analyzing original recording');
+      return run({ kind: 'loudness', file, metadata });
     }).then((stats) => {
-      if (!controller.signal.aborted) setLargeOriginalStats(stats);
-      setOperationStatus('Analyzing processed recording');
-      return analyzeLargeLoudness(file, metadata, {
-        signal: controller.signal,
-        transform: (channels, frame) => fullProcessor.process(channels, frame),
-        onProgress: ({ fraction }) => setOperationProgress(fraction),
-      });
+      if (generation !== analysisGenerationRef.current) throw new DOMException('Stale analysis.', 'AbortError');
+      setLargeOriginalStats(stats);
+      setAnalysisStatus('Analyzing processed recording');
+      return run({ kind: 'loudness', file, metadata, modules });
     }).then((stats) => {
-      if (!controller.signal.aborted) {
+      if (generation === analysisGenerationRef.current) {
         setLargeCurrentStats(stats);
-        setOperationStatus('');
-        setOperationProgress(1);
+        setAnalysisStatus('');
+        setAnalysisProgress(1);
+        analysisJobRef.current = null;
       }
     }).catch((caught) => {
       if ((caught as Error).name !== 'AbortError') setError(caught instanceof Error ? caught.message : 'Unable to analyze this recording.');
     });
-    return () => controller.abort();
+    return () => {
+      if (generation === analysisGenerationRef.current) analysisGenerationRef.current += 1;
+      analysisJobRef.current?.cancel();
+    };
   }, [largeSource, modules, selectionEnd, selectionStart]);
+
+  const pauseBackgroundWork = useCallback(() => {
+    backgroundPausedRef.current = true;
+    analysisJobRef.current?.pause();
+    spectrogramJobRef.current.forEach((job) => job.pause());
+    setOperationPaused(true);
+  }, []);
+
+  const resumeBackgroundWork = useCallback(() => {
+    backgroundPausedRef.current = false;
+    analysisJobRef.current?.resume();
+    spectrogramJobRef.current.forEach((job) => job.resume());
+    setOperationPaused(false);
+  }, []);
+
+  const cancelBackgroundWork = useCallback(() => {
+    analysisGenerationRef.current += 1;
+    spectrogramGenerationRef.current += 1;
+    analysisJobRef.current?.cancel();
+    spectrogramJobRef.current.forEach((job) => job.cancel());
+    analysisJobRef.current = null;
+    spectrogramJobRef.current = [];
+    backgroundPausedRef.current = false;
+    setOperationPaused(false);
+    setAnalysisStatus('');
+    setAnalysisProgress(0);
+    setSpectrogramStatus('');
+    setSpectrogramProgress(0);
+  }, []);
 
   const stopPlayback = useCallback(() => {
     playbackSessionRef.current += 1;
@@ -645,8 +703,8 @@ function App() {
         return;
       }
       const controller = new AbortController();
-      largeJobRef.current?.abort();
-      largeJobRef.current = controller;
+      exportJobRef.current?.abort();
+      exportJobRef.current = controller;
       try {
         const handle = await picker({ suggestedName: `${safeName || 'field-restore'}-rx.wav`, types: [{ description: 'WAV audio', accept: { 'audio/wav': ['.wav'] } }] });
         const writable = await handle.createWritable();
@@ -1004,7 +1062,12 @@ function App() {
         </header>
         <main className="main-content scrollbar-thin">
           {error && <div className="max-w-[1660px] mx-auto mb-3 border border-[#d79c88] bg-[#fff0e9] text-[#8e3a2b] rounded-md px-3 py-2 text-[12px] flex items-center justify-between" role="alert" data-testid="status-error"><span>{error}</span><button type="button" className="icon-btn" onClick={() => setError('')} aria-label="Dismiss error"><X size={14} /></button></div>}
-          {operationStatus && <div className="max-w-[1660px] mx-auto mb-3 border rounded-md px-3 py-2 text-[11px] flex items-center gap-3 bg-[hsl(var(--card))]" role="status"><span>{operationStatus}</span><div className="h-1.5 flex-1 max-w-56 bg-[hsl(var(--muted))] rounded overflow-hidden"><div className="h-full bg-[hsl(var(--primary))]" style={{ width: `${Math.max(4, operationProgress * 100)}%` }} /></div><span className="font-mono-value">{Math.round(operationProgress * 100)}%</span></div>}
+          {(analysisStatus || spectrogramStatus || operationStatus) && (() => {
+            const backgroundStatus = analysisStatus || spectrogramStatus;
+            const visibleStatus = backgroundStatus || operationStatus;
+            const visibleProgress = analysisStatus ? analysisProgress : spectrogramStatus ? spectrogramProgress : operationProgress;
+            return <div className="max-w-[1660px] mx-auto mb-3 border rounded-md px-3 py-2 text-[11px] flex items-center gap-3 bg-[hsl(var(--card))]" role="status"><span>{operationPaused && backgroundStatus ? `${visibleStatus} · paused` : visibleStatus}</span><div className="h-1.5 flex-1 max-w-56 bg-[hsl(var(--muted))] rounded overflow-hidden"><div className="h-full bg-[hsl(var(--primary))]" style={{ width: `${Math.max(4, visibleProgress * 100)}%` }} /></div><span className="font-mono-value">{Math.round(visibleProgress * 100)}%</span>{backgroundStatus && <><button type="button" className="quiet-btn !py-1" onClick={operationPaused ? resumeBackgroundWork : pauseBackgroundWork} data-testid="button-analysis-pause">{operationPaused ? <Play size={12} /> : <Pause size={12} />}{operationPaused ? 'Resume' : 'Pause'}</button><button type="button" className="icon-btn !h-7 !min-w-7" onClick={cancelBackgroundWork} aria-label="Cancel background analysis" data-testid="button-analysis-cancel"><X size={13} /></button></>}</div>;
+          })()}
           <div className="workspace-grid">
             <div className="min-w-0 space-y-4">
               <div className="flex items-center justify-between">

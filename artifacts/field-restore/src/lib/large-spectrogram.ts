@@ -14,6 +14,8 @@ export interface FileSpectrogramOptions {
   channelIndex?: number;
   signal?: AbortSignal;
   onProgress?: (completed: number, total: number) => void;
+  /** Cooperatively pause between FFT columns. */
+  checkpoint?: () => void | Promise<void>;
   transform?: (channels: Float32Array[], startFrame: number) => Float32Array[] | Promise<Float32Array[]>;
   /** Sequential frames processed before each FFT window to warm stateful DSP. */
   warmupFrames?: number;
@@ -106,6 +108,8 @@ export async function calculateFileSpectrogram(
   }
 
   for (let column = 0; column < width; column += 1) {
+    abort(options.signal);
+    await options.checkpoint?.();
     abort(options.signal);
     const center = startFrame + Math.floor(((column + 0.5) / width) * viewFrames);
     const windowStart = center - half;

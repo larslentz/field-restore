@@ -11,6 +11,8 @@ export interface LargeAnalysisOptions {
   signal?: AbortSignal;
   chunkFrames?: number;
   onProgress?: (progress: LargeAnalysisProgress) => void;
+  /** Cooperatively pause between bounded chunks without retaining file audio. */
+  checkpoint?: () => void | Promise<void>;
   /** Apply the current edit chain to a chunk before it is analysed. */
   transform?: (channels: Float32Array[], startFrame: number) => Float32Array[] | Promise<Float32Array[]>;
 }
@@ -112,6 +114,8 @@ export async function analyzeLargeLoudness(
   };
 
   while (frame < total) {
+    abort(options.signal);
+    await options.checkpoint?.();
     abort(options.signal);
     const start = frame;
     let channels = await readFrames(file, metadata, start, Math.min(chunkSize, total - start), { signal: options.signal });
