@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent as ReactDragEvent, type FormEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react';
-import { Activity, ArrowDown, ArrowUp, Check, ChevronDown, CircleHelp, Download, FileAudio, FolderOpen, Gauge, GripVertical, Info, Keyboard, Layers3, LoaderCircle, Menu, PanelRightOpen, Pause, Play, Plus, Redo2, RotateCcw, Save, Settings, Square, Trash2, Undo2, Waves, X, ZoomIn, ZoomOut } from 'lucide-react';
+import { Activity, ArrowDown, ArrowUp, Check, ChevronDown, CircleHelp, Download, ExternalLink, FileAudio, FolderOpen, Gauge, GripVertical, Info, Keyboard, Layers3, LoaderCircle, Menu, PanelRightOpen, Pause, Play, Plus, Redo2, RotateCcw, Save, Settings, Square, Trash2, Undo2, Waves, X, ZoomIn, ZoomOut } from 'lucide-react';
 import { createDemoAudio, downloadBlob, encodeWav, parseWav, type AudioSource } from '@/lib/audio';
 import { decodeChannels, loadProject, projectFromSource, saveProject } from '@/lib/persistence';
 import { AUTOMATIC_DC_REMOVAL, analyzeInitialHum, humOpeningReadout, isFixedLowRumble, isLegacyWind, makeBringBackLowEnd, makeDefaultChain, makeFadeIn, makeFadeOut, makeLowRumbleRemoval, makeModule, makeProcessingChain, makeRestorationReport, MODULE_LABELS, renderChain, toggleEditableModules, withFadeRange, withoutLegacyDcModules, type EditModule, type HumScanState } from '@/lib/edit-chain';
@@ -1793,12 +1793,21 @@ function App() {
       <aside className="sidebar-shell" inert={!!modal || presetDialogOpen} aria-hidden={modal || presetDialogOpen ? true : undefined}>
         <div className="px-4 py-5 flex items-center gap-3">
           <div className="brand-mark" aria-hidden="true" />
-          <div className="brand-copy"><div className="font-bold tracking-tight text-[14px]">FIELD RESTORE</div><div className="text-[10px] opacity-55 tracking-[.12em] mt-0.5">BY LARS LENTZ</div></div>
+          <div className="brand-copy">
+            <div className="font-bold tracking-tight text-[14px]">FIELD RESTORE</div>
+            <div className="text-[10px] opacity-55 tracking-[.12em] mt-0.5">BY LARS LENTZ</div>
+            <a className="brand-links" href="https://sleek.bio/larslentz" target="_blank" rel="noopener noreferrer" aria-label="More by Lars (opens in new tab)" data-testid="link-more-by-lars">
+              More by Lars <ExternalLink size={11} aria-hidden="true" />
+            </a>
+          </div>
         </div>
         <div className="px-3 mt-5 sidebar-title eyebrow text-[#91a69d]">Workspace</div>
         <nav className="px-3 mt-2 space-y-1" aria-label="Workspace navigation">
           {([['edit', Activity, 'Edit chain'], ['analyze', Gauge, 'Analyze'], ['project', FolderOpen, 'Project']] as const).map(([tab, Icon, label]) => <button key={tab} type="button" className={`nav-item ${activeTab === tab ? 'active' : ''}`} onClick={() => setActiveTab(tab)} data-testid={`nav-${tab}`}><Icon size={15} /><span className="nav-label">{label}</span></button>)}
           <button type="button" className="nav-item compact-chain-trigger" onClick={(event) => openChainDrawer(event)} aria-label="Open edit chain" data-testid="button-open-chain"><Layers3 size={15} /><span className="nav-label">Modules</span></button>
+          <a className="nav-item compact-more-link" href="https://sleek.bio/larslentz" target="_blank" rel="noopener noreferrer" aria-label="More by Lars (opens in new tab)" title="More by Lars (opens in new tab)" data-testid="link-more-by-lars-compact">
+            <ExternalLink size={15} aria-hidden="true" /><span className="compact-more-caption" aria-hidden="true">LARS</span>
+          </a>
         </nav>
         <section className="sidebar-chain" aria-label="Non-destructive edit chain">
           <div className="sidebar-chain-heading">

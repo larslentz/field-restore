@@ -173,6 +173,9 @@
 .has-edit-layout .sidebar-chain { flex: 0 0 auto; height: 44vh; }
 .brand-mark { width: 28px; height: 28px; border: 2px solid hsl(var(--sidebar-primary)); border-radius: 50%; position: relative; display: grid; place-items: center; }
 .brand-mark::after { content: ''; width: 6px; height: 6px; background: hsl(var(--sidebar-primary)); border-radius: 50%; box-shadow: 0 0 0 4px rgba(183, 221, 47, .12); }
+.brand-links { display: inline-flex; align-items: center; gap: 4px; margin-top: 6px; color: hsl(var(--sidebar-primary)); font-size: 11px; font-weight: 600; text-decoration: underline; text-underline-offset: 3px; }
+.brand-links:hover { color: #e5f49d; }
+.brand-links:focus-visible, .compact-more-link:focus-visible { outline: 2px solid hsl(var(--sidebar-primary)); outline-offset: 2px; }
 .main-shell { min-width: 0; min-height: 0; flex: 1; display: flex; flex-direction: column; }
 .topbar { height: 58px; flex: 0 0 58px; border-bottom: 1px solid hsl(var(--border)); display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 24px; background: hsl(var(--card)); }
 .topbar-actions { flex: 0 0 auto; }
@@ -225,6 +228,7 @@
 .nav-item:hover, .nav-item.active { background: hsl(var(--sidebar-accent)); opacity: 1; }
 .nav-item.active { color: hsl(var(--sidebar-primary)); box-shadow: inset 2px 0 hsl(var(--sidebar-primary)); }
 .compact-chain-trigger { display: none; }
+.compact-more-link { display: none; }
 .sidebar-chain { min-height: 150px; max-height: 44vh; margin-top: 22px; padding: 0 10px; display: flex; flex-direction: column; }
 .sidebar-chain-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 2px 8px; }
 .sidebar-chain-title { min-width: 0; text-align: left; border-radius: 4px; }
@@ -397,6 +401,8 @@
   .sidebar-shell { width: 60px; flex-basis: 60px; }
   .sidebar-shell .brand-copy, .sidebar-shell .nav-label, .sidebar-shell .sidebar-meta, .sidebar-shell .sidebar-title, .sidebar-chain { display: none; }
   .compact-chain-trigger { display: flex; }
+  .compact-more-link { display: flex; flex-direction: column; gap: 2px; padding-block: 7px; color: hsl(var(--sidebar-primary)); opacity: 1; }
+  .compact-more-caption { font-size: 9px; font-weight: 700; letter-spacing: .04em; }
   .nav-item { justify-content: center; padding: 10px 0; }
   .topbar { padding: 0 14px; }
   .topbar-processing .topbar-recording-copy { max-width: 120px; }
