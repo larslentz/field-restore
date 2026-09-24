@@ -35,7 +35,7 @@ type SpectrogramView = {
   durationSeconds: number;
 };
 
-const MODULE_TYPES = ['gain', 'fade', 'low-rumble', 'hum', 'wind', 'bring-back-low-end', 'region', 'ambient'] as const;
+const MODULE_TYPES = ['gain', 'fade', 'low-rumble', 'hum', 'wind', 'bring-back-low-end', 'ambient'] as const;
 type AddModuleType = typeof MODULE_TYPES[number];
 const moduleOptionLabel = (type: AddModuleType) => type === 'low-rumble' ? 'Low Rumble Removal' : type === 'bring-back-low-end' ? 'Bring Back the Low End' : MODULE_LABELS[type];
 const SPECTROGRAM_LEFT = 48;
