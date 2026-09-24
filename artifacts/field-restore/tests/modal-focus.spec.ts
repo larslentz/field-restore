@@ -32,12 +32,26 @@ for (const { name, opener: openerId, close: closeId, action: actionId, last: las
     const close = dialog.getByTestId(closeId);
     const action = dialog.getByTestId(actionId);
     const last = dialog.getByTestId(lastId);
+    const sidebar = page.locator('.sidebar-shell');
+    const main = page.locator('.main-shell');
 
     for (const dismissal of ['Escape', 'close', 'action'] as const) {
+      await expect(sidebar).not.toHaveAttribute('inert');
+      await expect(main).not.toHaveAttribute('inert');
+      await expect(opener).toBeVisible();
       await opener.focus();
       await page.keyboard.press('Enter');
       await expect(dialog).toBeVisible();
       await expect(close).toBeFocused();
+      for (const background of [sidebar, main]) {
+        await expect(background).toHaveAttribute('inert', '');
+        await expect(background).toHaveAttribute('aria-hidden', 'true');
+      }
+      await expect(page.getByRole('navigation', { name: 'Workspace navigation' })).toHaveCount(0);
+      await expect(page.getByRole('main')).toHaveCount(0);
+      await expect(page.getByRole('button', { name: 'Play playback' })).toHaveCount(0);
+      await expect(page.getByRole('button', { name: 'Export', exact: true })).toHaveCount(0);
+      await expect(dialog.getByRole('heading', { name })).toBeVisible();
 
       await page.keyboard.press('Shift+Tab');
       await expect(dialog.locator(':focus')).toHaveCount(1);
@@ -52,7 +66,13 @@ for (const { name, opener: openerId, close: closeId, action: actionId, last: las
       if (dismissal === 'close') await close.click();
       if (dismissal === 'action') await action.click();
       await expect(dialog).toBeHidden();
+      for (const background of [sidebar, main]) {
+        await expect(background).not.toHaveAttribute('inert');
+        await expect(background).not.toHaveAttribute('aria-hidden');
+      }
       await expect(opener).toBeFocused();
+      await expect(page.getByRole('navigation', { name: 'Workspace navigation' })).toBeVisible();
+      await expect(page.getByRole('main')).toBeVisible();
     }
   });
 }
@@ -71,4 +91,17 @@ test('alternate export and project settings openers also regain focus', async ({
   await expect(page.getByRole('dialog', { name: 'Preferences' }).getByTestId('button-close-settings')).toBeFocused();
   await page.keyboard.press('Escape');
   await expect(settingsOpener).toBeFocused();
+});
+
+test('the edit drawer retains its existing background and focus behavior', async ({ page }) => {
+  await page.goto('/');
+  const opener = page.getByTestId('button-open-full-chain');
+  await opener.click();
+  const drawer = page.getByRole('dialog', { name: 'Edit chain' });
+  await expect(drawer).toBeFocused();
+  await expect(page.locator('.sidebar-shell')).not.toHaveAttribute('inert');
+  await expect(page.locator('.main-shell')).not.toHaveAttribute('aria-hidden');
+  await page.keyboard.press('Escape');
+  await expect(drawer).toBeHidden();
+  await expect(opener).toBeFocused();
 });

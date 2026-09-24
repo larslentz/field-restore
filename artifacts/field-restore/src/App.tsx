@@ -1504,7 +1504,7 @@ function App() {
       data-testid="app-field-restore"
     >
       {isDraggingWav && (
-        <div className="wav-drop-overlay" role="status" aria-live="polite" data-testid="wav-drop-overlay">
+        <div className="wav-drop-overlay" role="status" aria-live="polite" inert={!!modal} aria-hidden={modal ? true : undefined} data-testid="wav-drop-overlay">
           <div className="wav-drop-card">
             <FileAudio size={34} strokeWidth={1.5} />
             <div>
@@ -1514,7 +1514,7 @@ function App() {
           </div>
         </div>
       )}
-      <aside className="sidebar-shell">
+      <aside className="sidebar-shell" inert={!!modal} aria-hidden={modal ? true : undefined}>
         <div className="px-4 py-5 flex items-center gap-3">
           <div className="brand-mark" aria-hidden="true" />
           <div className="brand-copy"><div className="font-bold tracking-tight text-[14px]">FIELD RESTORE</div><div className="text-[10px] opacity-55 tracking-[.12em] uppercase mt-0.5">local instrument</div></div>
@@ -1603,7 +1603,7 @@ function App() {
           </div>
         </div>
       </aside>
-      <section className="main-shell">
+      <section className="main-shell" inert={!!modal} aria-hidden={modal ? true : undefined}>
         <header className={`topbar ${analysisStatus || spectrogramStatus || operationStatus ? 'topbar-processing' : ''}`}>
           <div className="topbar-recording flex items-center gap-3 min-w-0">
             <button type="button" className="icon-btn md:hidden" aria-label="Open navigation" data-testid="button-menu"><Menu size={16} /></button>
@@ -1731,11 +1731,11 @@ function App() {
           </div>
         </main>
       </section>
-      <input ref={fileRef} type="file" accept=".wav,audio/wav" onChange={importFile} className="hidden" data-testid="input-import-wav" />
+      <input ref={fileRef} type="file" accept=".wav,audio/wav" onChange={importFile} className="hidden" inert={!!modal} aria-hidden={modal ? true : undefined} data-testid="input-import-wav" />
       {modal === 'export' && <ExportModal onClose={() => setModal(null)} onExport={exportAudio} title={title} />}
       {modal === 'help' && <HelpModal onClose={() => setModal(null)} />}
       {modal === 'settings' && <SettingsModal onClose={() => setModal(null)} spectrogramPalette={spectrogramPalette} onSpectrogramPaletteChange={(palette) => { setSpectrogramPalette(palette); localStorage.setItem('field-restore-spectrogram-palette', palette); }} />}
-      {presetDialogOpen && <div className="modal-backdrop" onKeyDown={(event) => { if (event.key === 'Escape') setPresetDialogOpen(false); }}>
+      {presetDialogOpen && <div className="modal-backdrop" inert={!!modal} aria-hidden={modal ? true : undefined} onKeyDown={(event) => { if (event.key === 'Escape') setPresetDialogOpen(false); }}>
         <form className="modal-card" role="dialog" aria-modal="true" aria-labelledby="preset-dialog-title" onSubmit={saveCurrentChainPreset}>
           <div className="modal-header"><div><div className="eyebrow">Local preset</div><h2 id="preset-dialog-title" className="text-[17px] font-bold mt-1">Save edit chain</h2></div><button type="button" className="icon-btn" onClick={() => setPresetDialogOpen(false)} aria-label="Close save preset"><X size={16} /></button></div>
           <div className="modal-body">
@@ -1747,7 +1747,7 @@ function App() {
           <div className="modal-footer"><button type="button" className="quiet-btn" onClick={() => setPresetDialogOpen(false)}>Cancel</button><button type="submit" className="primary-btn" data-testid="button-confirm-save-preset"><Save size={14} /> Save preset</button></div>
         </form>
       </div>}
-      {chainDrawerOpen && <div className="chain-drawer-backdrop" onPointerDown={(event) => { if (event.target === event.currentTarget) { event.preventDefault(); setChainDrawerOpen(false); } }}>
+      {chainDrawerOpen && <div className="chain-drawer-backdrop" inert={!!modal} aria-hidden={modal ? true : undefined} onPointerDown={(event) => { if (event.target === event.currentTarget) { event.preventDefault(); setChainDrawerOpen(false); } }}>
         <aside ref={chainDrawerRef} className="chain-drawer" role="dialog" aria-modal="true" aria-label={automaticDcSelected ? AUTOMATIC_DC_REMOVAL.name : selectedModule ? `Edit ${selectedModule.name}` : 'Edit chain'} tabIndex={-1}>
           <div className="chain-drawer-header">
             <div><div className="eyebrow">Non-destructive edit chain</div><div className="section-title mt-1">{automaticDcSelected ? AUTOMATIC_DC_REMOVAL.name : selectedModule ? selectedModule.name : 'Modules'}</div></div>
