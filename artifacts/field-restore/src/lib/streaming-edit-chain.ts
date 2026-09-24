@@ -2,6 +2,7 @@ import type { ChannelData } from './audio';
 import { automaticDcBlockerPole, analyzeInitialHum, fadeGainAtFrame, isFixedLowRumble, type EditModule } from './edit-chain';
 import { WindProcessor, windLevel, type WindSnapshot } from './wind-reduction';
 import { HumProcessor, humPrefixFrames, type HumSnapshot } from './hum-removal';
+import { NoiseReductionProcessor, type NoiseReductionSnapshot } from './noise-reduction';
 import { readAudioFrames, type AudioMetadata } from './source-audio';
 
 interface FilterState {
@@ -20,11 +21,12 @@ interface ModuleState {
   ambientBed: number[] | undefined;
   hum: HumProcessor | undefined;
   wind: WindProcessor | undefined;
+  noise: NoiseReductionProcessor | undefined;
 }
 
 export interface StreamingEditChainSnapshot {
   nextFrame: number;
-  state: Array<Omit<ModuleState, 'hum' | 'wind'> & { hum: HumSnapshot | undefined; wind: WindSnapshot | undefined }>;
+  state: Array<Omit<ModuleState, 'hum' | 'wind' | 'noise'> & { hum: HumSnapshot | undefined; wind: WindSnapshot | undefined; noise: NoiseReductionSnapshot | undefined }>;
 }
 
 interface Biquad {
@@ -105,6 +107,7 @@ export class StreamingEditChain {
       ambientBed: undefined,
       hum: undefined,
       wind: undefined,
+      noise: undefined,
     }));
     this.nextFrame = initialFrame;
   }
@@ -119,6 +122,7 @@ export class StreamingEditChain {
       state.ambientBed = undefined;
       state.hum = undefined;
       state.wind = undefined;
+      state.noise = undefined;
     });
     this.nextFrame = startFrame;
   }
@@ -143,6 +147,7 @@ export class StreamingEditChain {
         ambientBed: state.ambientBed ? [...state.ambientBed] : undefined,
         hum: state.hum?.snapshot(),
         wind: state.wind?.snapshot(),
+        noise: state.noise?.snapshot(),
       })),
     };
   }
@@ -168,6 +173,10 @@ export class StreamingEditChain {
           (frame, active) => this.onWindChange?.(this.modules[index].id, frame, active))
         : undefined;
       if (saved.wind) target.wind?.restore(saved.wind);
+      target.noise = saved.noise
+        ? new NoiseReductionProcessor(this.sampleRate, saved.noise.lows.length, Number(this.modules[index].params.strength))
+        : undefined;
+      if (saved.noise) target.noise?.restore(saved.noise);
     });
     this.nextFrame = snapshot.nextFrame;
   }
@@ -246,6 +255,9 @@ export class StreamingEditChain {
             (frame, active) => this.onWindChange?.(module.id, frame, active), startFrame);
           state.wind.process(output);
         }
+      } else if (module.type === 'noise') {
+        state.noise ??= new NoiseReductionProcessor(this.sampleRate, output.length, Number(p.strength));
+        state.noise.process(output);
       } else if (module.type === 'region') {
         const start = Math.max(0, Math.floor(Math.max(0, Number(p.start)) * this.sampleRate));
         const end = Math.floor(Math.max(Number(p.end), Number(p.start)) * this.sampleRate);

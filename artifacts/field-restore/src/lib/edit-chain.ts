@@ -1,8 +1,9 @@
 import { cloneChannels, type ChannelData } from './audio';
 import { HumProcessor, humAnalysisWindowSize, humPrefixFrames } from './hum-removal';
 import { WindProcessor, WIND_DEFAULTS, windLevel } from './wind-reduction';
+import { NoiseReductionProcessor } from './noise-reduction';
 
-export type ModuleType = 'gain' | 'fade' | 'eq' | 'dc' | 'hum' | 'wind' | 'region' | 'ambient';
+export type ModuleType = 'gain' | 'fade' | 'eq' | 'dc' | 'hum' | 'wind' | 'noise' | 'region' | 'ambient';
 export interface EditModule {
   id: string;
   type: ModuleType;
@@ -12,7 +13,7 @@ export interface EditModule {
 }
 
 export const MODULE_LABELS: Record<ModuleType, string> = {
-  gain: 'Gain', fade: 'Fade', eq: 'EQ', dc: 'DC Offset', hum: 'Hum Removal', wind: 'Wind Removal',
+  gain: 'Gain', fade: 'Fade', eq: 'EQ', dc: 'DC Offset', hum: 'Hum Removal', wind: 'Wind Removal', noise: 'Noise Reduction',
   region: 'Region Attenuation', ambient: 'Ambient Patch',
 };
 
@@ -22,7 +23,7 @@ let idCounter = 1;
 export const makeModule = (type: ModuleType, options?: { name?: string; params?: Record<string, number | string> }): EditModule => {
   const defaults: Record<ModuleType, Record<string, number | string>> = {
     gain: { db: -2 }, fade: { in: 0, out: 0 }, eq: { mode: 'three-band', low: 0, mid: 0, high: -1, frequency: 55, q: 0.4, gain: 0 }, dc: { mode: 'Auto', amount: 0 },
-    hum: { mode: 'Static', frequency: 60, reduction: 12 }, wind: { mode: 'Automatic', ...WIND_DEFAULTS },
+    hum: { mode: 'Static', frequency: 60, reduction: 12 }, wind: { mode: 'Automatic', ...WIND_DEFAULTS }, noise: { strength: 50 },
     region: { start: 0, end: 0, amount: -8 }, ambient: { start: 0, end: 0, length: 1 },
   };
   return {
@@ -284,6 +285,8 @@ export function applyModule(input: ChannelData, module: EditModule, sampleRate: 
       new WindProcessor(sampleRate, output.length, windLevel(p.detection), windLevel(p.removal),
         context.onWindChange && ((frame, active) => context.onWindChange!(frameOffset + frame, active))).process(output);
     }
+  } else if (module.type === 'noise') {
+    new NoiseReductionProcessor(sampleRate, output.length, Number(p.strength)).process(output);
   } else if (module.type === 'region') {
     const start = Math.max(0, Math.floor(Math.max(0, Number(p.start)) * sampleRate) - frameOffset);
     const end = Math.min(length, Math.floor(Math.max(Number(p.end), Number(p.start)) * sampleRate) - frameOffset);

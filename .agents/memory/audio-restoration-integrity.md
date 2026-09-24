@@ -50,3 +50,9 @@ Time-positioned hum history is an observation of audible processed playback, not
 **Why:** Streaming buffers can make future decisions available before they are heard, and bounded history cannot establish what happened outside its retained positions.
 
 **How to apply:** Retain only audible-playhead decisions in local bounded history, preserve gaps across seeks and loops, and reset the history whenever its source or edit chain changes.
+
+Automatic broadband cleanup must be judged against wanted audio *inside noise*, not just isolated clean tones and noise-only clips. Preserve short onsets after the estimate has settled, and check high-sample-rate recordings.
+
+**Why:** An estimate learned from steady hiss can attenuate the first milliseconds of a wanted sound; a tone protected in silence can still be softened when mixed with hiss. Broad frequency-band ratios change with the recording's Nyquist frequency and can mistake high-rate white noise for a tonal signal.
+
+**How to apply:** Compare quiet and loud mixed tones, late short transients, stereo-only events, and steady hiss at common and high sample rates. For file-backed visual previews, a stateful adaptive floor needs the same source history as playback and export, not an independent short warmup for each visible slice.

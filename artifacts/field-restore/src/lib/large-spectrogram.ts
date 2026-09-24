@@ -21,6 +21,8 @@ export interface FileSpectrogramOptions {
   transform?: (channels: Float32Array[], startFrame: number) => Float32Array[] | Promise<Float32Array[]>;
   /** Sequential frames processed before each FFT window to warm stateful DSP. */
   warmupFrames?: number;
+  /** Process from frame zero once, retaining bounded overlapping windows for stateful edits. */
+  continuousTransform?: boolean;
 }
 
 function abort(signal?: AbortSignal): void {
@@ -108,6 +110,9 @@ export async function calculateFileSpectrogram(
   for (let i = 0; i < fftSize; i += 1) {
     window[i] = 0.5 - 0.5 * Math.cos(2 * Math.PI * i / (fftSize - 1));
   }
+  let processedEnd = 0;
+  let previousStart = 0;
+  let previousWindow: Float32Array | undefined;
 
   for (let column = 0; column < width; column += 1) {
     abort(options.signal);
@@ -118,15 +123,43 @@ export async function calculateFileSpectrogram(
     const targetReadStart = Math.max(0, windowStart);
     const skip = targetReadStart - windowStart;
     const framesToRead = Math.max(0, Math.min(fftSize - skip, metadata.frameCount - targetReadStart));
-    const processingStart = Math.max(0, targetReadStart - Math.max(0, Math.floor(options.warmupFrames ?? 0)));
-    const prefix = targetReadStart - processingStart;
-    let channels = framesToRead > 0
-      ? await readAudioFrames(file, metadata, processingStart, prefix + framesToRead, { signal: options.signal })
-      : [];
-    if (channels.length && options.transform) channels = await options.transform(channels, processingStart);
+    let prefix = 0;
+    let samples: Float32Array | undefined;
+    if (framesToRead > 0 && options.continuousTransform && options.transform) {
+      const end = targetReadStart + framesToRead;
+      const current = new Float32Array(framesToRead);
+      if (previousWindow && targetReadStart < processedEnd) {
+        const overlapEnd = Math.min(processedEnd, end);
+        current.set(previousWindow.subarray(targetReadStart - previousStart, overlapEnd - previousStart));
+      }
+      const chunkFrames = 32768;
+      for (let frame = processedEnd; frame < end; frame += chunkFrames) {
+        abort(options.signal);
+        await options.checkpoint?.();
+        const count = Math.min(chunkFrames, end - frame);
+        const channels = await readAudioFrames(file, metadata, frame, count, { signal: options.signal });
+        const processed = await options.transform(channels, frame);
+        if (frame + count > targetReadStart) {
+          const skipBlock = Math.max(0, targetReadStart - frame);
+          current.set(processed[channel].subarray(skipBlock), Math.max(0, frame - targetReadStart));
+        }
+        options.onProgress?.(column + (frame + count) / Math.max(end, 1), width);
+      }
+      processedEnd = end;
+      previousWindow = current;
+      previousStart = targetReadStart;
+      samples = current;
+    } else {
+      const processingStart = Math.max(0, targetReadStart - Math.max(0, Math.floor(options.warmupFrames ?? 0)));
+      prefix = targetReadStart - processingStart;
+      let channels = framesToRead > 0
+        ? await readAudioFrames(file, metadata, processingStart, prefix + framesToRead, { signal: options.signal })
+        : [];
+      if (channels.length && options.transform) channels = await options.transform(channels, processingStart);
+      samples = channels[channel];
+    }
     real.fill(0);
     imaginary.fill(0);
-    const samples = channels[channel];
     for (let i = 0; i < framesToRead; i += 1) real[skip + i] = (samples?.[prefix + i] ?? 0) * window[skip + i];
     fft(real, imaginary);
     for (let bin = 0; bin <= half; bin += 1) magnitudes[bin] = Math.hypot(real[bin], imaginary[bin]) / half;

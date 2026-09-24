@@ -7,7 +7,7 @@ export interface ChainPreset {
 
 const STORAGE_KEY = 'field-restore-chain-presets-v1';
 const MAX_NAME_LENGTH = 60;
-const EDITABLE_TYPES = new Set(['gain', 'fade', 'eq', 'hum', 'wind', 'region', 'ambient']);
+const EDITABLE_TYPES = new Set(['gain', 'fade', 'eq', 'hum', 'wind', 'noise', 'region', 'ambient']);
 
 export function parseChainPresets(raw: string | null): ChainPreset[] {
   if (raw === null) return [];

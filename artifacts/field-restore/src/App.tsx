@@ -37,7 +37,7 @@ type SpectrogramView = {
   durationSeconds: number;
 };
 
-const MODULE_TYPES = ['gain', 'fade-in', 'fade-out', 'low-rumble', 'hum', 'wind', 'bring-back-low-end', 'region', 'ambient'] as const;
+const MODULE_TYPES = ['gain', 'fade-in', 'fade-out', 'low-rumble', 'hum', 'wind', 'noise', 'bring-back-low-end', 'region', 'ambient'] as const;
 type AddModuleType = typeof MODULE_TYPES[number];
 const moduleOptionLabel = (type: AddModuleType) => type === 'low-rumble' ? 'Low Rumble Removal' : type === 'bring-back-low-end' ? 'Bring Back the Low End' : type === 'fade-in' ? 'Fade In' : type === 'fade-out' ? 'Fade Out' : MODULE_LABELS[type];
 const SPECTROGRAM_LEFT = 48;
@@ -98,6 +98,7 @@ function moduleSummary(module: EditModule, humReadout?: ReturnType<typeof humOpe
   return module.type === 'gain' ? `${p.db} dB`
     : module.type === 'hum' ? humReadout?.summary ?? `${p.mode} · ${p.frequency} Hz`
       : module.type === 'wind' ? (isFixedLowRumble(module) ? `HPF ${p.cutoff} Hz` : `Auto · ${p.detection ?? 'Medium'} detection · ${p.removal ?? 'Medium'} removal`)
+        : module.type === 'noise' ? `Auto · ${p.strength ?? 50}% strength`
         : module.type === 'eq' && p.mode === 'low-shelf' ? `${p.gain} dB · ${p.frequency} Hz`
           : module.type === 'fade' ? (fadeControlDirection(module) === 'in' ? `${p.in} s in`
             : fadeControlDirection(module) === 'out' ? `${p.out} s out` : `${p.in} s in · ${p.out} s out`)
@@ -707,7 +708,9 @@ function App() {
         cachedSelectionCurrent.selectionEnd === selectionEndFrame) return cachedSelectionCurrent.stats;
       const editedFrames = editedSelectionEndFrame - editedSelectionStartFrame;
       const editedMetadata = audioRange(metadata, editedSelectionStartFrame, editedFrames);
-      const warmStart = committedTrimStart > 0 ? 0 : Math.max(0, editedSelectionStartFrame - metadata.sampleRate * 2);
+      const needsFullNoiseHistory = processingModules.some((module) =>
+        module.enabled && module.type === 'noise' && Number(module.params.strength) > 0);
+      const warmStart = committedTrimStart > 0 || needsFullNoiseHistory ? 0 : Math.max(0, editedSelectionStartFrame - metadata.sampleRate * 2);
       return run({
         kind: 'loudness',
         file,
@@ -917,9 +920,11 @@ function App() {
     const recentStart = Math.max(0, nextFrame - Math.floor(metadata.sampleRate * 2));
     const needsAlignedHumHistory = monitor === 'current' && processingModules.some((module) =>
       module.enabled && module.type === 'hum' && module.params.mode !== 'Static');
+    const needsFullNoiseHistory = monitor === 'current' && processingModules.some((module) =>
+      module.enabled && module.type === 'noise' && Number(module.params.strength) > 0);
     const humWindow = humAnalysisWindowSize(metadata.sampleRate);
     const warmStart = monitor === 'current'
-      ? (trimRef.current?.[0] ? 0 : needsAlignedHumHistory ? Math.floor(recentStart / humWindow) * humWindow : recentStart)
+      ? (trimRef.current?.[0] || needsFullNoiseHistory ? 0 : needsAlignedHumHistory ? Math.floor(recentStart / humWindow) * humWindow : recentStart)
       : nextFrame;
     setOperationStatus('Buffering playback');
     let initialHumFrequencies: number[][];
@@ -2276,6 +2281,10 @@ function ModuleCard({ module, humReadout, liveFrequencies, windActive, sampleRat
       {module.type === 'eq' && p.mode !== 'low-shelf' && <div className="grid grid-cols-3 gap-2">{numberInput('low', 'Low', -12, 12, .5, ' dB')}{numberInput('mid', 'Mid', -12, 12, .5, ' dB')}{numberInput('high', 'High', -12, 12, .5, ' dB')}</div>}
       {module.type === 'dc' && <div className="grid grid-cols-2 gap-3"><label><span className="field-label">Detection</span><select className="select-field" value={String(p.mode)} onChange={(event) => updateParams(module.id, 'mode', event.target.value)}><option>Auto</option><option>Manual</option></select></label>{p.mode === 'Manual' && numberInput('amount', 'Offset estimate', -100, 100, 1, ' ×10⁻³')}</div>}
        {module.type === 'hum' && <div className="grid grid-cols-2 gap-3"><label><span className="field-label">Mode</span><select className="select-field" value={String(p.mode)} onChange={(event) => updateParams(module.id, 'mode', event.target.value)} data-testid={`select-hum-mode-${module.id}`}><option>Static</option><option>Dynamic</option><option>Adaptive</option></select></label>{p.mode !== 'Adaptive' && numberInput('frequency', 'Fundamental', 40, 120, 1, ' Hz')}{numberInput('reduction', 'Reduction', 0, 24, 1, ' dB')}<p className="col-span-2 text-[11px] leading-relaxed" data-testid={`hum-scan-${module.id}`} role="status">{humReadout?.detail}</p>{liveFrequencies && <p className="col-span-2 text-[11px] leading-relaxed" data-testid={`hum-live-${module.id}`}>Now playing · estimated filters: {liveFrequencies.length ? liveFrequencies.map((frequency) => `${frequency.toFixed(1)} Hz`).join(', ') : 'none currently confirmed'}. Current position only, not a whole-recording measurement.</p>}<p className="col-span-2 text-[10px] leading-relaxed text-muted-foreground">{p.mode === 'Adaptive' ? 'Scans 40–400 Hz for sustained 50/60 Hz hum or tones with a matching harmonic pattern. Confirmed harmonics are also filtered. A bounded opening scan starts confirmed filters at the first frame; short or changing hum may still take time to detect. Isolated non-mains hum may be missed to protect wanted tones; some wanted steady tones may still be affected. No frequency setting is used.' : p.mode === 'Dynamic' ? 'Tracks a sustained tone near the selected frequency (±12%) and its harmonics. A bounded opening scan starts confirmed filters at the first frame; changing hum may still take time to detect. Preview before exporting.' : 'Applies fixed narrow filters at the selected frequency and its first few harmonics. Preview before exporting.'}</p></div>}
+       {module.type === 'noise' && <div className="space-y-2">
+         {numberInput('strength', 'Reduction strength', 0, 100, 1, '%', { resetValue: 50, wheelStep: 5 })}
+         <p className="text-[11px] leading-relaxed text-muted-foreground" data-testid="noise-reduction-usage-note">Automatically estimates steady background hiss or room tone; no noise-only selection is needed. This gentle, stereo-linked reduction is approximate and may soften wanted ambience. It will not repair clicks, isolate voices, or remove all noise. Compare with bypass before exporting.</p>
+       </div>}
        {module.type === 'wind' && (isFixedLowRumble(module)
           ? <div className="space-y-2">
             <div className="grid grid-cols-2 gap-3">{numberInput('cutoff', 'High-pass cutoff', 20, 240, .5, ' Hz')}{numberInput('q', 'Q', .1, 2, .01)}</div>

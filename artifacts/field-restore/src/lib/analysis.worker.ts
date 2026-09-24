@@ -34,11 +34,18 @@ async function run(request: WorkerJobRequest) {
   await checkpoint();
   if (request.kind === 'spectrogram') {
     const channelIndex = request.options.channelIndex ?? 0;
+    const continuousTransform = request.modules?.some((module) =>
+      module.enabled && module.type === 'noise' && Number(module.params.strength) > 0) ?? false;
+    const continuousProcessor = continuousTransform
+      ? createStreamingEditChain(request.modules, request.metadata.sampleRate, request.metadata.frameCount, 0, initialHumFrequencies)
+      : undefined;
     const result = await calculateFileSpectrogram(request.file, request.metadata, {
       ...request.options,
       checkpoint,
+      continuousTransform,
       transform: (channels, frame) => {
         if (!channels[channelIndex]) return channels;
+        if (continuousProcessor) return continuousProcessor.process(channels, frame);
         return createStreamingEditChain(
           request.modules,
           request.metadata.sampleRate,
