@@ -2219,7 +2219,7 @@ function ModuleCard({ module, humReadout, liveFrequencies, windActive, sampleRat
        {module.type === 'wind' && (isFixedLowRumble(module)
           ? <div className="space-y-2">
             <div className="grid grid-cols-2 gap-3">{numberInput('cutoff', 'High-pass cutoff', 20, 240, .5, ' Hz')}{numberInput('q', 'Q', .1, 2, .01)}</div>
-            <p className="text-[11px] leading-relaxed text-muted-foreground" data-testid="low-rumble-usage-note">Only use if there is audible low rumble. Adjust the frequency and Q value to just remove low fluttering (rumble) noise, if present. This filter can remove wanted low frequencies (thunder, etc.) that cannot be retrieved, so be careful.</p>
+             <p className="text-[11px] leading-relaxed text-muted-foreground" data-testid="low-rumble-usage-note">Only use if there is audible low rumble. Adjust the frequency downward and Q value, if needed, to just remove low fluttering (rumble) noise, if present. It is set by default at 55 Hz, but reduce this as needed until you can just hear the rumble come back, then go up a bit. This filter can remove desirable low frequencies (thunder, etc.) that cannot be retrieved, so be careful.</p>
           </div>
          : <div className="space-y-2">
            <div className="grid grid-cols-2 gap-3">
