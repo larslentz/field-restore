@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, ty
 import { Activity, ArrowDown, ArrowUp, Check, ChevronDown, CircleHelp, Download, FileAudio, FolderOpen, Gauge, GripVertical, Info, Keyboard, Layers3, LoaderCircle, Menu, PanelRightOpen, Pause, Play, Plus, Redo2, RotateCcw, Save, Settings, Square, Trash2, Undo2, Waves, X, ZoomIn, ZoomOut } from 'lucide-react';
 import { createDemoAudio, downloadBlob, encodeWav, parseWav, type AudioSource } from '@/lib/audio';
 import { decodeChannels, loadProject, projectFromSource, saveProject } from '@/lib/persistence';
-import { AUTOMATIC_DC_REMOVAL, analyzeInitialHum, humOpeningReadout, isFixedLowRumble, isLegacyWind, makeBringBackLowEnd, makeDefaultChain, makeLowRumbleRemoval, makeModule, makeProcessingChain, makeRestorationReport, MODULE_LABELS, renderChain, withoutLegacyDcModules, type EditModule, type HumScanState } from '@/lib/edit-chain';
+import { AUTOMATIC_DC_REMOVAL, analyzeInitialHum, humOpeningReadout, isFixedLowRumble, isLegacyWind, makeBringBackLowEnd, makeDefaultChain, makeLowRumbleRemoval, makeModule, makeProcessingChain, makeRestorationReport, MODULE_LABELS, renderChain, toggleEditableModules, withoutLegacyDcModules, type EditModule, type HumScanState } from '@/lib/edit-chain';
 import { analyzeLoudness, type LoudnessStats } from '@/lib/loudness';
 import { createPlaybackRangePlan } from '@/lib/playback-range';
 import { calculateSpectrogram, type SpectrogramData } from '@/lib/spectrogram';
@@ -1099,6 +1099,9 @@ function App() {
   };
 
   const updateModule = (id: string, patch: Partial<EditModule>) => commitModules(modules.map((module) => module.id === id ? { ...module, ...patch } : module));
+  const toggleAllModules = () => {
+    if (modules.length) commitModules(toggleEditableModules(modules));
+  };
   const updateParams = (id: string, key: string, value: number | string) => commitModules(modules.map((module) => module.id === id ? { ...module, params: { ...module.params, [key]: value } } : module));
   const addModule = (type: AddModuleType) => {
     const module = type === 'low-rumble' ? makeLowRumbleRemoval() : type === 'bring-back-low-end' ? makeBringBackLowEnd() : makeModule(type);
@@ -1777,6 +1780,7 @@ function App() {
           <div className="sidebar-chain-heading">
             <button type="button" className="sidebar-chain-title" onClick={(event) => openChainDrawer(event)} data-testid="button-open-full-chain"><div className="eyebrow text-[#91a69d]">Edit chain</div><div className="sidebar-chain-count">{modules.filter((module) => module.enabled).length}/{modules.length} editable enabled</div></button>
             <div className="sidebar-chain-actions">
+              <EditChainToggle modules={modules} onToggle={toggleAllModules} testId="toggle-all-modules-sidebar" />
               <button type="button" className="sidebar-open-button" onClick={(event) => openChainDrawer(event)} aria-label="Open full edit chain" title="Open full edit chain"><PanelRightOpen size={13} /></button>
               <div className="relative">
                 <button type="button" className="sidebar-add-button" onClick={() => setModuleMenu(!moduleMenu)} aria-label="Add module" aria-expanded={moduleMenu} data-testid="button-add-module"><Plus size={13} /></button>
@@ -2047,6 +2051,7 @@ function App() {
             <button type="button" className="icon-btn" onClick={() => setChainDrawerOpen(false)} aria-label="Close edit chain" data-testid="button-close-chain"><X size={16} /></button>
           </div>
           <div className="chain-drawer-mobile-list">
+            <EditChainToggle modules={modules} onToggle={toggleAllModules} testId="toggle-all-modules-drawer" compact />
             <button type="button" className={automaticDcSelected ? 'selected' : ''} onClick={() => setSelectedModuleId(AUTOMATIC_DC_REMOVAL.id)}><span>01</span><strong>{AUTOMATIC_DC_REMOVAL.name}</strong><small>Always applied</small></button>
             {modules.map((module, index) => <button type="button" key={module.id} className={selectedModuleId === module.id ? 'selected' : ''} onClick={() => setSelectedModuleId(module.id)}><span>{String(index + 2).padStart(2, '0')}</span><strong>{module.name}</strong><small>{moduleSummary(module, module.type === 'hum' ? humReadoutFor(module) : undefined)}</small></button>)}
              <div className="relative"><button type="button" className="quiet-btn w-full" onClick={() => setModuleMenu(!moduleMenu)}><Plus size={13} /> Add module</button>{moduleMenu && <div className="drawer-module-menu">{MODULE_TYPES.map((type) => <button type="button" key={type} onClick={() => addModule(type)}>{moduleOptionLabel(type)}</button>)}</div>}</div>
@@ -2059,6 +2064,25 @@ function App() {
       </div>}
     </div>
   );
+}
+
+function EditChainToggle({ modules, onToggle, testId, compact = false }: {
+  modules: EditModule[]; onToggle: () => void; testId: string; compact?: boolean;
+}) {
+  const allEnabled = modules.length > 0 && modules.every((module) => module.enabled);
+  const mixed = !allEnabled && modules.some((module) => module.enabled);
+  return <label className={`chain-all-toggle ${compact ? 'in-drawer' : ''} ${modules.length === 0 ? 'disabled' : ''}`} title={allEnabled ? 'Bypass all editable modules' : 'Enable all editable modules'}>
+    <input
+      type="checkbox"
+      checked={allEnabled}
+      ref={(element) => { if (element) element.indeterminate = mixed; }}
+      onChange={onToggle}
+      disabled={modules.length === 0}
+      aria-label="All editable modules"
+      data-testid={testId}
+    />
+    {compact && <span>All editable modules</span>}
+  </label>;
 }
 
 function HumSpectrogramOverlay({ modules, segments, sampleRate, onSeek }: {

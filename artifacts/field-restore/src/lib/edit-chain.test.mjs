@@ -7,6 +7,7 @@ import {
   makeProcessingChain,
   makeRestorationReport,
   renderChain,
+  toggleEditableModules,
   withoutLegacyDcModules,
 } from './edit-chain.ts';
 
@@ -15,6 +16,18 @@ const gain = { id: 'gain', type: 'gain', name: 'Gain', enabled: true, params: { 
 
 test('editable presets never expose DC removal', () => {
   assert.equal(makeDefaultChain().some((module) => module.type === 'dc'), false);
+});
+
+test('chain check mark toggles all editable modules while retaining their settings', () => {
+  const disabled = { ...gain, id: 'gain-2', enabled: false, params: { db: 3 } };
+  const mixed = [gain, disabled];
+  const allOn = toggleEditableModules(mixed);
+  assert.deepEqual(allOn.map((module) => module.enabled), [true, true]);
+  assert.deepEqual(allOn.map((module) => module.params), mixed.map((module) => module.params));
+  assert.deepEqual(toggleEditableModules(allOn).map((module) => module.enabled), [false, false]);
+  assert.deepEqual(toggleEditableModules([disabled]).map((module) => module.enabled), [true]);
+  assert.deepEqual(toggleEditableModules([]), []);
+  assert.equal(makeProcessingChain(toggleEditableModules(allOn))[0].enabled, true);
 });
 
 test('new low rumble removal matches the default preset with an independent ID', () => {

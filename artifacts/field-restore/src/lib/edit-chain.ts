@@ -95,6 +95,12 @@ export const makeProcessingChain = (modules: EditModule[]): EditModule[] => [
   ...withoutLegacyDcModules(modules),
 ];
 
+export const toggleEditableModules = (modules: EditModule[]): EditModule[] => {
+  if (modules.length === 0) return modules;
+  const enable = modules.some((module) => !module.enabled);
+  return modules.map((module) => ({ ...module, enabled: enable }));
+};
+
 export interface RestorationReportInput {
   source: string;
   sampleRate: number;

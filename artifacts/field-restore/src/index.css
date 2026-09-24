@@ -224,6 +224,12 @@
 .sidebar-chain-title { min-width: 0; text-align: left; border-radius: 4px; }
 .sidebar-chain-title:hover .eyebrow { color: #d8ed55; }
 .sidebar-chain-actions { display: flex; align-items: center; gap: 5px; }
+.chain-all-toggle { display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; gap: 7px; min-width: 26px; min-height: 26px; border: 1px solid #43555c; border-radius: 5px; cursor: pointer; }
+.chain-all-toggle:hover:not(.disabled) { background: hsl(var(--sidebar-accent)); }
+.chain-all-toggle input { width: 15px; height: 15px; margin: 0; accent-color: #d8ed55; cursor: pointer; }
+.chain-all-toggle.disabled { opacity: .5; cursor: not-allowed; }
+.chain-all-toggle.in-drawer { justify-content: flex-start; padding: 8px; border-color: hsl(var(--border)); color: hsl(var(--foreground)); font-size: 11px; }
+.chain-all-toggle.in-drawer input { accent-color: hsl(var(--primary)); }
 .sidebar-chain-count { margin-top: 5px; color: #829890; font-family: var(--app-font-mono); font-size: 9px; }
 .sidebar-add-button, .sidebar-open-button { width: 26px; height: 26px; display: grid; place-items: center; border: 1px solid #43555c; border-radius: 5px; color: #d8ed55; }
 .sidebar-open-button { color: #b7c8bb; }
