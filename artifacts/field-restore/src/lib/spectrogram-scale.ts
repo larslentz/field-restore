@@ -10,6 +10,16 @@ export function anchoredLevelScaleCeiling(
   return Math.max(minimumLevel + span, Math.min(maximumLevel, unclamped));
 }
 
+export function levelScaleTicks(ceiling: number, span: number, height: number) {
+  const targetStep = span / Math.max(1, height / 26);
+  const step = [1, 2, 5, 10, 20, 50, 100].find((candidate) => candidate >= targetStep) ?? 100;
+  const ticks: { level: number; y: number }[] = [];
+  for (let level = Math.ceil((ceiling - span) / step) * step; level <= ceiling; level += step) {
+    ticks.push({ level, y: ((ceiling - level) / span) * height });
+  }
+  return ticks;
+}
+
 export function anchoredTimeViewStart(
   grabbedTime: number,
   pointerX: number,

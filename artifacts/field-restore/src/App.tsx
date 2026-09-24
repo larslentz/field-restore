@@ -14,7 +14,7 @@ import { humAnalysisWindowSize, humPrefixFrames } from '@/lib/hum-removal';
 import { recordHumHistory, visibleHumHistory, type HumHistorySegment, type VisibleHumSegment } from '@/lib/hum-history';
 import { readChainPresets, saveChainPreset, type ChainPreset } from '@/lib/chain-presets';
 import { EqCurve } from '@/components/EqCurve';
-import { anchoredLevelScaleCeiling, anchoredTimeViewStart } from '@/lib/spectrogram-scale';
+import { anchoredLevelScaleCeiling, anchoredTimeViewStart, levelScaleTicks } from '@/lib/spectrogram-scale';
 import { SPECTROGRAM_DATA_HEIGHT, SPECTROGRAM_FFT_SIZE } from '@/lib/spectrogram-resolution';
 import { DEFAULT_SPECTROGRAM_PALETTE, SPECTROGRAM_PALETTES, spectrogramColor, spectrogramColorCss, spectrogramLegendStops, type SpectrogramPaletteId } from '@/lib/spectrogram-palette';
 import { startWorkerJob, type WorkerJob } from '@/lib/worker-analysis';
@@ -284,8 +284,7 @@ function App() {
   const frequencyDragRef = useRef<{ startY: number; startMaximum: number } | null>(null);
   const levelDragRef = useRef<{
     grabbedLevel: number;
-    paneTop: number;
-    paneHeight: number;
+    graphHeight: number;
     span: number;
   } | null>(null);
   const timeDragRef = useRef<{
@@ -1440,13 +1439,9 @@ function App() {
     }
     if (localX >= bounds.width - SPECTROGRAM_RIGHT) {
       if (localY < graphBottom) {
-        const paneHeight = graphBottom / 2;
-        const paneTop = localY >= paneHeight ? paneHeight : 0;
-        const paneY = Math.max(0, Math.min(paneHeight, localY - paneTop));
         levelDragRef.current = {
-          grabbedLevel: spectrogramCeilingDb - (paneY / paneHeight) * spectrogramLevelSpanDb,
-          paneTop,
-          paneHeight,
+          grabbedLevel: spectrogramCeilingDb - (localY / graphBottom) * spectrogramLevelSpanDb,
+          graphHeight: graphBottom,
           span: spectrogramLevelSpanDb,
         };
         event.currentTarget.setPointerCapture(event.pointerId);
@@ -1485,11 +1480,11 @@ function App() {
     }
     if (levelDragRef.current) {
       const bounds = event.currentTarget.getBoundingClientRect();
-      const paneY = event.clientY - bounds.top - levelDragRef.current.paneTop;
+      const pointerY = event.clientY - bounds.top;
       setSpectrogramCeilingDb(anchoredLevelScaleCeiling(
         levelDragRef.current.grabbedLevel,
-        paneY,
-        levelDragRef.current.paneHeight,
+        pointerY,
+        levelDragRef.current.graphHeight,
         levelDragRef.current.span,
         SPECTROGRAM_DATA_FLOOR_DB,
         SPECTROGRAM_MAX_CEILING_DB,
@@ -1570,9 +1565,7 @@ function App() {
     } else if (x >= bounds.width - SPECTROGRAM_RIGHT) {
       event.preventDefault();
       event.stopPropagation();
-      const paneHeight = graphBottom / 2;
-      const paneY = ((Math.max(0, Math.min(graphBottom, y)) % paneHeight) + paneHeight) % paneHeight;
-      const pointerRatio = Math.max(0, Math.min(1, 1 - paneY / paneHeight));
+      const pointerRatio = Math.max(0, Math.min(1, 1 - y / graphBottom));
       const pointerLevel = spectrogramFloorDb + pointerRatio * spectrogramLevelSpanDb;
       const factor = event.deltaY > 0 ? 1.15 : 1 / 1.15;
       const nextSpan = Math.max(SPECTROGRAM_MIN_LEVEL_SPAN_DB, Math.min(SPECTROGRAM_MAX_LEVEL_SPAN_DB, spectrogramLevelSpanDb * factor));
@@ -1700,20 +1693,15 @@ function App() {
       }
     }
     context.textAlign = 'left';
-    for (const top of [0, paneHeight]) {
-      const gradient = context.createLinearGradient(0, top + 3, 0, top + paneHeight - 3);
-      for (const [position, color] of spectrogramLegendStops(spectrogramPalette)) gradient.addColorStop(position, color);
-      context.fillStyle = gradient;
-      context.fillRect(graphRight + 6, top + 3, 9, paneHeight - 6);
-      context.strokeStyle = 'rgba(242, 244, 232, .35)';
-      context.strokeRect(graphRight + 6, top + 3, 9, paneHeight - 6);
-      context.fillStyle = '#f2f4e8';
-      for (let tick = 0; tick <= SPECTROGRAM_SCALE_DIVISIONS; tick += 1) {
-        const decibels = spectrogramCeilingDb - (tick / SPECTROGRAM_SCALE_DIVISIONS) * (spectrogramCeilingDb - spectrogramFloorDb);
-        const y = top + (tick / SPECTROGRAM_SCALE_DIVISIONS) * paneHeight;
-        const levelLabel = Math.round(decibels);
-        context.fillText(levelLabel > 0 ? `+${levelLabel}` : `${levelLabel}`, graphRight + 19, Math.max(top + 10, Math.min(top + paneHeight - 3, y + 3)));
-      }
+    const gradient = context.createLinearGradient(0, 3, 0, graphBottom - 3);
+    for (const [position, color] of spectrogramLegendStops(spectrogramPalette)) gradient.addColorStop(position, color);
+    context.fillStyle = gradient;
+    context.fillRect(graphRight + 6, 3, 9, graphBottom - 6);
+    context.strokeStyle = 'rgba(242, 244, 232, .35)';
+    context.strokeRect(graphRight + 6, 3, 9, graphBottom - 6);
+    context.fillStyle = '#f2f4e8';
+    for (const { level, y } of levelScaleTicks(spectrogramCeilingDb, spectrogramLevelSpanDb, graphBottom)) {
+      context.fillText(level > 0 ? `+${level}` : `${level}`, graphRight + 19, Math.max(10, Math.min(graphBottom - 3, y + 3)));
     }
     context.textAlign = 'left';
     context.fillStyle = '#d8ed55';

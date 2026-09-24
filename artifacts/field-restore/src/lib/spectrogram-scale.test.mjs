@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { anchoredLevelScaleCeiling, anchoredTimeViewStart } from './spectrogram-scale.ts';
+import { anchoredLevelScaleCeiling, anchoredTimeViewStart, levelScaleTicks } from './spectrogram-scale.ts';
 
 test('keeps the grabbed level under the pointer while preserving the span', () => {
   const span = 80;
@@ -13,6 +13,17 @@ test('keeps the grabbed level under the pointer while preserving the span', () =
 test('stops a translated level scale at its supported bounds', () => {
   assert.equal(anchoredLevelScaleCeiling(20, 200, 200, 80, -180, 24), 24);
   assert.equal(anchoredLevelScaleCeiling(-175, 0, 200, 80, -180, 24), -100);
+});
+
+test('fixed dB labels move with the shared full-height level scale', () => {
+  const before = levelScaleTicks(-20, 85, 452);
+  const after = levelScaleTicks(-15, 85, 452);
+  const original = before.find((tick) => tick.level === -25);
+  const moved = after.find((tick) => tick.level === -25);
+  assert.ok(original && moved);
+  assert.ok(moved.y > original.y);
+  assert.equal(moved.y - original.y, 5 / 85 * 452);
+  assert.ok(after.every((tick) => tick.y >= 0 && tick.y <= 452));
 });
 
 test('keeps the grabbed time under the pointer while preserving the visible span', () => {
