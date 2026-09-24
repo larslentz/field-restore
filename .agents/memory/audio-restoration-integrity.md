@@ -15,6 +15,12 @@ For file-backed recordings, carry DSP state across sequential chunks and restore
 
 **How to apply:** Use bounded chunk readers with stateful processors for playback, analysis, and export; use a bounded content fingerprint plus parsed format metadata for restore and relink checks.
 
+When a file-backed edited range starts after source time zero, warm processing state through the discarded prefix in bounded chunks before rendering the kept portion. Do not replace this with a fixed two-second warmup for trimmed output.
+
+**Why:** A stateful Ambient Patch can capture its bed sample earlier than that window but remain active at the kept boundary. Starting a processor nearby misses that sample, so a file-backed export or analysis can disagree with the in-memory render.
+
+**How to apply:** Treat trim as an output window, not a new DSP origin. Preserve absolute source frame positions for fades and regions; check cancellation between pre-roll chunks. If optimizing pre-roll, prove parity for ambient capture as well as filter state.
+
 DC offset removal is a mandatory hidden baseline stage, not an editable module. Apply it before user edits in previews, analysis, processed playback, and exports; absorb legacy saved DC modules to prevent duplicate correction.
 
 **Why:** DC correction is required for every recording and must not be bypassed, deleted, or applied twice when older projects are restored.

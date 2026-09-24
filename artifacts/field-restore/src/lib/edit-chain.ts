@@ -65,6 +65,8 @@ export interface RestorationReportInput {
   container: 'RIFF' | 'RF64';
   modules: EditModule[];
   selection: [number, number];
+  trim?: [number, number];
+  sourceDuration?: number;
   exportedAt?: string;
 }
 
@@ -76,6 +78,8 @@ export function makeRestorationReport(input: RestorationReportInput) {
     sampleRate: input.sampleRate,
     channels: input.channels,
     duration: input.duration,
+    sourceDuration: input.sourceDuration ?? input.duration,
+    trim: input.trim ?? [0, input.duration],
     format: '32-bit IEEE float WAV',
     container: input.container,
     automaticDcOffsetRemoval: true,

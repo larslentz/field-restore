@@ -9,6 +9,7 @@ export interface StoredProject {
   modules: EditModule[];
   markers: { id: string; time: number; label: string; color: string }[];
   regions: { id: string; start: number; end: number; label: string }[];
+  trim?: [number, number];
   savedAt: string;
   original?: number[][];
   originalBase64?: string[];
@@ -52,8 +53,8 @@ export function loadProject(): StoredProject | null {
     return raw ? JSON.parse(raw) as StoredProject : null;
   } catch { return null; }
 }
-export function projectFromSource(source: AudioSource, modules: EditModule[], markers: StoredProject['markers'], regions: StoredProject['regions'], title: string, notes: string): StoredProject {
+export function projectFromSource(source: AudioSource, modules: EditModule[], markers: StoredProject['markers'], regions: StoredProject['regions'], title: string, notes: string, trim?: [number, number]): StoredProject {
   const maxSamples = 1_000_000;
   const originalBase64 = source.channels[0]?.length <= maxSamples ? encodeChannels(source.channels) : undefined;
-  return { title, notes, sourceName: source.name, sampleRate: source.sampleRate, modules, markers, regions, savedAt: new Date().toISOString(), originalBase64, originalLength: source.channels[0]?.length };
+  return { title, notes, sourceName: source.name, sampleRate: source.sampleRate, modules, markers, regions, trim, savedAt: new Date().toISOString(), originalBase64, originalLength: source.channels[0]?.length };
 }

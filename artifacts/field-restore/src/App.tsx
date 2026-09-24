@@ -97,6 +97,27 @@ function formatTime(seconds: number, precise = false) {
   return `${String(minutes).padStart(2, '0')}:${remaining.toFixed(precise ? 3 : 1).padStart(precise ? 6 : 4, '0')}`;
 }
 
+function validTrim(range: [number, number] | undefined | null, duration: number): [number, number] | null {
+  if (!range || !Number.isFinite(range[0]) || !Number.isFinite(range[1]) || duration <= 0) return null;
+  const start = Math.max(0, Math.min(duration, range[0]));
+  const end = Math.max(start, Math.min(duration, range[1]));
+  return end - start >= 1 / 192000 ? [start, end] : null;
+}
+
+async function warmFileProcessor(
+  file: File, metadata: WavMetadata, processor: ReturnType<typeof createStreamingEditChain>,
+  start: number, end: number, signal?: AbortSignal, cancelled?: () => boolean,
+) {
+  const chunkFrames = Math.max(4096, metadata.sampleRate * 2);
+  for (let frame = start; frame < end; frame += chunkFrames) {
+    if (signal?.aborted || cancelled?.()) throw new DOMException('Processing cancelled.', 'AbortError');
+    const count = Math.min(chunkFrames, end - frame);
+    const channels = await readFrames(file, metadata, frame, count, { signal });
+    if (signal?.aborted || cancelled?.()) throw new DOMException('Processing cancelled.', 'AbortError');
+    processor.process(channels, frame);
+  }
+}
+
 function formatLevel(value: number, unit: 'dBTP' | 'LUFS' | 'LU') {
   if (!Number.isFinite(value)) return `-∞ ${unit}`;
   return `${value > 0 ? '+' : ''}${value.toFixed(1)} ${unit}`;
@@ -118,6 +139,8 @@ function App() {
   const [undoStack, setUndoStack] = useState<EditModule[][]>([]);
   const [redoStack, setRedoStack] = useState<EditModule[][]>([]);
   const [selection, setSelection] = useState<[number, number]>([4.1, 7.8]);
+  const [trim, setTrim] = useState<[number, number] | null>(null);
+  const [committedTrim, setCommittedTrim] = useState<[number, number] | null>(null);
   const [markers, setMarkers] = useState<Marker[]>([]);
   const [regions, setRegions] = useState<Region[]>([]);
   const [activeTab, setActiveTab] = useState<ViewTab>('edit');
@@ -287,6 +310,7 @@ function App() {
   const animationRef = useRef<number | null>(null);
   const playHeadRef = useRef(0);
   const selectionRef = useRef<[number, number]>([4.1, 7.8]);
+  const trimRef = useRef<[number, number] | null>(null);
   const pointerDragRef = useRef<{ start: number; current: number; startClientX: number; moved: boolean } | null>(null);
   const frequencyDragRef = useRef<{ startY: number; startMaximum: number } | null>(null);
   const levelDragRef = useRef<{
@@ -312,11 +336,21 @@ function App() {
   const exportJobRef = useRef<AbortController | null>(null);
   const scheduledNodesRef = useRef<AudioBufferSourceNode[]>([]);
   const playbackSessionRef = useRef(0);
+  const restoreTrim = useCallback((range: [number, number] | undefined | null, length: number) => {
+    const next = validTrim(range, length);
+    trimRef.current = next;
+    setTrim(next);
+    setCommittedTrim(next);
+  }, []);
 
   const processingModules = useMemo(() => makeProcessingChain(modules), [modules]);
   const currentChannels = useMemo(() => largeSource ? [] : renderChain(source.channels, processingModules, source.sampleRate), [largeSource, source.channels, source.sampleRate, processingModules]);
   const currentSource = useMemo<AudioSource>(() => ({ ...source, channels: currentChannels }), [source, currentChannels]);
   const duration = source.duration;
+  const trimStart = trim?.[0] ?? 0;
+  const trimEnd = trim?.[1] ?? duration;
+  const committedTrimStart = committedTrim?.[0] ?? 0;
+  const committedTrimEnd = committedTrim?.[1] ?? duration;
   const sourceChannelCount = largeSource?.metadata.channels ?? Number(pendingRelink?.source.channels ?? source.channels.length);
   const viewDuration = duration / zoom;
   const selectionStart = Math.min(...selection);
@@ -362,9 +396,9 @@ function App() {
     ? (largeSource ? largeOriginalSpectrograms : memoryOriginalSpectrograms)
     : (largeSource ? largeSpectrograms : memorySpectrograms);
   const memoryOriginalStats = useMemo(() => largeSource ? EMPTY_STATS : analyzeLoudness(source.channels, source.sampleRate), [largeSource, source.channels, source.sampleRate]);
-  const memoryCurrentStats = useMemo(() => largeSource ? EMPTY_STATS : analyzeLoudness(currentChannels, source.sampleRate), [currentChannels, largeSource, source.sampleRate]);
+  const memoryCurrentStats = useMemo(() => largeSource ? EMPTY_STATS : analyzeLoudness(currentChannels, source.sampleRate, committedTrimStart * source.sampleRate, committedTrimEnd * source.sampleRate), [committedTrimEnd, committedTrimStart, currentChannels, largeSource, source.sampleRate]);
   const memorySelectionOriginalStats = useMemo(() => largeSource || !hasSelection ? EMPTY_STATS : analyzeLoudness(source.channels, source.sampleRate, selectionStart * source.sampleRate, selectionEnd * source.sampleRate), [hasSelection, largeSource, source.channels, selectionStart, selectionEnd, source.sampleRate]);
-  const memorySelectionCurrentStats = useMemo(() => largeSource || !hasSelection ? EMPTY_STATS : analyzeLoudness(currentChannels, source.sampleRate, selectionStart * source.sampleRate, selectionEnd * source.sampleRate), [currentChannels, hasSelection, largeSource, selectionStart, selectionEnd, source.sampleRate]);
+  const memorySelectionCurrentStats = useMemo(() => largeSource || !hasSelection || Math.min(selectionEnd, committedTrimEnd) <= Math.max(selectionStart, committedTrimStart) ? EMPTY_STATS : analyzeLoudness(currentChannels, source.sampleRate, Math.max(selectionStart, committedTrimStart) * source.sampleRate, Math.min(selectionEnd, committedTrimEnd) * source.sampleRate), [committedTrimEnd, committedTrimStart, currentChannels, hasSelection, largeSource, selectionStart, selectionEnd, source.sampleRate]);
   const originalStats = largeSource ? largeOriginalStats : memoryOriginalStats;
   const currentStats = largeSource ? largeCurrentStats : memoryCurrentStats;
   const selectionOriginalStats = largeSource ? largeSelectionOriginalStats : memorySelectionOriginalStats;
@@ -382,9 +416,10 @@ function App() {
     setModules([]);
     setMarkers([]);
     setRegions([]);
+    restoreTrim(record.trim, Number(record.source.duration ?? 0));
     setLargeSource(null);
     setSource({ channels: [], sampleRate: record.source.sampleRate, duration: Number(record.source.duration ?? 0), name: record.source.name });
-  }, []);
+  }, [restoreTrim]);
 
   const restoreVerifiedProject = useCallback((record: ProjectRecord, verified: Awaited<ReturnType<typeof openVerifiedFileHandle>>) => {
     if (!record.fileHandle || !verified) return false;
@@ -394,6 +429,7 @@ function App() {
     setModules(withoutLegacyDcModules(record.modules));
     setMarkers(record.markers);
     setRegions(record.regions);
+    restoreTrim(record.trim, metadata.frameCount / metadata.sampleRate);
     setTitle(record.title);
     setNotes(record.notes);
     setProjectId(record.id);
@@ -402,19 +438,19 @@ function App() {
     setSelection([0, Math.min(5, metadata.frameCount / metadata.sampleRate)]);
     setSavedStatus(`Restored file-backed project · ${new Date(record.savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
     return true;
-  }, []);
+  }, [restoreTrim]);
 
   useEffect(() => {
     const saved = loadProject();
     if (saved?.originalBase64?.length && saved.originalLength) {
       const channels = decodeChannels(saved.originalBase64, saved.originalLength);
       const next: AudioSource = { channels, sampleRate: saved.sampleRate, duration: channels[0].length / saved.sampleRate, name: saved.sourceName };
-      setSource(next); setTitle(saved.title); setNotes(saved.notes); setModules(withoutLegacyDcModules(saved.modules)); setMarkers(saved.markers); setRegions(saved.regions);
+      setSource(next); setTitle(saved.title); setNotes(saved.notes); setModules(withoutLegacyDcModules(saved.modules)); setMarkers(saved.markers); setRegions(saved.regions); restoreTrim(saved.trim, next.duration);
       setSavedStatus(`Restored ${new Date(saved.savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
     } else if (saved?.original?.length) {
       const channels = saved.original.map((channel) => new Float32Array(channel));
       const next: AudioSource = { channels, sampleRate: saved.sampleRate, duration: channels[0].length / saved.sampleRate, name: saved.sourceName };
-      setSource(next); setTitle(saved.title); setNotes(saved.notes); setModules(withoutLegacyDcModules(saved.modules)); setMarkers(saved.markers); setRegions(saved.regions);
+      setSource(next); setTitle(saved.title); setNotes(saved.notes); setModules(withoutLegacyDcModules(saved.modules)); setMarkers(saved.markers); setRegions(saved.regions); restoreTrim(saved.trim, next.duration);
       setSavedStatus(`Restored ${new Date(saved.savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
     }
     void listProjects().then(async (projects) => {
@@ -450,7 +486,7 @@ function App() {
     }).catch(() => {
       // Legacy localStorage restoration remains available when IndexedDB is unavailable.
     });
-  }, [restoreVerifiedProject, stageSavedProject]);
+  }, [restoreTrim, restoreVerifiedProject, stageSavedProject]);
 
   useEffect(() => {
     if (!largeSource) return;
@@ -550,7 +586,6 @@ function App() {
     const { file, metadata } = largeSource;
     const selectionStartFrame = Math.max(0, Math.floor(selectionStart * metadata.sampleRate));
     const selectionFrames = Math.max(1, Math.min(metadata.frameCount - selectionStartFrame, Math.ceil((selectionEnd - selectionStart) * metadata.sampleRate)));
-    const selectionWarmStart = Math.max(0, selectionStartFrame - Math.floor(metadata.sampleRate * 2));
     const selectionMetadata: WavMetadata = {
       ...metadata,
       dataOffset: metadata.dataOffset + selectionStartFrame * metadata.frameSize,
@@ -558,6 +593,8 @@ function App() {
       dataLength: selectionFrames * metadata.frameSize,
       dataLengthBigInt: BigInt(selectionFrames * metadata.frameSize),
     };
+    const editedSelectionStartFrame = Math.max(selectionStartFrame, Math.floor(committedTrimStart * metadata.sampleRate));
+    const editedSelectionEndFrame = Math.min(selectionStartFrame + selectionFrames, Math.ceil(committedTrimEnd * metadata.sampleRate));
     setAnalysisStatus(hasSelection ? 'Analyzing selection' : 'Analyzing original recording');
     setAnalysisProgress(0);
     setOperationPaused(false);
@@ -582,20 +619,30 @@ function App() {
       if (generation !== analysisGenerationRef.current) throw new DOMException('Stale analysis.', 'AbortError');
       setLargeSelectionOriginalStats(stats);
       setAnalysisStatus('Analyzing processed selection');
+      if (editedSelectionEndFrame <= editedSelectionStartFrame) return EMPTY_STATS;
+      const editedFrames = editedSelectionEndFrame - editedSelectionStartFrame;
+      const editedMetadata: WavMetadata = {
+        ...metadata,
+        dataOffset: metadata.dataOffset + editedSelectionStartFrame * metadata.frameSize,
+        frameCount: editedFrames,
+        dataLength: editedFrames * metadata.frameSize,
+        dataLengthBigInt: BigInt(editedFrames * metadata.frameSize),
+      };
+      const warmStart = committedTrimStart > 0 ? 0 : Math.max(0, editedSelectionStartFrame - metadata.sampleRate * 2);
       return run({
         kind: 'loudness',
         file,
-        metadata: selectionMetadata,
+        metadata: editedMetadata,
         modules: processingModules,
-        frameOffset: selectionStartFrame,
+        frameOffset: editedSelectionStartFrame,
         sourceFrameCount: metadata.frameCount,
-        warmup: selectionWarmStart < selectionStartFrame
-          ? { metadata, startFrame: selectionWarmStart, frameCount: selectionStartFrame - selectionWarmStart }
+        warmup: warmStart < editedSelectionStartFrame
+          ? { metadata, startFrame: warmStart, frameCount: editedSelectionStartFrame - warmStart }
           : undefined,
       }, 1);
     }).then((stats) => {
       if (generation !== analysisGenerationRef.current) throw new DOMException('Stale analysis.', 'AbortError');
-      setLargeSelectionCurrentStats(stats);
+       setLargeSelectionCurrentStats(stats);
     }) : Promise.resolve();
     void selectionAnalysis.then(() => {
       if (generation !== analysisGenerationRef.current) throw new DOMException('Stale analysis.', 'AbortError');
@@ -605,7 +652,18 @@ function App() {
       if (generation !== analysisGenerationRef.current) throw new DOMException('Stale analysis.', 'AbortError');
       setLargeOriginalStats(stats);
       setAnalysisStatus('Analyzing processed recording');
-      return run({ kind: 'loudness', file, metadata, modules: processingModules }, hasSelection ? 3 : 1);
+       const startFrame = Math.floor(committedTrimStart * metadata.sampleRate);
+       const endFrame = Math.min(metadata.frameCount, Math.ceil(committedTrimEnd * metadata.sampleRate));
+       const trimmedMetadata: WavMetadata = {
+         ...metadata,
+         dataOffset: metadata.dataOffset + startFrame * metadata.frameSize,
+         frameCount: endFrame - startFrame,
+         dataLength: (endFrame - startFrame) * metadata.frameSize,
+         dataLengthBigInt: BigInt((endFrame - startFrame) * metadata.frameSize),
+       };
+       return run({ kind: 'loudness', file, metadata: trimmedMetadata, modules: processingModules, frameOffset: startFrame, sourceFrameCount: metadata.frameCount,
+         warmup: startFrame > 0 ? { metadata, startFrame: 0, frameCount: startFrame } : undefined,
+       }, hasSelection ? 3 : 1);
     }).then((stats) => {
       if (generation === analysisGenerationRef.current) {
         setLargeCurrentStats(stats);
@@ -624,7 +682,7 @@ function App() {
       if (generation === analysisGenerationRef.current) analysisGenerationRef.current += 1;
       analysisJobRef.current?.cancel();
     };
-  }, [hasSelection, largeSource, processingModules, selectionEnd, selectionStart]);
+  }, [committedTrimEnd, committedTrimStart, hasSelection, largeSource, processingModules, selectionEnd, selectionStart]);
 
   const pauseBackgroundWork = useCallback(() => {
     backgroundPausedRef.current = true;
@@ -700,7 +758,9 @@ function App() {
       selection: selectionRef.current,
       startPosition,
       totalFrames: channels[0]?.length ?? 0,
+      trim: monitor === 'current' ? trimRef.current ?? undefined : undefined,
     });
+    if (plan.emptySelection) { setError('Selection is outside the edited range. Clear the selection or move it inside the kept range to play.'); return; }
     const bufferLength = Math.max(1, plan.bufferEndFrame - plan.bufferStartFrame);
     const buffer = context.createBuffer(channels.length, bufferLength, source.sampleRate);
     channels.forEach((channel, index) => buffer.getChannelData(index).set(channel.subarray(plan.bufferStartFrame, plan.bufferEndFrame)));
@@ -730,7 +790,7 @@ function App() {
       animationRef.current = requestAnimationFrame(tick);
     };
     animationRef.current = requestAnimationFrame(tick);
-  }, [duration, loop, rate, source.sampleRate]);
+  }, [duration, loop, monitor, rate, source.sampleRate]);
 
   const startLargePlayback = useCallback(async (startPosition: number) => {
     if (!largeSource) return;
@@ -743,7 +803,8 @@ function App() {
     const session = playbackSessionRef.current + 1;
     playbackSessionRef.current = session;
     const { file, metadata } = largeSource;
-    const plan = createPlaybackRangePlan({ duration, loop, sampleRate: metadata.sampleRate, selection: selectionRef.current, startPosition, totalFrames: metadata.frameCount });
+    const plan = createPlaybackRangePlan({ duration, loop, sampleRate: metadata.sampleRate, selection: selectionRef.current, startPosition, totalFrames: metadata.frameCount, trim: monitor === 'current' ? trimRef.current ?? undefined : undefined });
+    if (plan.emptySelection) { setError('Selection is outside the edited range. Clear the selection or move it inside the kept range to play.'); return; }
     const rangeStart = plan.bufferStartFrame;
     const rangeEnd = plan.bufferEndFrame;
     let nextFrame = plan.timelineStartFrame;
@@ -752,12 +813,21 @@ function App() {
     const startedAt = scheduledAt;
     const playbackStart = nextFrame / metadata.sampleRate;
     const chunkFrames = Math.max(4096, Math.floor(metadata.sampleRate * 4));
-    const warmStart = monitor === 'current' ? Math.max(0, nextFrame - Math.floor(metadata.sampleRate * 2)) : nextFrame;
+    const warmStart = monitor === 'current' ? (trimRef.current?.[0] ? 0 : Math.max(0, nextFrame - Math.floor(metadata.sampleRate * 2))) : nextFrame;
     const processor = createStreamingEditChain(processingModules, metadata.sampleRate, metadata.frameCount, warmStart);
+    setOperationStatus('Buffering playback');
     if (monitor === 'current' && warmStart < nextFrame) {
-      const warmup = await readFrames(file, metadata, warmStart, nextFrame - warmStart);
-      processor.process(warmup, warmStart);
+      try {
+        await warmFileProcessor(file, metadata, processor, warmStart, nextFrame, undefined, () => playbackSessionRef.current !== session);
+      } catch (caught) {
+        if (playbackSessionRef.current === session) {
+          setOperationStatus('');
+          if ((caught as Error).name !== 'AbortError') setError(caught instanceof Error ? caught.message : 'Unable to buffer playback.');
+        }
+        return;
+      }
     }
+    if (playbackSessionRef.current !== session) return;
     const loopState = processor.snapshot();
     setIsPlaying(true);
     setOperationStatus('Buffering playback');
@@ -972,6 +1042,7 @@ function App() {
         setModules(withoutLegacyDcModules(savedProject.modules));
         setMarkers(savedProject.markers);
         setRegions(savedProject.regions);
+         restoreTrim(savedProject.trim, metadata.frameCount / metadata.sampleRate);
         setTitle(savedProject.title);
         setNotes(savedProject.notes);
         setProjectId(savedProject.id);
@@ -980,13 +1051,14 @@ function App() {
         setSavedStatus('Source relinked · project restored');
       } else {
         setModules(makeDefaultChain()); setMarkers([]); setRegions([]); setTitle(file.name.replace(/\.wav$/i, '')); setProjectId(null);
+         restoreTrim(null, metadata.frameCount / metadata.sampleRate);
       }
       setSelection([0, Math.min(metadata.frameCount / metadata.sampleRate, 5)]); setOperationStatus('');
     } catch (caught) {
       setOperationStatus('');
       setError(caught instanceof Error ? caught.message : 'Unable to read this WAV file.');
     }
-  }, [pendingPermission, pendingRelink, stopPlayback]);
+  }, [pendingPermission, pendingRelink, restoreTrim, stopPlayback]);
 
   const pickWavFile = useCallback(async () => {
     const picker = (window as typeof window & {
@@ -1077,6 +1149,7 @@ function App() {
           modules,
           markers,
           regions,
+          trim: trim ?? undefined,
           source: {
             name: source.name,
             sampleRate: source.sampleRate,
@@ -1099,7 +1172,7 @@ function App() {
       }
       return;
     }
-    const project = projectFromSource(source, modules, markers, regions, title, notes);
+    const project = projectFromSource(source, modules, markers, regions, title, notes, trim ?? undefined);
     const ok = saveProject(project);
     setSavedStatus(ok ? `Saved locally · ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 'Storage full · export a project report');
   };
@@ -1120,17 +1193,24 @@ function App() {
       try {
         const handle = await picker({ suggestedName: `${safeName || 'field-restore'}-rx.wav`, types: [{ description: 'WAV audio', accept: { 'audio/wav': ['.wav'] } }] });
         await withLargeExportLeaveWarning(async () => {
-          const writable = await handle.createWritable();
           const { file, metadata } = largeSource;
-          const processor = createStreamingEditChain(processingModules, metadata.sampleRate, metadata.frameCount, 0);
+          const firstFrame = Math.floor(trimStart * metadata.sampleRate);
+          const lastFrame = Math.min(metadata.frameCount, Math.ceil(trimEnd * metadata.sampleRate));
+          const warmStart = 0;
+          const processor = createStreamingEditChain(processingModules, metadata.sampleRate, metadata.frameCount, warmStart);
+          if (warmStart < firstFrame) {
+            setOperationStatus('Preparing trimmed export');
+            await warmFileProcessor(file, metadata, processor, warmStart, firstFrame, controller.signal);
+          }
+          const writable = await handle.createWritable();
           setOperationStatus('Exporting file-backed WAV');
           await writeFloat32WavChunks(writable, {
             channels: metadata.channels,
             sampleRate: metadata.sampleRate,
-            frameCount: metadata.frameCount,
+            frameCount: lastFrame - firstFrame,
             signal: controller.signal,
-            readFrames: (start, count, signal) => readFrames(file, metadata, start, count, { signal }),
-            processFrames: (channels, start) => processor.process(channels, start),
+            readFrames: (start, count, signal) => readFrames(file, metadata, firstFrame + start, count, { signal }),
+            processFrames: (channels, start) => processor.process(channels, firstFrame + start),
             onProgress: (completed, total) => setOperationProgress(completed / total),
           });
         });
@@ -1145,14 +1225,18 @@ function App() {
         if (exportJobRef.current === controller) exportJobRef.current = null;
       }
     } else {
-      downloadBlob(encodeWav(currentSource), `${safeName || 'field-restore'}-rx.wav`);
+      const firstFrame = Math.floor(trimStart * source.sampleRate);
+      const lastFrame = Math.min(source.channels[0]?.length ?? 0, Math.ceil(trimEnd * source.sampleRate));
+      downloadBlob(encodeWav({ ...currentSource, channels: currentChannels.map((channel) => channel.subarray(firstFrame, lastFrame)) }), `${safeName || 'field-restore'}-rx.wav`);
     }
     const report = makeRestorationReport({
       source: source.name,
       sampleRate: source.sampleRate,
       channels: sourceChannelCount,
-      duration,
-      container: largeSource && largeSource.metadata.frameCount * sourceChannelCount * 4 + 36 > 0xffffffff ? 'RF64' : 'RIFF',
+      duration: trimEnd - trimStart,
+      sourceDuration: duration,
+      trim: [trimStart, trimEnd],
+      container: largeSource && (Math.ceil(trimEnd * source.sampleRate) - Math.floor(trimStart * source.sampleRate)) * sourceChannelCount * 4 + 36 > 0xffffffff ? 'RF64' : 'RIFF',
       modules,
       selection: [selectionStart, selectionEnd],
     });
@@ -1166,6 +1250,33 @@ function App() {
     const plotWidth = Math.max(1, bounds.width - SPECTROGRAM_LEFT - SPECTROGRAM_RIGHT);
     const x = Math.max(0, Math.min(1, (event.clientX - bounds.left - SPECTROGRAM_LEFT) / plotWidth));
     return Math.max(0, Math.min(duration, viewStart + x * viewDuration));
+  };
+  const setTrimEdge = (edge: 'start' | 'end', time: number, commit = false) => {
+    const current = trimRef.current ?? [0, duration];
+    const gap = Math.min(0.01, duration / 2);
+    const next: [number, number] = edge === 'start'
+      ? [Math.max(0, Math.min(current[1] - gap, time)), current[1]]
+      : [current[0], Math.min(duration, Math.max(current[0] + gap, time))];
+    trimRef.current = next;
+    setTrim(next);
+    if (commit) setCommittedTrim(next);
+    setSavedStatus('Unsaved local changes');
+  };
+  const timeAtClientX = (clientX: number) => {
+    const bounds = canvasRef.current?.getBoundingClientRect();
+    if (!bounds) return 0;
+    const ratio = Math.max(0, Math.min(1, (clientX - bounds.left - SPECTROGRAM_LEFT) / Math.max(1, bounds.width - SPECTROGRAM_LEFT - SPECTROGRAM_RIGHT)));
+    return viewStart + ratio * viewDuration;
+  };
+  const trimHandleKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>, edge: 'start' | 'end') => {
+    let time: number;
+    if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') time = (edge === 'start' ? trimStart : trimEnd) + (event.key === 'ArrowRight' ? 1 : -1) * (event.shiftKey ? 1 : 0.1);
+    else if (event.key === 'Home') time = 0;
+    else if (event.key === 'End') time = duration;
+    else return;
+    event.preventDefault();
+    stopPlayback();
+    setTrimEdge(edge, time, true);
   };
   const onCanvasPointerDown = (event: ReactPointerEvent<HTMLCanvasElement>) => {
     const bounds = event.currentTarget.getBoundingClientRect();
@@ -1432,6 +1543,13 @@ function App() {
       context.fillStyle = 'rgba(214, 237, 85, .13)'; context.fillRect(selectedLeft, 0, selectedRight - selectedLeft, graphBottom);
       context.strokeStyle = 'rgba(216, 237, 85, .5)'; context.strokeRect(selectedLeft, 0, selectedRight - selectedLeft, graphBottom);
     }
+    if (spectrogramSource === 'current') {
+      const startX = Math.max(graphLeft, Math.min(graphRight, graphLeft + ((trimStart - viewStart) / viewDuration) * graphWidth));
+      const endX = Math.max(graphLeft, Math.min(graphRight, graphLeft + ((trimEnd - viewStart) / viewDuration) * graphWidth));
+      context.fillStyle = 'rgba(5, 12, 18, .72)';
+      context.fillRect(graphLeft, 0, startX - graphLeft, graphBottom);
+      context.fillRect(endX, 0, graphRight - endX, graphBottom);
+    }
     const headX = graphLeft + ((playHead - viewStart) / viewDuration) * graphWidth; context.strokeStyle = '#ff8a4c'; context.lineWidth = 2; context.beginPath(); context.moveTo(headX, 0); context.lineTo(headX, graphBottom); context.stroke();
 
     context.fillStyle = '#f2f4e8'; context.font = '10px "Space Mono", monospace'; context.textAlign = 'left';
@@ -1481,12 +1599,12 @@ function App() {
     context.textAlign = 'center';
     context.fillText('LEVEL (dB)', 0, 0);
     context.restore();
-  }, [activeTab, hasSelection, playHead, selectionEnd, selectionStart, sourceChannelCount, spectrogramCeilingDb, spectrogramFloorDb, spectrogramMaxFrequency, spectrogramMinFrequency, spectrogramPalette, spectrograms, viewDuration, viewStart]);
+  }, [activeTab, hasSelection, playHead, selectionEnd, selectionStart, sourceChannelCount, spectrogramCeilingDb, spectrogramFloorDb, spectrogramMaxFrequency, spectrogramMinFrequency, spectrogramPalette, spectrogramSource, spectrograms, trimEnd, trimStart, viewDuration, viewStart]);
 
   useEffect(() => {
     const keyHandler = (event: KeyboardEvent) => {
       if (modal) return;
-      if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return;
+      if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || (event.target instanceof HTMLElement && event.target.closest('[data-trim-handle]'))) return;
       if (event.code === 'Space') { event.preventDefault(); play(); }
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); event.shiftKey ? redo() : undo(); }
       if (event.key === 'Escape') setModuleMenu(false);
@@ -1592,7 +1710,7 @@ function App() {
         <div className="px-3 mt-5 sidebar-title eyebrow text-[#91a69d]">Session</div>
         <div className="px-3 mt-2 space-y-1">
           <button type="button" className="nav-item" onClick={() => void pickWavFile()} data-testid="nav-import"><FileAudio size={15} /><span className="nav-label">Import WAV</span></button>
-          <button type="button" className="nav-item" onClick={() => { stopPlayback(); setLargeSource(null); setSource(createDemoAudio()); setModules(makeDefaultChain()); setSelection([4.1, 7.8]); setMarkers([]); setRegions([]); setTitle('Coastal dawn / north bluff'); setSavedStatus('Demo source loaded'); }} data-testid="nav-demo"><Waves size={15} /><span className="nav-label">Load demo source</span></button>
+          <button type="button" className="nav-item" onClick={() => { stopPlayback(); setLargeSource(null); setSource(createDemoAudio()); restoreTrim(null, 18); setModules(makeDefaultChain()); setSelection([4.1, 7.8]); setMarkers([]); setRegions([]); setTitle('Coastal dawn / north bluff'); setSavedStatus('Demo source loaded'); }} data-testid="nav-demo"><Waves size={15} /><span className="nav-label">Load demo source</span></button>
           <button type="button" className="nav-item" onClick={save} data-testid="nav-save"><Save size={15} /><span className="nav-label">Save locally</span></button>
           <button type="button" className="nav-item" onClick={(event) => openModal(event, 'export')} data-testid="nav-export"><Download size={15} /><span className="nav-label">Export</span></button>
         </div>
@@ -1654,7 +1772,7 @@ function App() {
               {activeTab === 'project' ? (
                  <ProjectPanel title={title} notes={notes} setTitle={setTitle} setNotes={setNotes} source={source} sourceChannelCount={sourceChannelCount} save={() => void save()} openSettings={(event) => openModal(event, 'settings')} />
               ) : activeTab === 'analyze' ? (
-                <AnalyzePanel originalStats={originalStats} currentStats={currentStats} selectionOriginalStats={selectionOriginalStats} selectionCurrentStats={selectionCurrentStats} duration={duration} selection={[selectionStart, selectionEnd]} hasSelection={hasSelection} modules={modules} />
+                <AnalyzePanel originalStats={originalStats} currentStats={currentStats} selectionOriginalStats={selectionOriginalStats} selectionCurrentStats={selectionCurrentStats} duration={duration} selection={[selectionStart, selectionEnd]} trim={[committedTrimStart, committedTrimEnd]} hasSelection={hasSelection} modules={modules} />
               ) : (
                 <>
                   <section className="panel instrument-grid" aria-label="Spectrogram editor">
@@ -1678,6 +1796,28 @@ function App() {
                       <div className="waveform-wrap">
                         <canvas ref={canvasRef} className="waveform-canvas" onPointerDown={onCanvasPointerDown} onPointerMove={onCanvasPointerMove} onPointerUp={onCanvasPointerUp} onPointerCancel={onCanvasPointerUp} onDoubleClick={(event) => { event.preventDefault(); if (hasSelection) clearSelection(); }} aria-label={`${spectrogramSource === 'original' ? 'Original recording' : 'Edited signal'} interactive spectrogram from ${spectrogramMinFrequency / 1000} to ${spectrogramMaxFrequency / 1000} kilohertz with ${spectrogramFloorDb} to ${spectrogramCeilingDb} decibel scale`} data-testid="canvas-spectrogram" data-request-id={spectrogramRequestId} data-result-id={spectrogramResultId} />
                         <div className={`spectrogram-source-label ${spectrogramSource}`} data-testid="label-spectrogram-source">{spectrogramSource === 'original' ? 'Original recording' : 'Edited signal · chain applied'}</div>
+                        {spectrogramSource === 'current' && <div className="trim-overlay" aria-label="Edited recording trim handles">
+                          {(['start', 'end'] as const).map((edge) => {
+                            const position = edge === 'start' ? trimStart : trimEnd;
+                            const ratio = (position - viewStart) / viewDuration;
+                            if (ratio < 0 || ratio > 1) return null;
+                            return <button key={edge} type="button" data-trim-handle={edge} data-testid={`trim-handle-${edge}`} className={`trim-handle ${edge}`} style={{ left: `${ratio * 100}%` }}
+                              aria-label={`Edited recording ${edge}: ${formatTime(position, true)}. Drag or use arrow keys to adjust.`}
+                              title={`Drag to set edited ${edge} · ${formatTime(position, true)}`}
+                              onPointerDown={(event) => { event.preventDefault(); stopPlayback(); event.currentTarget.setPointerCapture(event.pointerId); }}
+                              onPointerMove={(event) => { if (event.currentTarget.hasPointerCapture(event.pointerId)) setTrimEdge(edge, timeAtClientX(event.clientX)); }}
+                              onPointerUp={(event) => { if (event.currentTarget.hasPointerCapture(event.pointerId)) { setTrimEdge(edge, timeAtClientX(event.clientX), true); event.currentTarget.releasePointerCapture(event.pointerId); } }}
+                              onPointerCancel={() => setCommittedTrim(trimRef.current)}
+                              onKeyDown={(event) => trimHandleKeyDown(event, edge)}>
+                              <span className="trim-handle-tag" aria-hidden="true">{edge === 'start' ? 'START' : 'END'}</span>
+                            </button>;
+                          })}
+                        </div>}
+                      </div>
+                      <div className="trim-summary" data-testid="trim-summary">
+                        <span><strong>Edited range</strong> {formatTime(trimStart, true)} – {formatTime(trimEnd, true)} <span className="text-muted-foreground">({formatTime(trimEnd - trimStart, true)} kept)</span></span>
+                        <span className="text-muted-foreground">Drag START and END on the edited spectrogram. Original stays untouched.</span>
+                        {trim && (trimStart > 0 || trimEnd < duration) && <button type="button" className="quiet-btn !py-1 !px-2 !text-[10px]" onClick={() => { stopPlayback(); restoreTrim(null, duration); setSavedStatus('Unsaved local changes'); }} data-testid="button-reset-trim">Reset trim</button>}
                       </div>
                       <div className="flex flex-wrap items-center justify-between gap-3 mt-3">
                         <div className="flex items-center gap-2 text-[11px] text-muted-foreground"><span className="inline-block w-3 h-3 rounded-sm" style={{ background: spectrogramColorCss(0.08, spectrogramPalette) }} /> low energy <span className="inline-block w-3 h-3 rounded-sm ml-2" style={{ background: spectrogramColorCss(0.92, spectrogramPalette) }} /> high energy <span className="inline-block w-3 h-3 rounded-sm bg-[#ff8a4c] ml-2" /> playhead</div>
@@ -1695,12 +1835,15 @@ function App() {
                      </div>
                      <div className="signal-stats-groups">
                        <div className="signal-stats-group">
-                         <div className="signal-stats-label">{displayedSourceLabel} / full file</div>
+                         <div className="signal-stats-label">{spectrogramSource === 'current' ? `Edited / kept range · ${formatTime(committedTrimEnd - committedTrimStart)}` : `${displayedSourceLabel} / full file · ${formatTime(duration)}`}</div>
                          {statisticsPending ? <div className="signal-stats-pending">{statisticsUnavailableLabel}</div> : <StatsGrid stats={displayedStats} />}
                        </div>
                        <div className="signal-stats-group">
-                         <div className="signal-stats-label">{hasSelection ? `${displayedSourceLabel} / selection · ${formatTime(selectionEnd - selectionStart)}` : 'No selection'}</div>
-                          {hasSelection ? statisticsPending ? <div className="signal-stats-pending">{statisticsUnavailableLabel}</div> : <StatsGrid stats={displayedSelectionStats} /> : <div className="stat-grid"><div className="stat-cell text-[11px] text-muted-foreground">No selection · full track playback</div></div>}
+                         <div className="signal-stats-label">{hasSelection ? spectrogramSource === 'current' ? `Edited / selection within kept range · ${formatTime(Math.max(0, Math.min(selectionEnd, committedTrimEnd) - Math.max(selectionStart, committedTrimStart)))}` : `${displayedSourceLabel} / selection · ${formatTime(selectionEnd - selectionStart)}` : 'No selection'}</div>
+                          {hasSelection ? spectrogramSource === 'current' && Math.min(selectionEnd, committedTrimEnd) <= Math.max(selectionStart, committedTrimStart)
+                            ? <div className="signal-stats-pending">Selection is outside the edited range</div>
+                            : statisticsPending ? <div className="signal-stats-pending">{statisticsUnavailableLabel}</div> : <StatsGrid stats={displayedSelectionStats} />
+                            : <div className="stat-grid"><div className="stat-cell text-[11px] text-muted-foreground">No selection · full track playback</div></div>}
                        </div>
                      </div>
                      <div className="signal-stats-note"><Info size={12} />Local BS.1770-style estimates with 4× true-peak interpolation; not certified meter readings.</div>
@@ -1824,7 +1967,9 @@ function ModuleCard({ module, sampleRate, index, total, collapsed, updateModule,
   </div>;
 }
 
-function AnalyzePanel({ originalStats, currentStats, selectionOriginalStats, selectionCurrentStats, duration, selection, hasSelection, modules }: { originalStats: LoudnessStats; currentStats: LoudnessStats; selectionOriginalStats: LoudnessStats; selectionCurrentStats: LoudnessStats; duration: number; selection: [number, number]; hasSelection: boolean; modules: EditModule[] }) {
+function AnalyzePanel({ originalStats, currentStats, selectionOriginalStats, selectionCurrentStats, duration, selection, trim, hasSelection, modules }: { originalStats: LoudnessStats; currentStats: LoudnessStats; selectionOriginalStats: LoudnessStats; selectionCurrentStats: LoudnessStats; duration: number; selection: [number, number]; trim: [number, number]; hasSelection: boolean; modules: EditModule[] }) {
+  const keptSelectionDuration = Math.max(0, Math.min(selection[1], trim[1]) - Math.max(selection[0], trim[0]));
+  const isTrimmed = trim[0] > 0 || trim[1] < duration;
   return (
     <div className="space-y-4">
       <section className="panel">
@@ -1837,12 +1982,12 @@ function AnalyzePanel({ originalStats, currentStats, selectionOriginalStats, sel
         </div>
         <div className="panel-body grid md:grid-cols-2 gap-5">
           <div>
-            <div className="eyebrow mb-2">Current / full file · {formatTime(duration)}</div>
+            <div className="eyebrow mb-2">Edited / kept range · {formatTime(trim[1] - trim[0])}</div>
             <StatsGrid stats={currentStats} />
           </div>
           <div>
-            <div className="eyebrow mb-2">{hasSelection ? `Current / selection · ${formatTime(selection[1] - selection[0])}` : 'Current / no selection'}</div>
-            {hasSelection ? <StatsGrid stats={selectionCurrentStats} /> : <div className="text-[11px] text-muted-foreground">Select a range to analyze it.</div>}
+            <div className="eyebrow mb-2">{hasSelection ? `Edited / selection within kept range · ${formatTime(keptSelectionDuration)}` : 'Edited / no selection'}</div>
+            {hasSelection ? keptSelectionDuration > 0 ? <StatsGrid stats={selectionCurrentStats} /> : <div className="text-[11px] text-muted-foreground">Selection is outside the edited range.</div> : <div className="text-[11px] text-muted-foreground">Select a range to analyze it.</div>}
           </div>
         </div>
       </section>
@@ -1851,13 +1996,13 @@ function AnalyzePanel({ originalStats, currentStats, selectionOriginalStats, sel
         <div className="panel-header">
           <div>
             <div className="section-title">Original vs Current comparison</div>
-            <div className="text-[10px] text-muted-foreground mt-1">A/B changes introduced by the enabled edit chain</div>
+            <div className="text-[10px] text-muted-foreground mt-1">{isTrimmed ? 'Original and Edited cover different durations; differences include trimming and enabled edits.' : 'A/B changes introduced by the enabled edit chain'}</div>
           </div>
           <span className="chip">{modules.filter((module) => module.enabled).length} edits enabled</span>
         </div>
         <div className="panel-body grid md:grid-cols-2 gap-5">
-          <SignalComparison title={`Full file · ${formatTime(duration)}`} original={originalStats} current={currentStats} />
-          {hasSelection ? <SignalComparison title={`Selection · ${formatTime(selection[1] - selection[0])}`} original={selectionOriginalStats} current={selectionCurrentStats} /> : <div className="text-[11px] text-muted-foreground">No selection · full track playback</div>}
+          <SignalComparison title={isTrimmed ? `Original full file ${formatTime(duration)} / Edited kept range ${formatTime(trim[1] - trim[0])}` : `Full file · ${formatTime(duration)}`} original={originalStats} current={currentStats} />
+          {hasSelection ? keptSelectionDuration > 0 ? <SignalComparison title={isTrimmed ? `Original selection ${formatTime(selection[1] - selection[0])} / Edited intersecting range ${formatTime(keptSelectionDuration)}` : `Selection · ${formatTime(selection[1] - selection[0])}`} original={selectionOriginalStats} current={selectionCurrentStats} /> : <div className="text-[11px] text-muted-foreground">Selection is outside the edited range; there is no Edited comparison.</div> : <div className="text-[11px] text-muted-foreground">No selection · full track playback</div>}
         </div>
       </section>
 

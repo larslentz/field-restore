@@ -21,6 +21,7 @@ export interface ProjectRecord {
   modules: EditModule[];
   markers: StoredProject['markers'];
   regions: StoredProject['regions'];
+  trim?: [number, number];
   source: ProjectSourceMetadata;
   /** Alias retained for callers that use the descriptive field name. */
   sourceMetadata?: ProjectSourceMetadata;
@@ -106,6 +107,7 @@ function withoutAudio(input: ProjectInput): ProjectRecord {
     modules: input.modules ?? [],
     markers: input.markers ?? [],
     regions: input.regions ?? [],
+    trim: input.trim,
     source: { ...source },
     sourceMetadata: { ...source },
     fileHandle: input.fileHandle,
@@ -148,6 +150,7 @@ export function migrateStoredProject(input: StoredProject | ProjectInput, id?: s
     modules: value.modules ?? [],
     markers: value.markers ?? [],
     regions: value.regions ?? [],
+    trim: value.trim,
     source: value.source ?? value.sourceMetadata ?? {
       name: value.sourceName ?? '',
       sampleRate: value.sampleRate ?? 0,

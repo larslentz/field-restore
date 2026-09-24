@@ -56,13 +56,14 @@ async function run(request: WorkerJobRequest) {
     ? createStreamingEditChain(request.modules, request.metadata.sampleRate, request.sourceFrameCount ?? request.metadata.frameCount, request.warmup?.startFrame ?? offset)
     : null;
   if (processor && request.warmup?.frameCount) {
-    const channels = await readFrames(
-      request.file,
-      request.warmup.metadata,
-      request.warmup.startFrame,
-      request.warmup.frameCount,
-    );
-    processor.process(channels, request.warmup.startFrame);
+    const { metadata, startFrame, frameCount } = request.warmup;
+    const chunkFrames = Math.max(4096, metadata.sampleRate * 2);
+    for (let frame = startFrame; frame < startFrame + frameCount; frame += chunkFrames) {
+      await checkpoint();
+      const channels = await readFrames(request.file, metadata, frame, Math.min(chunkFrames, startFrame + frameCount - frame));
+      await checkpoint();
+      processor.process(channels, frame);
+    }
   }
   const result = await analyzeLargeLoudness(request.file, request.metadata, {
     checkpoint,

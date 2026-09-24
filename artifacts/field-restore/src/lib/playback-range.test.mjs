@@ -64,3 +64,26 @@ test('current and original monitor sources receive identical timeline boundaries
   const original = createPlaybackRangePlan({ ...base, loop: true, selection: [1.25, 2.75] });
   assert.deepEqual(current, original);
 });
+
+test('edited trim clips full-track playback and offsets the buffer without changing original playback', () => {
+  const edited = createPlaybackRangePlan({ ...base, loop: true, selection: [0, 0], trim: [2, 8], startPosition: 6 });
+  const original = createPlaybackRangePlan({ ...base, loop: true, selection: [0, 0], startPosition: 6 });
+  assert.equal(edited.bufferStartFrame, 2000);
+  assert.equal(edited.bufferEndFrame, 8000);
+  assert.equal(edited.bufferStartOffset, 4);
+  assert.equal(edited.bufferLoopStart, 4);
+  assert.equal(edited.bufferLoopEnd, 6);
+  assert.equal(edited.timelineEnd, 8);
+  assert.equal(original.bufferStartFrame, 0);
+  assert.equal(original.bufferEndFrame, 10000);
+});
+
+test('edited selection intersects trim and an outside selection is marked unplayable', () => {
+  const partial = createPlaybackRangePlan({ ...base, loop: false, selection: [1, 4], trim: [2, 8] });
+  assert.equal(partial.bufferStartFrame, 2000);
+  assert.equal(partial.bufferEndFrame, 4000);
+  assert.equal(partial.hasSelection, true);
+  const outside = createPlaybackRangePlan({ ...base, loop: false, selection: [0, 1], trim: [2, 8], startPosition: 0 });
+  assert.equal(outside.hasSelection, false);
+  assert.equal(outside.emptySelection, true);
+});
