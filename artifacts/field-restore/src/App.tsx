@@ -2225,6 +2225,8 @@ function ModuleCard({ module, humReadout, liveFrequencies, windActive, sampleRat
       {module.type === 'fade' && <div className={fadeDirection === 'both' ? 'grid grid-cols-2 gap-3' : 'space-y-2'}>
         {fadeDirection !== 'out' && numberInput('in', 'Fade in', 0, 20, .1, ' s')}
         {fadeDirection !== 'in' && numberInput('out', 'Fade out', 0, 20, .1, ' s')}
+        {fadeDirection === 'in' && <p className="text-[11px] leading-relaxed text-muted-foreground" data-testid="fade-in-usage-note">This creates a fade in from the Start marker position.</p>}
+        {fadeDirection === 'out' && <p className="text-[11px] leading-relaxed text-muted-foreground" data-testid="fade-out-usage-note">This creates a fade out that ends at the End marker position.</p>}
       </div>}
       {module.type === 'eq' && p.mode === 'low-shelf' && <div className="space-y-2">
         <div className="grid grid-cols-3 gap-2">{numberInput('frequency', 'Low shelf', 20, 240, .5, ' Hz')}{numberInput('q', 'Q', .1, 2, .01)}{numberInput('gain', 'Gain', -12, 12, .1, ' dB')}</div>
