@@ -5,7 +5,7 @@ import { analyzeFileInitialHum, createStreamingEditChain } from './streaming-edi
 import { humAnalysisWindowSize } from './hum-removal.ts';
 import { generateFloat32WavHeader, parseWavMetadata } from './large-wav.ts';
 import { readFrames, writeFloat32WavChunks } from './large-wav.ts';
-import { encodeWav, parseWav } from './audio.ts';
+import { createDemoAudio, encodeWav, parseWav } from './audio.ts';
 
 const sampleRate = 48000;
 const totalFrames = 12000;
@@ -208,7 +208,7 @@ function toneLevel(samples, frequency, from = 0) {
   return 2 * Math.hypot(sine, cosine) / (samples.length - from);
 }
 
-test('confirmed opening hum is filtered from frame zero across memory, chunks, and restored loops', () => {
+test('confirmed opening tones are filtered from frame zero across memory, chunks, and restored loops', () => {
   const count = sampleRate * 3;
   const input = [0, 1].map((channel) => Float32Array.from({ length: count }, (_, i) =>
     .13 * Math.sin(2 * Math.PI * 73 * i / sampleRate + channel * .3) +
@@ -222,7 +222,7 @@ test('confirmed opening hum is filtered from frame zero across memory, chunks, a
   const openingEnd = Math.floor(sampleRate * .24);
   for (let channel = 0; channel < 2; channel++) {
     assert.ok(toneLevel(whole[channel].slice(0, openingEnd), 73) < toneLevel(input[channel].slice(0, openingEnd), 73) * .75, 'opening hum should fall');
-    assert.ok(toneLevel(whole[channel].slice(0, openingEnd), 510) > toneLevel(input[channel].slice(0, openingEnd), 510) * .95, 'wanted opening tone should remain');
+    assert.ok(toneLevel(whole[channel].slice(0, openingEnd), 510) < toneLevel(input[channel].slice(0, openingEnd), 510) * .75, 'unrelated sustained tone should also fall');
   }
   const window = humAnalysisWindowSize(sampleRate);
   for (let segment = 0; segment < 3; segment++) {
@@ -247,16 +247,18 @@ test('confirmed opening hum is filtered from frame zero across memory, chunks, a
     whole.map((channel) => channel.slice(loopFrame, loopFrame + 4093)));
 });
 
-test('opening scan does not invent hum from silence, a lone wanted tone, or a short take', () => {
+test('opening scan does not invent tones from silence or a short take, but detects a lone sustained tone', () => {
   const count = sampleRate;
   const hum = { id: 'adaptive', type: 'hum', name: 'Hum', enabled: true, params: { mode: 'Adaptive', frequency: 60, reduction: 18 } };
   const silence = [new Float32Array(count)];
   const wanted = [Float32Array.from({ length: count }, (_, i) => .13 * Math.sin(2 * Math.PI * 230 * i / sampleRate))];
   const short = [Float32Array.from({ length: humAnalysisWindowSize(sampleRate) }, (_, i) => .13 * Math.sin(2 * Math.PI * 60 * i / sampleRate))];
-  for (const input of [silence, wanted, short]) {
+  for (const input of [silence, short]) {
     assert.deepEqual(analyzeInitialHum(input, [hum], sampleRate, input[0].length), [[]]);
     assert.deepEqual(renderChain(input, [hum], sampleRate), input);
   }
+  assert.ok(analyzeInitialHum(wanted, [hum], sampleRate, count)[0].some((frequency) => Math.abs(frequency - 230) < 2));
+  assert.ok(toneLevel(renderChain(wanted, [hum], sampleRate)[0], 230) < toneLevel(wanted[0], 230) * .75);
 });
 
 test('file-backed opening scan reads only the prefix and matches in-memory detection', async () => {
@@ -272,6 +274,7 @@ test('file-backed opening scan reads only the prefix and matches in-memory detec
   const output = createStreamingEditChain([hum], sampleRate, count, 0, seeds).process(input, 0)[0];
   assert.deepEqual(output, renderChain(input, [hum], sampleRate)[0]);
   assert.ok(toneLevel(output.slice(0, sampleRate / 4), 50) < toneLevel(input[0].slice(0, sampleRate / 4), 50) * .75);
+  assert.ok(toneLevel(output.slice(0, sampleRate / 4), 500) < toneLevel(input[0].slice(0, sampleRate / 4), 500) * .75);
 });
 
 test('opening scan readout distinguishes estimates, absence, unavailable scans and bypass', async () => {
@@ -332,7 +335,7 @@ test('live hum decisions follow playback frames equally in memory and bounded fi
   assert.deepEqual(processor.trackedHumFrequencies().hum, seeds[0]);
 });
 
-test('adaptive mode detects non-mains hum and harmonics without attenuating an unrelated tone', () => {
+test('adaptive mode attenuates non-mains hum, harmonics, and unrelated sustained tones', () => {
   const count = sampleRate * 2;
   const input = [0, 1].map((channel) => Float32Array.from({ length: count }, (_, i) =>
     .1 * Math.sin(2 * Math.PI * 73 * i / sampleRate + channel * 1.7) +
@@ -345,7 +348,7 @@ test('adaptive mode detects non-mains hum and harmonics without attenuating an u
   for (let channel = 0; channel < 2; channel++) {
     assert.ok(toneLevel(output[channel], 73, measuredFrom) < toneLevel(input[channel], 73, measuredFrom) * .55, 'fundamental should fall');
     assert.ok(toneLevel(output[channel], 146, measuredFrom) < toneLevel(input[channel], 146, measuredFrom) * .7, 'harmonic should fall');
-    assert.ok(toneLevel(output[channel], 510, measuredFrom) > toneLevel(input[channel], 510, measuredFrom) * .95, 'wanted tone should remain');
+    assert.ok(toneLevel(output[channel], 510, measuredFrom) < toneLevel(input[channel], 510, measuredFrom) * .7, 'unrelated sustained tone should fall');
   }
   assert.deepEqual(createStreamingEditChain([{ ...hum, enabled: false }], sampleRate, count).process(input, 0), input);
 });
@@ -360,7 +363,7 @@ test('adaptive mode covers standard 50 Hz hum without a manual frequency', () =>
   const output = createStreamingEditChain([hum], sampleRate, count).process(input, 0);
   const from = count - sampleRate / 2;
   assert.ok(toneLevel(output[0], 50, from) < toneLevel(input[0], 50, from) * .55);
-  assert.ok(toneLevel(output[0], 500, from) > toneLevel(input[0], 500, from) * .95);
+  assert.ok(toneLevel(output[0], 500, from) < toneLevel(input[0], 500, from) * .7);
 });
 
 test('adaptive detection and filter history agree across chunks, render routes, and restored loops', () => {
@@ -408,14 +411,15 @@ test('adaptive detection does not follow a short wanted tone in the scan band', 
   assert.ok(toneLevel(output[0], 83, count - sampleRate / 2) < toneLevel(input[0], 83, count - sampleRate / 2) * .7);
 });
 
-test('adaptive leaves a lone sustained in-band wanted tone unchanged', () => {
+test('adaptive removes a lone sustained tone without a harmonic or mains match', () => {
   const count = sampleRate * 2;
   const input = [Float32Array.from({ length: count }, (_, i) => .13 * Math.sin(2 * Math.PI * 230 * i / sampleRate))];
   const hum = { id: 'adaptive', type: 'hum', name: 'Hum', enabled: true, params: { mode: 'Adaptive', frequency: 60, reduction: 18 } };
-  assert.deepEqual(createStreamingEditChain([hum], sampleRate, count).process(input, 0), input);
+  const output = createStreamingEditChain([hum], sampleRate, count).process(input, 0)[0];
+  assert.ok(toneLevel(output, 230, count - sampleRate / 2) < toneLevel(input[0], 230, count - sampleRate / 2) * .55);
 });
 
-test('adaptive favors confirmed hum over a stronger unrelated steady tone', () => {
+test('adaptive filters a stronger unrelated steady tone as well as a harmonic family', () => {
   const count = sampleRate * 2;
   const input = [Float32Array.from({ length: count }, (_, i) =>
     .16 * Math.sin(2 * Math.PI * 230 * i / sampleRate) +
@@ -426,7 +430,88 @@ test('adaptive favors confirmed hum over a stronger unrelated steady tone', () =
   const output = createStreamingEditChain([hum], sampleRate, count).process(input, 0);
   const from = count - sampleRate / 2;
   assert.ok(toneLevel(output[0], 73, from) < toneLevel(input[0], 73, from) * .65);
-  assert.ok(toneLevel(output[0], 230, from) > toneLevel(input[0], 230, from) * .95);
+  assert.ok(toneLevel(output[0], 230, from) < toneLevel(input[0], 230, from) * .65);
+});
+
+test('demo Adaptive removes all four independent sustained tones in memory and file-backed chunks', async () => {
+  const demo = createDemoAudio(sampleRate, 3);
+  const count = demo.channels[0].length;
+  const original = demo.channels.map((channel) => new Float32Array(channel));
+  const hum = { id: 'adaptive', type: 'hum', name: 'Hum', enabled: true, params: { mode: 'Adaptive', reduction: 22 } };
+  const seeds = analyzeInitialHum(demo.channels, [hum], sampleRate, count);
+  assert.equal(seeds[0].length, 4, `expected all demo tones, got ${seeds[0]}`);
+  const memory = renderChain(demo.channels, [hum], sampleRate);
+  const frame = count - sampleRate / 2;
+  for (const frequency of [82, 124, 220, 327]) {
+    assert.ok(seeds[0].some((detected) => Math.abs(detected - frequency) < 2), `missing ${frequency} Hz`);
+    for (let channel = 0; channel < 2; channel++) {
+      const before = toneLevel(demo.channels[channel], frequency, frame);
+      const after = toneLevel(memory[channel], frequency, frame);
+      assert.ok(20 * Math.log10(after / before) < -18, `${frequency} Hz channel ${channel}: insufficient attenuation`);
+    }
+  }
+  const readout = humOpeningReadout(hum, 'complete', seeds[0]);
+  assert.match(readout.summary, /\+3/);
+  for (const frequency of [82, 124, 220, 327]) assert.match(readout.detail, new RegExp(`${frequency}\\.`));
+  const file = encodeWav(demo);
+  const metadata = await parseWavMetadata(file);
+  assert.deepEqual(await analyzeFileInitialHum(file, metadata, [hum]), seeds);
+  const streamed = demo.channels.map(() => new Float32Array(count));
+  const processor = createStreamingEditChain([hum], sampleRate, count, 0, seeds);
+  for (let start = 0; start < count; start += 4093) {
+    const end = Math.min(count, start + 4093);
+    const chunk = await readFrames(file, metadata, start, end - start);
+    processor.process(chunk, start).forEach((channel, index) => streamed[index].set(channel, start));
+  }
+  assert.deepEqual(streamed, memory);
+  assert.deepEqual(demo.channels, original, 'the original is not changed');
+  assert.deepEqual(createStreamingEditChain([{ ...hum, enabled: false }], sampleRate, count).process(demo.channels, 0), original);
+});
+
+test('adaptive filters a sustained higher tone but not a changing chirp', () => {
+  const count = sampleRate * 3;
+  const input = [Float32Array.from({ length: count }, (_, i) => {
+    const time = i / sampleRate;
+    return .1 * Math.sin(2 * Math.PI * 1500 * time) +
+      .09 * Math.sin(2 * Math.PI * (2200 * time + 200 * time * time));
+  })];
+  const hum = { id: 'adaptive', type: 'hum', name: 'Hum', enabled: true, params: { mode: 'Adaptive', reduction: 22 } };
+  const seeds = analyzeInitialHum(input, [hum], sampleRate, count);
+  assert.equal(seeds[0].length, 1, `chirp should not be classified as sustained: ${seeds[0]}`);
+  assert.ok(Math.abs(seeds[0][0] - 1500) < 2);
+  const output = renderChain(input, [hum], sampleRate)[0];
+  assert.ok(toneLevel(output, 1500, count - sampleRate / 2) < toneLevel(input[0], 1500, count - sampleRate / 2) * .2);
+});
+
+test('adaptive includes 20 Hz and 20 kHz boundaries at common sample rates', () => {
+  for (const [rate, frequency] of [[44100, 20], [44100, 20000], [48000, 20000], [96000, 20000]]) {
+    const count = 2 * humAnalysisWindowSize(rate);
+    const input = [Float32Array.from({ length: count }, (_, frame) =>
+      .15 * Math.sin(2 * Math.PI * frequency * frame / rate))];
+    const hum = { id: 'adaptive', type: 'hum', name: 'Hum', enabled: true, params: { mode: 'Adaptive', reduction: 22 } };
+    const seeds = analyzeInitialHum(input, [hum], rate, count);
+    assert.ok(seeds[0].some((detected) => Math.abs(detected - frequency) < 2),
+      `${rate} Hz source: missing sustained ${frequency} Hz at the analysis boundary`);
+    const output = renderChain(input, [hum], rate)[0];
+    const start = Math.floor(rate / 8);
+    const frames = Math.floor(rate / 2);
+    assert.ok(measuredTone(output, rate, frequency, start, frames) <
+      measuredTone(input[0], rate, frequency, start, frames) * .3,
+    `${rate} Hz source: insufficient attenuation at ${frequency} Hz`);
+  }
+});
+
+test('adaptive does not confirm a tone that changes slightly between analysis windows', () => {
+  const window = humAnalysisWindowSize(sampleRate);
+  const input = [Float32Array.from({ length: window * 2 }, (_, frame) => {
+    const frequency = frame < window ? 500 : 502;
+    const cycles = frame < window ? 500 * frame / sampleRate :
+      500 * window / sampleRate + 502 * (frame - window) / sampleRate;
+    return .12 * Math.sin(2 * Math.PI * cycles);
+  })];
+  const hum = { id: 'adaptive', type: 'hum', name: 'Hum', enabled: true, params: { mode: 'Adaptive', reduction: 22 } };
+  assert.deepEqual(analyzeInitialHum(input, [hum], sampleRate, input[0].length), [[]]);
+  assert.deepEqual(renderChain(input, [hum], sampleRate), input);
 });
 
 test('aligned mid-file preview agrees with processing from the beginning', () => {

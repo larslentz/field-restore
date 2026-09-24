@@ -27,11 +27,11 @@ DC offset removal is a mandatory hidden baseline stage, not an editable module. 
 
 **How to apply:** Keep the original source immutable for A/B comparison, identify processed output as automatically DC-corrected, and record the baseline stage in restoration reports.
 
-Automatic tonal cleanup must prefer missing an ambiguous tone over removing a wanted one. A single sustained spectral peak is not enough evidence for unsupervised removal; look for a convincing interference pattern and expose the limits.
+For Adaptive Hum Removal, treat every persistent narrowband tone as hum, including isolated non-mains tones and wanted held sounds. Require persistence to distinguish short/changing sounds, not a harmonic family or mains frequency.
 
-**Why:** Field calls, sustained environmental sounds, and music can look like hum in a short analysis window, especially when the cleanup is enabled by default.
+**Why:** The user explicitly prefers removing all sustained tones over protecting ambiguous wanted notes; preserving an isolated tone solely because it lacks harmonics left obvious interference in the demo.
 
-**How to apply:** Keep auto-detection conservative and auditionable; manual tuning can target a single known frequency. For seekable file playback, align analysis history with full-file processing so the preview is representative of export.
+**How to apply:** Detect independent persistent peaks across the supported range, warn that wanted held notes and calls will also be reduced, and keep bypass available for comparison. For seekable file playback, align analysis history with full-file processing so the preview is representative of export.
 
 For automatic hum removal, a bounded opening scan may seed *confirmed frequencies* at source frame zero, but never transplant filter history from the scan into the render. Treat the scan as a decision, not as processed playback time.
 

@@ -156,7 +156,7 @@ export function makeRestorationReport(input: RestorationReportInput) {
     limitations: [
       'Automatic DC offset removal is always applied before editable modules.',
       'Previously saved projects may sound different when reprocessed with the updated DC correction; original recordings remain untouched.',
-      'Adaptive hum detection is conservative: it can miss interference or affect wanted steady tones.',
+      'Adaptive Hum Removal attenuates detected sustained tones regardless of their source, including wanted held notes and calls; short or changing tones may not be detected.',
       'Automatic wind/rumble detection may miss interference or reduce wanted low sounds.',
       'Edits are conservative sample-domain approximations in this browser build.',
       'Original source remains immutable; export reflects automatic DC correction and enabled modules.',

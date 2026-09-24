@@ -1,7 +1,7 @@
 /**
  * Bounded, stereo-linked hum detector and narrow-band remover.
- * Only sustained spectral peaks are eligible; wanted steady tones can still
- * resemble hum, so attenuation is deliberately limited by the reduction knob.
+ * Only persistent spectral peaks are eligible. Adaptive treats even isolated
+ * sustained wanted tones as hum; attenuation is limited by the reduction knob.
  */
 type Filter = { x1: number; x2: number; y1: number; y2: number };
 type Notch = { frequency: number; b0: number; b1: number; b2: number; a1: number; a2: number; history: Filter[] };
@@ -30,7 +30,9 @@ function copyNotches(filters: Notch[]): Notch[] {
 function notch(frequency: number, sampleRate: number, channels: number): Notch {
   const omega = 2 * Math.PI * frequency / sampleRate;
   const cosine = Math.cos(omega);
-  const alpha = Math.sin(omega) / (2 * Math.max(12, frequency / 4));
+  // A very high Q near Nyquist takes too long to settle to the advertised
+  // reduction; cap it while keeping the notch narrow relative to frequency.
+  const alpha = Math.sin(omega) / (2 * Math.min(500, Math.max(12, frequency / 4)));
   const a0 = 1 + alpha;
   return {
     frequency, b0: 1 / a0, b1: -2 * cosine / a0, b2: 1 / a0,
@@ -85,8 +87,8 @@ function findTones(capture: number[][], sampleRate: number, mode: string, target
   }
   const rms = Math.sqrt(energy / (size * capture.length));
   const binWidth = sampleRate / size;
-  const lower = mode === 'Dynamic' ? Math.max(35, target * .88) : 40;
-  const upper = mode === 'Dynamic' ? Math.min(1200, target * 1.12) : 400;
+  const lower = mode === 'Dynamic' ? Math.max(35, target * .88) : 20;
+  const upper = mode === 'Dynamic' ? Math.min(1200, target * 1.12) : Math.min(20000, sampleRate / 2);
   const peaks: Array<{ frequency: number; score: number }> = [];
   const measurePeak = (k: number, minimumAmplitude: number) => {
     if (k < 4 || k >= power.length - 9) return null;
@@ -105,11 +107,20 @@ function findTones(capture: number[][], sampleRate: number, mode: string, target
     const offset = Math.max(-.5, Math.min(.5, .5 * (left - right) / (left - 2 * center + right || 1)));
     return { frequency: (k + offset) * binWidth, score: amplitude * Math.min(1000, power[k] / floor) };
   };
-  for (let k = Math.max(4, Math.ceil(lower / binWidth)); k <= Math.min(power.length - 11, Math.floor(upper / binWidth)); k++) {
-    const peak = measurePeak(k, Math.max(.0015, rms * .08));
-    if (peak) peaks.push(peak);
+  // Search neighboring bins too: interpolation can place a true boundary
+  // frequency inside the requested range when its peak bin is just outside.
+  for (let k = Math.max(4, Math.floor(lower / binWidth) - 1); k <= Math.min(power.length - 11, Math.ceil(upper / binWidth) + 1); k++) {
+    const peak = measurePeak(k, mode === 'Adaptive' ? Math.max(.0008, rms * .025) : Math.max(.0015, rms * .08));
+    if (peak && peak.frequency >= lower - .1 && peak.frequency <= upper + .1) peaks.push(peak);
   }
   peaks.sort((a, b) => b.score - a.score);
+  if (mode === 'Adaptive') {
+    // Persistence across two windows, checked by the caller, rejects short or
+    // moving peaks. No mains, harmonic-family, or two-fundamental restriction.
+    return peaks.filter((peak, index) => !peaks.slice(0, index).some((other) =>
+      Math.abs(peak.frequency - other.frequency) < Math.max(5, binWidth * 2),
+    )).map((peak) => peak.frequency).sort((a, b) => a - b);
+  }
   const fundamentals = peaks.filter((peak, index) => !peaks.slice(0, index).some((other) =>
     Math.abs(peak.frequency - other.frequency) < Math.max(5, binWidth * 2) ||
     Math.abs(peak.frequency / other.frequency - Math.round(peak.frequency / other.frequency)) < .025,
@@ -128,11 +139,8 @@ function findTones(capture: number[][], sampleRate: number, mode: string, target
       if (candidate && Math.abs(candidate.frequency - harmonic * fundamental) <= Math.max(2, binWidth * .5) &&
         !tones.some((frequency) => Math.abs(frequency - candidate.frequency) < 3)) harmonics.push(candidate.frequency);
     }
-    // A lone non-mains sustained note is indistinguishable from a single hum.
-    const mains = [50, 60].some((frequency) => Math.abs(fundamental - frequency) < 1.5);
-    if (mode !== 'Dynamic' && !mains && !harmonics.length) continue;
     tones.push(fundamental, ...harmonics);
-    if (++accepted === (mode === 'Dynamic' ? 1 : 2)) break;
+    if (++accepted === 1) break;
   }
   return tones.sort((a, b) => a - b);
 }
@@ -232,7 +240,10 @@ export class HumProcessor {
       if (this.state.transition && --this.state.transition.remaining <= 0) this.state.transition = undefined;
       if (this.mode === 'Static' || ++this.state.collected < this.size) continue;
       const detected = findTones(this.state.capture, this.sampleRate, this.mode, this.target);
-      const stable = detected.filter((frequency) => this.state.pending.some((previous) => Math.abs(previous - frequency) < Math.max(2, this.sampleRate / this.size)));
+      const tolerance = this.mode === 'Adaptive'
+        ? Math.max(.5, Math.min(1, .22 * this.sampleRate / this.size))
+        : Math.max(2, this.sampleRate / this.size);
+      const stable = detected.filter((frequency) => this.state.pending.some((previous) => Math.abs(previous - frequency) < tolerance));
       const next = stable.length ? this.makeNotches(stable, channels.length) : [];
       if (next.length !== this.state.notches.length ||
         next.some((filter, index) => Math.abs(filter.frequency - this.state.notches[index].frequency) > 1)) {
