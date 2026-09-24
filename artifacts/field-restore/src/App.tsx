@@ -125,6 +125,7 @@ function App() {
   const [loop, setLoop] = useState(false);
   const [rate, setRate] = useState(1);
   const [monitor, setMonitor] = useState<MonitorMode>('current');
+  const [spectrogramSource, setSpectrogramSource] = useState<MonitorMode>('current');
   const [moduleMenu, setModuleMenu] = useState(false);
   const [selectedModuleId, setSelectedModuleId] = useState<string | null>(null);
   const [draggedModuleId, setDraggedModuleId] = useState<string | null>(null);
@@ -148,6 +149,12 @@ function App() {
   const [timeViewCenter, setTimeViewCenter] = useState<number | null>(null);
   const [largeSource, setLargeSource] = useState<LargeSource | null>(null);
   const [largeSpectrograms, setLargeSpectrograms] = useState<SpectrogramView>({
+    left: EMPTY_SPECTROGRAM,
+    right: EMPTY_SPECTROGRAM,
+    startSeconds: 0,
+    durationSeconds: source.duration,
+  });
+  const [largeOriginalSpectrograms, setLargeOriginalSpectrograms] = useState<SpectrogramView>({
     left: EMPTY_SPECTROGRAM,
     right: EMPTY_SPECTROGRAM,
     startSeconds: 0,
@@ -262,7 +269,18 @@ function App() {
     }),
     [currentChannels, largeSource, memorySpectrogramView, source.sampleRate],
   );
-  const spectrograms = largeSource ? largeSpectrograms : memorySpectrograms;
+  const memoryOriginalSpectrograms = useMemo(
+    () => ({
+      left: largeSource || !source.channels[0] ? EMPTY_SPECTROGRAM : calculateSpectrogram([source.channels[0]], source.sampleRate, memorySpectrogramView.startSeconds, memorySpectrogramView.durationSeconds, 480, SPECTROGRAM_DATA_HEIGHT, 0, source.sampleRate / 2, SPECTROGRAM_DATA_FLOOR_DB, SPECTROGRAM_DATA_CEILING_DB, SPECTROGRAM_FFT_SIZE),
+      right: largeSource || !source.channels[0] ? EMPTY_SPECTROGRAM : calculateSpectrogram([source.channels[1] ?? source.channels[0]], source.sampleRate, memorySpectrogramView.startSeconds, memorySpectrogramView.durationSeconds, 480, SPECTROGRAM_DATA_HEIGHT, 0, source.sampleRate / 2, SPECTROGRAM_DATA_FLOOR_DB, SPECTROGRAM_DATA_CEILING_DB, SPECTROGRAM_FFT_SIZE),
+      startSeconds: memorySpectrogramView.startSeconds,
+      durationSeconds: memorySpectrogramView.durationSeconds,
+    }),
+    [largeSource, memorySpectrogramView, source.channels, source.sampleRate],
+  );
+  const spectrograms = spectrogramSource === 'original'
+    ? (largeSource ? largeOriginalSpectrograms : memoryOriginalSpectrograms)
+    : (largeSource ? largeSpectrograms : memorySpectrograms);
   const memoryOriginalStats = useMemo(() => largeSource ? EMPTY_STATS : analyzeLoudness(source.channels, source.sampleRate), [largeSource, source.channels, source.sampleRate]);
   const memoryCurrentStats = useMemo(() => largeSource ? EMPTY_STATS : analyzeLoudness(currentChannels, source.sampleRate), [currentChannels, largeSource, source.sampleRate]);
   const memorySelectionOriginalStats = useMemo(() => largeSource ? EMPTY_STATS : analyzeLoudness(source.channels, source.sampleRate, selectionStart * source.sampleRate, selectionEnd * source.sampleRate), [largeSource, source.channels, selectionStart, selectionEnd, source.sampleRate]);
@@ -371,31 +389,54 @@ function App() {
         // avoids multiplying half a second of DSP by every visible column.
         warmupFrames: 2048,
       };
-      setSpectrogramStatus('Building visible spectrogram');
+      setSpectrogramStatus('Building original spectrogram');
       setSpectrogramProgress(0);
       setOperationPaused(false);
-      const leftJob = startWorkerJob<SpectrogramData>(
-        { kind: 'spectrogram', file, metadata, modules: processingModules, options: { ...options, channelIndex: 0 } },
+      const originalLeftJob = startWorkerJob<SpectrogramData>(
+        { kind: 'spectrogram', file, metadata, options: { ...options, channelIndex: 0 } },
         (fraction) => { if (generation === spectrogramGenerationRef.current) setSpectrogramProgress(fraction / 2); },
       );
-      const rightJob = startWorkerJob<SpectrogramData>(
-        { kind: 'spectrogram', file, metadata, modules: processingModules, options: { ...options, channelIndex: Math.min(1, metadata.channels - 1) } },
+      const originalRightJob = startWorkerJob<SpectrogramData>(
+        { kind: 'spectrogram', file, metadata, options: { ...options, channelIndex: Math.min(1, metadata.channels - 1) } },
         (fraction) => { if (generation === spectrogramGenerationRef.current) setSpectrogramProgress(0.5 + fraction / 2); },
       );
-      jobs = [leftJob, rightJob];
+      jobs = [originalLeftJob, originalRightJob];
       spectrogramJobRef.current = jobs;
-      Promise.all([leftJob.promise, rightJob.promise]).then(([left, right]) => {
+      Promise.all([originalLeftJob.promise, originalRightJob.promise]).then(([left, right]) => {
         if (generation === spectrogramGenerationRef.current) {
-          setLargeSpectrograms({
+          setLargeOriginalSpectrograms({
             left,
             right,
             startSeconds: options.startSeconds,
             durationSeconds: options.durationSeconds,
           });
-          setSpectrogramResultId(generation);
-          setSpectrogramStatus('');
-          setSpectrogramProgress(1);
-          spectrogramJobRef.current = [];
+          setSpectrogramStatus('Building edited spectrogram');
+          setSpectrogramProgress(0);
+          const editedLeftJob = startWorkerJob<SpectrogramData>(
+            { kind: 'spectrogram', file, metadata, modules: processingModules, options: { ...options, channelIndex: 0 } },
+            (fraction) => { if (generation === spectrogramGenerationRef.current) setSpectrogramProgress(fraction / 2); },
+          );
+          const editedRightJob = startWorkerJob<SpectrogramData>(
+            { kind: 'spectrogram', file, metadata, modules: processingModules, options: { ...options, channelIndex: Math.min(1, metadata.channels - 1) } },
+            (fraction) => { if (generation === spectrogramGenerationRef.current) setSpectrogramProgress(0.5 + fraction / 2); },
+          );
+          jobs = [editedLeftJob, editedRightJob];
+          spectrogramJobRef.current = jobs;
+          Promise.all([editedLeftJob.promise, editedRightJob.promise]).then(([editedLeft, editedRight]) => {
+            if (generation !== spectrogramGenerationRef.current) return;
+            setLargeSpectrograms({
+              left: editedLeft,
+              right: editedRight,
+              startSeconds: options.startSeconds,
+              durationSeconds: options.durationSeconds,
+            });
+            setSpectrogramResultId(generation);
+            setSpectrogramStatus('');
+            setSpectrogramProgress(1);
+            spectrogramJobRef.current = [];
+          }).catch((caught) => {
+            if ((caught as Error).name !== 'AbortError') setError(caught instanceof Error ? caught.message : 'Unable to build the edited spectrogram.');
+          });
         }
       }).catch((caught) => {
         if ((caught as Error).name !== 'AbortError') setError(caught instanceof Error ? caught.message : 'Unable to build the visible spectrogram.');
