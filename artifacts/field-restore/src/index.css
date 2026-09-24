@@ -215,12 +215,17 @@
 .sidebar-chain-row:hover, .sidebar-chain-row.selected { background: hsl(var(--sidebar-accent)); border-color: #43555c; }
 .sidebar-chain-row.bypassed { opacity: .55; }
 .sidebar-chain-row.dragging { opacity: .3; }
+.sidebar-chain-row.automatic { flex: 0 0 auto; margin-bottom: 4px; }
+.sidebar-chain-row.automatic .sidebar-chain-copy small { color: #a5baab; }
+.sidebar-chain-row.automatic .sidebar-chain-copy strong { white-space: normal; line-height: 1.2; }
+.sidebar-chain-row.automatic .sidebar-bypass { pointer-events: none; }
 .sidebar-chain-row.drop-before::before, .sidebar-chain-row.drop-after::after { content: ''; position: absolute; z-index: 2; left: 4px; right: 4px; height: 2px; border-radius: 2px; background: hsl(var(--sidebar-primary)); box-shadow: 0 0 0 1px hsl(var(--sidebar)), 0 0 8px rgba(183, 221, 47, .55); pointer-events: none; }
 .sidebar-chain-row.drop-before::before { top: -4px; }
 .sidebar-chain-row.drop-after::after { bottom: -4px; }
 .sidebar-drag-handle { width: 18px; align-self: stretch; flex: 0 0 18px; display: grid; place-items: center; color: #829890; cursor: grab; touch-action: none; }
 .sidebar-drag-handle:hover { color: #d8ed55; }
 .sidebar-drag-handle:active { cursor: grabbing; }
+.sidebar-drag-spacer { width: 18px; flex: 0 0 18px; }
 .sidebar-chain-select { min-width: 0; flex: 1; display: flex; align-items: center; gap: 6px; padding: 7px 3px 7px 7px; text-align: left; }
 .sidebar-chain-copy { min-width: 0; display: grid; gap: 2px; }
 .sidebar-chain-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
@@ -229,7 +234,6 @@
 .sidebar-bypass { width: 25px; height: 25px; flex: 0 0 25px; display: grid; place-items: center; color: #d8ed55; border-radius: 4px; }
 .sidebar-bypass:hover { background: rgba(255,255,255,.08); }
 .sidebar-chain-empty { padding: 14px 8px; color: #829890; font-size: 10px; text-align: center; border: 1px dashed #43555c; border-radius: 5px; }
-.sidebar-chain-note { padding: 8px 2px 0; color: #829890; font-size: 8px; letter-spacing: .03em; }
 .input-field, .select-field, .textarea-field { width: 100%; background: hsl(var(--background)); border: 1px solid hsl(var(--input)); border-radius: 4px; color: hsl(var(--foreground)); padding: 7px 9px; font-size: 12px; }
 .input-field::placeholder, .textarea-field::placeholder { color: hsl(var(--muted-foreground)); opacity: .7; }
 .textarea-field { resize: vertical; min-height: 70px; }

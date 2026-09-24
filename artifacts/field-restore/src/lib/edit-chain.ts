@@ -44,7 +44,7 @@ export const makeDefaultChain = (): EditModule[] => [
 export const AUTOMATIC_DC_REMOVAL: EditModule = {
   id: 'automatic-dc-removal',
   type: 'dc',
-  name: 'Automatic DC Offset Removal',
+  name: 'Remove DC Offset',
   enabled: true,
   params: { mode: 'Auto', amount: 0 },
 };

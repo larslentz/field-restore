@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent as ReactDragEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent as ReactDragEvent, type FormEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import { Activity, ArrowDown, ArrowUp, Check, ChevronDown, CircleHelp, Download, FileAudio, FolderOpen, Gauge, GripVertical, Info, Keyboard, Layers3, Menu, PanelRightOpen, Pause, Play, Plus, Redo2, RotateCcw, Save, Settings, Square, Trash2, Undo2, Waves, X, ZoomIn, ZoomOut } from 'lucide-react';
 import { createDemoAudio, downloadBlob, encodeWav, parseWav, type AudioSource } from '@/lib/audio';
 import { decodeChannels, loadProject, projectFromSource, saveProject } from '@/lib/persistence';
-import { makeDefaultChain, makeModule, makeProcessingChain, makeRestorationReport, MODULE_LABELS, renderChain, withoutLegacyDcModules, type EditModule, type ModuleType } from '@/lib/edit-chain';
+import { AUTOMATIC_DC_REMOVAL, makeDefaultChain, makeModule, makeProcessingChain, makeRestorationReport, MODULE_LABELS, renderChain, withoutLegacyDcModules, type EditModule, type ModuleType } from '@/lib/edit-chain';
 import { analyzeLoudness, type LoudnessStats } from '@/lib/loudness';
 import { createPlaybackRangePlan } from '@/lib/playback-range';
 import { calculateSpectrogram, type SpectrogramData } from '@/lib/spectrogram';
@@ -10,6 +10,7 @@ import { fingerprintWav, parseWavMetadata, readFrames, withLargeExportLeaveWarni
 import { isVerifiedRelink, openVerifiedFileHandle } from '@/lib/file-access';
 import { listProjects, loadProject as loadProjectV2, queryFileHandlePermission, requestFileHandlePermission, saveProject as saveProjectV2, type ProjectRecord } from '@/lib/project-store';
 import { createStreamingEditChain } from '@/lib/streaming-edit-chain';
+import { readChainPresets, saveChainPreset, type ChainPreset } from '@/lib/chain-presets';
 import { anchoredLevelScaleCeiling, anchoredTimeViewStart } from '@/lib/spectrogram-scale';
 import { SPECTROGRAM_DATA_HEIGHT, SPECTROGRAM_FFT_SIZE } from '@/lib/spectrogram-resolution';
 import { startWorkerJob, type WorkerJob } from '@/lib/worker-analysis';
@@ -127,6 +128,10 @@ function App() {
   const [monitor, setMonitor] = useState<MonitorMode>('current');
   const [spectrogramSource, setSpectrogramSource] = useState<MonitorMode>('current');
   const [moduleMenu, setModuleMenu] = useState(false);
+  const [chainPresets, setChainPresets] = useState<ChainPreset[]>([]);
+  const [presetDialogOpen, setPresetDialogOpen] = useState(false);
+  const [presetName, setPresetName] = useState('');
+  const [presetError, setPresetError] = useState('');
   const [selectedModuleId, setSelectedModuleId] = useState<string | null>(null);
   const [draggedModuleId, setDraggedModuleId] = useState<string | null>(null);
   const [moduleDropTarget, setModuleDropTarget] = useState<{ id: string; edge: 'before' | 'after' } | null>(null);
@@ -137,6 +142,13 @@ function App() {
   const [savedStatus, setSavedStatus] = useState('Local session');
   const [error, setError] = useState('');
   const [isDraggingWav, setIsDraggingWav] = useState(false);
+  useEffect(() => {
+    try {
+      setChainPresets(readChainPresets(localStorage));
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Unable to read saved presets.');
+    }
+  }, []);
   const chainDrawerRef = useRef<HTMLElement>(null);
   const chainDrawerOpenerRef = useRef<HTMLButtonElement>(null);
   const [spectrogramMinFrequency, setSpectrogramMinFrequency] = useState(0);
@@ -166,6 +178,7 @@ function App() {
   const [largeSelectionOriginalStats, setLargeSelectionOriginalStats] = useState<LoudnessStats>(EMPTY_STATS);
   const [largeSelectionCurrentStats, setLargeSelectionCurrentStats] = useState<LoudnessStats>(EMPTY_STATS);
   const selectedModule = modules.find((module) => module.id === selectedModuleId) ?? null;
+  const automaticDcSelected = selectedModuleId === AUTOMATIC_DC_REMOVAL.id;
 
   const openChainDrawer = (event: ReactMouseEvent<HTMLButtonElement>, moduleId: string | null = null) => {
     chainDrawerOpenerRef.current = event.currentTarget;
@@ -208,7 +221,7 @@ function App() {
   }, [chainDrawerOpen]);
 
   useEffect(() => {
-    if (selectedModuleId && !modules.some((module) => module.id === selectedModuleId)) {
+    if (selectedModuleId && selectedModuleId !== AUTOMATIC_DC_REMOVAL.id && !modules.some((module) => module.id === selectedModuleId)) {
       setSelectedModuleId(null);
       setChainDrawerOpen(false);
     }
@@ -783,6 +796,39 @@ function App() {
     setModules(next);
     setSavedStatus('Unsaved local changes');
   }, [modules]);
+
+  const saveCurrentChainPreset = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    try {
+      const updated = saveChainPreset(localStorage, presetName, modules);
+      setChainPresets(updated);
+      setPresetDialogOpen(false);
+      setPresetName('');
+      setPresetError('');
+      setSavedStatus(`Preset “${presetName.trim()}” saved locally · project not saved`);
+    } catch (caught) {
+      setPresetError(caught instanceof Error ? caught.message : 'Unable to save preset on this device.');
+    }
+  };
+  const loadChainPreset = (value: string) => {
+    if (value === 'save') {
+      setPresetName('');
+      setPresetError('');
+      setPresetDialogOpen(true);
+    } else if (value === 'common-field') {
+      commitModules(makeDefaultChain());
+      setSavedStatus('Common Field Recording Adjustments loaded · project not saved');
+    } else if (value.startsWith('saved:')) {
+      const preset = chainPresets[Number(value.slice(6))];
+      if (!preset) return;
+      commitModules(preset.modules.map((module) => ({
+        ...module,
+        id: `${module.type}-${crypto.randomUUID()}`,
+        params: { ...module.params },
+      })));
+      setSavedStatus(`Preset “${preset.name}” loaded · project not saved`);
+    }
+  };
 
   const updateModule = (id: string, patch: Partial<EditModule>) => commitModules(modules.map((module) => module.id === id ? { ...module, ...patch } : module));
   const updateParams = (id: string, key: string, value: number | string) => commitModules(modules.map((module) => module.id === id ? { ...module, params: { ...module.params, [key]: value } } : module));
@@ -1401,7 +1447,7 @@ function App() {
         </nav>
         <section className="sidebar-chain" aria-label="Non-destructive edit chain">
           <div className="sidebar-chain-heading">
-            <button type="button" className="sidebar-chain-title" onClick={(event) => openChainDrawer(event)} data-testid="button-open-full-chain"><div className="eyebrow text-[#91a69d]">Edit chain</div><div className="sidebar-chain-count">{modules.filter((module) => module.enabled).length}/{modules.length} enabled</div></button>
+            <button type="button" className="sidebar-chain-title" onClick={(event) => openChainDrawer(event)} data-testid="button-open-full-chain"><div className="eyebrow text-[#91a69d]">Edit chain</div><div className="sidebar-chain-count">{modules.filter((module) => module.enabled).length}/{modules.length} editable enabled</div></button>
             <div className="sidebar-chain-actions">
               <button type="button" className="sidebar-open-button" onClick={(event) => openChainDrawer(event)} aria-label="Open full edit chain" title="Open full edit chain"><PanelRightOpen size={13} /></button>
               <div className="relative">
@@ -1410,8 +1456,16 @@ function App() {
               </div>
             </div>
           </div>
+          <div className={`sidebar-chain-row automatic ${automaticDcSelected && chainDrawerOpen ? 'selected' : ''}`} data-testid="sidebar-automatic-dc">
+            <span className="sidebar-drag-spacer" aria-hidden="true" />
+            <button type="button" className="sidebar-chain-select" onClick={(event) => openChainDrawer(event, AUTOMATIC_DC_REMOVAL.id)} data-testid="button-open-automatic-dc">
+              <span className="module-index">01</span><span className="module-dot" />
+              <span className="sidebar-chain-copy"><strong>{AUTOMATIC_DC_REMOVAL.name}</strong><small>Always applied first</small></span>
+            </button>
+            <span className="sidebar-bypass" aria-label="Always applied"><Check size={12} /></span>
+          </div>
           <div className="sidebar-chain-list">
-            {modules.length === 0 ? <div className="sidebar-chain-empty">No edits yet</div> : modules.map((module, index) => (
+            {modules.length === 0 ? <div className="sidebar-chain-empty">No additional edits yet</div> : modules.map((module, index) => (
               <div
                 key={module.id}
                 data-testid={`sidebar-module-${module.id}`}
@@ -1448,14 +1502,13 @@ function App() {
                   <GripVertical size={12} />
                 </span>
                 <button type="button" className="sidebar-chain-select" onClick={(event) => openChainDrawer(event, module.id)} data-testid={`button-open-module-${module.id}`}>
-                  <span className="module-index">{String(index + 1).padStart(2, '0')}</span><span className="module-dot" />
+                  <span className="module-index">{String(index + 2).padStart(2, '0')}</span><span className="module-dot" />
                   <span className="sidebar-chain-copy"><strong>{module.name}</strong><small>{moduleSummary(module)}</small></span>
                 </button>
                 <button type="button" className="sidebar-bypass" onClick={() => updateModule(module.id, { enabled: !module.enabled })} aria-label={`${module.enabled ? 'Bypass' : 'Enable'} ${module.name}`} aria-pressed={module.enabled}><Check size={12} /></button>
               </div>
             ))}
           </div>
-          <div className="sidebar-chain-note">automatic DC correction first</div>
         </section>
         <div className="px-3 mt-5 sidebar-title eyebrow text-[#91a69d]">Session</div>
         <div className="px-3 mt-2 space-y-1">
@@ -1566,7 +1619,19 @@ function App() {
                     <div className="time-readout" data-testid="text-playhead">{formatTime(playHead)} <span className="font-sans text-[10px] opacity-55">/ {formatTime(duration)}</span></div>
                     <div className="h-5 w-px bg-white/15 mx-1" />
                     <button type="button" className={`icon-btn !text-[11px] !font-bold ${loop ? '!bg-white/10 !text-[#d8ed55]' : ''}`} onClick={() => setLoop(!loop)} aria-pressed={loop} data-testid="button-loop">LOOP</button>
-                    <div className="ml-auto flex flex-wrap items-center justify-end gap-2"><span className="text-[10px] opacity-60">PRESET</span><select className="transport-select border border-white/15 rounded px-2 py-1 text-[11px] max-w-[210px]" value="" onChange={(event) => { if (event.target.value === 'common-field') { commitModules(makeDefaultChain()); setSavedStatus('Common Field Recording Adjustments preset loaded'); } }} aria-label="Load local preset" data-testid="select-local-preset"><option value="" disabled>Load preset…</option><option value="common-field">Common Field Recording Adjustments</option></select><span className="h-5 w-px bg-white/15 mx-1" /><span className="text-[10px] opacity-60">MONITOR</span><select className="transport-select border border-white/15 rounded px-2 py-1 text-[11px]" value={monitor} onChange={(event) => setMonitor(event.target.value as MonitorMode)} aria-label="Monitor source" data-testid="select-monitor"><option value="current">Current</option><option value="original">Original A/B</option></select><select className="transport-select border border-white/15 rounded px-2 py-1 text-[11px]" value={rate} onChange={(event) => setRate(Number(event.target.value))} aria-label="Playback rate" data-testid="select-playback-rate"><option value="0.5">0.5×</option><option value="1">1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option></select></div>
+                    <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+                      <span className="text-[10px] opacity-60">PRESET</span>
+                      <select className="transport-select border border-white/15 rounded px-2 py-1 text-[11px] max-w-[210px]" value="" onChange={(event) => loadChainPreset(event.target.value)} aria-label="Load or save local preset" data-testid="select-local-preset">
+                        <option value="" disabled>Load or save preset…</option>
+                        <option value="save">Save current chain as preset…</option>
+                        <option value="common-field">Common Field Recording Adjustments</option>
+                        {chainPresets.length > 0 && <optgroup label="Your saved presets">{chainPresets.map((preset, index) => <option key={index} value={`saved:${index}`}>{preset.name}</option>)}</optgroup>}
+                      </select>
+                      <span className="h-5 w-px bg-white/15 mx-1" />
+                      <span className="text-[10px] opacity-60">MONITOR</span>
+                      <select className="transport-select border border-white/15 rounded px-2 py-1 text-[11px]" value={monitor} onChange={(event) => setMonitor(event.target.value as MonitorMode)} aria-label="Monitor source" data-testid="select-monitor"><option value="current">Current</option><option value="original">Original A/B</option></select>
+                      <select className="transport-select border border-white/15 rounded px-2 py-1 text-[11px]" value={rate} onChange={(event) => setRate(Number(event.target.value))} aria-label="Playback rate" data-testid="select-playback-rate"><option value="0.5">0.5×</option><option value="1">1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option></select>
+                    </div>
                   </section>
                 </>
               )}
@@ -1578,18 +1643,31 @@ function App() {
       {modal === 'export' && <ExportModal onClose={() => setModal(null)} onExport={exportAudio} title={title} />}
       {modal === 'help' && <HelpModal onClose={() => setModal(null)} />}
       {modal === 'settings' && <SettingsModal onClose={() => setModal(null)} spectrogramPalette={spectrogramPalette} onSpectrogramPaletteChange={(palette) => { setSpectrogramPalette(palette); localStorage.setItem('field-restore-spectrogram-palette', palette); }} />}
+      {presetDialogOpen && <div className="modal-backdrop" onKeyDown={(event) => { if (event.key === 'Escape') setPresetDialogOpen(false); }}>
+        <form className="modal-card" role="dialog" aria-modal="true" aria-labelledby="preset-dialog-title" onSubmit={saveCurrentChainPreset}>
+          <div className="modal-header"><div><div className="eyebrow">Local preset</div><h2 id="preset-dialog-title" className="text-[17px] font-bold mt-1">Save edit chain</h2></div><button type="button" className="icon-btn" onClick={() => setPresetDialogOpen(false)} aria-label="Close save preset"><X size={16} /></button></div>
+          <div className="modal-body">
+            <label htmlFor="preset-name" className="field-label">Preset name</label>
+            <input id="preset-name" className="input-field" value={presetName} onChange={(event) => { setPresetName(event.target.value); setPresetError(''); }} maxLength={60} required autoFocus placeholder="e.g. Quiet morning ambience" data-testid="input-preset-name" />
+            <p className="text-[11px] text-muted-foreground mt-2">Saves all {modules.length} editable modules, in order, on this device. The original recording is unchanged.</p>
+            {presetError && <p role="alert" className="text-[11px] text-[#a34935] mt-2">{presetError}</p>}
+          </div>
+          <div className="modal-footer"><button type="button" className="quiet-btn" onClick={() => setPresetDialogOpen(false)}>Cancel</button><button type="submit" className="primary-btn" data-testid="button-confirm-save-preset"><Save size={14} /> Save preset</button></div>
+        </form>
+      </div>}
       {chainDrawerOpen && <div className="chain-drawer-backdrop" onPointerDown={(event) => { if (event.target === event.currentTarget) { event.preventDefault(); setChainDrawerOpen(false); } }}>
-        <aside ref={chainDrawerRef} className="chain-drawer" role="dialog" aria-modal="true" aria-label={selectedModule ? `Edit ${selectedModule.name}` : 'Edit chain'} tabIndex={-1}>
+        <aside ref={chainDrawerRef} className="chain-drawer" role="dialog" aria-modal="true" aria-label={automaticDcSelected ? AUTOMATIC_DC_REMOVAL.name : selectedModule ? `Edit ${selectedModule.name}` : 'Edit chain'} tabIndex={-1}>
           <div className="chain-drawer-header">
-            <div><div className="eyebrow">Non-destructive edit chain</div><div className="section-title mt-1">{selectedModule ? selectedModule.name : 'Modules'}</div></div>
+            <div><div className="eyebrow">Non-destructive edit chain</div><div className="section-title mt-1">{automaticDcSelected ? AUTOMATIC_DC_REMOVAL.name : selectedModule ? selectedModule.name : 'Modules'}</div></div>
             <button type="button" className="icon-btn" onClick={() => setChainDrawerOpen(false)} aria-label="Close edit chain" data-testid="button-close-chain"><X size={16} /></button>
           </div>
           {selectedModule && <div className="chain-drawer-mobile-list">
-            {modules.map((module, index) => <button type="button" key={module.id} className={selectedModuleId === module.id ? 'selected' : ''} onClick={() => setSelectedModuleId(module.id)}><span>{String(index + 1).padStart(2, '0')}</span><strong>{module.name}</strong><small>{moduleSummary(module)}</small></button>)}
+            <button type="button" className={automaticDcSelected ? 'selected' : ''} onClick={() => setSelectedModuleId(AUTOMATIC_DC_REMOVAL.id)}><span>01</span><strong>{AUTOMATIC_DC_REMOVAL.name}</strong><small>Always applied</small></button>
+            {modules.map((module, index) => <button type="button" key={module.id} className={selectedModuleId === module.id ? 'selected' : ''} onClick={() => setSelectedModuleId(module.id)}><span>{String(index + 2).padStart(2, '0')}</span><strong>{module.name}</strong><small>{moduleSummary(module)}</small></button>)}
             <div className="relative"><button type="button" className="quiet-btn w-full" onClick={() => setModuleMenu(!moduleMenu)}><Plus size={13} /> Add module</button>{moduleMenu && <div className="drawer-module-menu">{MODULE_TYPES.map((type) => <button type="button" key={type} onClick={() => { addModule(type); setModuleMenu(false); }}>{MODULE_LABELS[type]}</button>)}</div>}</div>
           </div>}
           <div className="chain-drawer-body">
-            {selectedModule ? <ModuleCard module={selectedModule} index={modules.findIndex((module) => module.id === selectedModule.id)} total={modules.length} collapsed={false} updateModule={updateModule} updateParams={updateParams} deleteModule={deleteModule} duplicateModule={duplicateModule} moveModule={moveModule} /> : modules.length ? <div className="chain-drawer-full-list">{modules.map((module, index) => <ModuleCard key={module.id} module={module} index={index} total={modules.length} collapsed={false} updateModule={updateModule} updateParams={updateParams} deleteModule={deleteModule} duplicateModule={duplicateModule} moveModule={moveModule} />)}</div> : <div className="empty-state"><Layers3 size={22} className="mx-auto mb-2" /><div>No edits in the chain yet.</div></div>}
+            {automaticDcSelected ? <AutomaticDcCard /> : selectedModule ? <ModuleCard module={selectedModule} index={modules.findIndex((module) => module.id === selectedModule.id)} total={modules.length} collapsed={false} updateModule={updateModule} updateParams={updateParams} deleteModule={deleteModule} duplicateModule={duplicateModule} moveModule={moveModule} /> : <div className="chain-drawer-full-list"><AutomaticDcCard />{modules.map((module, index) => <ModuleCard key={module.id} module={module} index={index} total={modules.length} collapsed={false} updateModule={updateModule} updateParams={updateParams} deleteModule={deleteModule} duplicateModule={duplicateModule} moveModule={moveModule} />)}{modules.length === 0 && <div className="empty-state">No additional edits yet.</div>}</div>}
           </div>
           <div className="chain-drawer-footer">processing is local · original stays untouched</div>
         </aside>
@@ -1623,10 +1701,21 @@ function RangeControl({ label, value, min, max, step, suffix, onChange, resetVal
   return <label className="block"><span className="field-label">{label} <span className="font-mono-value normal-case">{value}{suffix}</span></span><input ref={inputRef} className="range-field" type="range" min={min} max={max} step={step} value={value} onChange={(event) => onChange(Number(event.target.value))} onDoubleClick={() => { if (resetValue !== undefined) onChange(resetValue); }} title={resetValue !== undefined ? `Double-click to reset to ${resetValue}${suffix}` : undefined} data-testid={testId} /></label>;
 }
 
+function AutomaticDcCard() {
+  return <div className="module-card" data-testid="card-automatic-dc">
+    <div className="module-head">
+      <span className="module-index">01</span><span className="module-dot" />
+      <strong className="module-name">{AUTOMATIC_DC_REMOVAL.name}</strong>
+      <span className="module-summary">Always applied</span><Check size={13} className="text-[hsl(var(--primary))]" aria-hidden="true" />
+    </div>
+    <div className="module-controls text-[11px] text-muted-foreground">Automatically applied before all editable modules. There are no settings to change, and this step cannot be bypassed or moved.</div>
+  </div>;
+}
+
 function ModuleCard({ module, index, total, collapsed, updateModule, updateParams, deleteModule, duplicateModule, moveModule }: { module: EditModule; index: number; total: number; collapsed: boolean; updateModule: (id: string, patch: Partial<EditModule>) => void; updateParams: (id: string, key: string, value: number | string) => void; deleteModule: (id: string) => void; duplicateModule: (module: EditModule) => void; moveModule: (index: number, direction: -1 | 1) => void }) {
   const p = module.params;
   const numberInput = (key: string, label: string, min: number, max: number, step: number, suffix = '', options?: { resetValue?: number; wheelStep?: number }) => <RangeControl label={label} value={Number(p[key])} min={min} max={max} step={step} suffix={suffix} resetValue={options?.resetValue} wheelStep={options?.wheelStep} onChange={(value) => updateParams(module.id, key, value)} testId={`range-${module.type}-${key}`} />;
-  return <div className={`module-card ${module.enabled ? '' : 'bypassed'}`} data-testid={`card-module-${module.id}`}><div className="module-head"><span className="module-index">{String(index + 1).padStart(2, '0')}</span><span className="module-dot" /><button type="button" className="module-name text-left" onDoubleClick={() => { const name = window.prompt('Rename module', module.name); if (name?.trim()) updateModule(module.id, { name: name.trim() }); }} title="Double-click to rename" data-testid={`button-rename-${module.id}`}>{module.name}</button><span className="module-summary">{moduleSummary(module)}</span><button type="button" className={`icon-btn !h-6 !min-w-6 ${module.enabled ? 'text-[hsl(var(--primary))]' : ''}`} onClick={() => updateModule(module.id, { enabled: !module.enabled })} aria-label={`${module.enabled ? 'Bypass' : 'Enable'} ${module.name}`} aria-pressed={module.enabled} data-testid={`button-bypass-${module.id}`}><Check size={13} /></button><button type="button" className="icon-btn !h-6 !min-w-6" onClick={() => moveModule(index, -1)} disabled={index === 0} aria-label="Move module up" data-testid={`button-up-${module.id}`}><ArrowUp size={12} /></button><button type="button" className="icon-btn !h-6 !min-w-6" onClick={() => moveModule(index, 1)} disabled={index === total - 1} aria-label="Move module down" data-testid={`button-down-${module.id}`}><ArrowDown size={12} /></button><button type="button" className="icon-btn !h-6 !min-w-6" onClick={() => duplicateModule(module)} aria-label={`Duplicate ${module.name}`} data-testid={`button-duplicate-${module.id}`}><Layers3 size={12} /></button><button type="button" className="icon-btn !h-6 !min-w-6" onClick={() => deleteModule(module.id)} aria-label={`Delete ${module.name}`} data-testid={`button-delete-${module.id}`}><Trash2 size={12} /></button></div>
+  return <div className={`module-card ${module.enabled ? '' : 'bypassed'}`} data-testid={`card-module-${module.id}`}><div className="module-head"><span className="module-index">{String(index + 2).padStart(2, '0')}</span><span className="module-dot" /><button type="button" className="module-name text-left" onDoubleClick={() => { const name = window.prompt('Rename module', module.name); if (name?.trim()) updateModule(module.id, { name: name.trim() }); }} title="Double-click to rename" data-testid={`button-rename-${module.id}`}>{module.name}</button><span className="module-summary">{moduleSummary(module)}</span><button type="button" className={`icon-btn !h-6 !min-w-6 ${module.enabled ? 'text-[hsl(var(--primary))]' : ''}`} onClick={() => updateModule(module.id, { enabled: !module.enabled })} aria-label={`${module.enabled ? 'Bypass' : 'Enable'} ${module.name}`} aria-pressed={module.enabled} data-testid={`button-bypass-${module.id}`}><Check size={13} /></button><button type="button" className="icon-btn !h-6 !min-w-6" onClick={() => moveModule(index, -1)} disabled={index === 0} aria-label="Move module up" data-testid={`button-up-${module.id}`}><ArrowUp size={12} /></button><button type="button" className="icon-btn !h-6 !min-w-6" onClick={() => moveModule(index, 1)} disabled={index === total - 1} aria-label="Move module down" data-testid={`button-down-${module.id}`}><ArrowDown size={12} /></button><button type="button" className="icon-btn !h-6 !min-w-6" onClick={() => duplicateModule(module)} aria-label={`Duplicate ${module.name}`} data-testid={`button-duplicate-${module.id}`}><Layers3 size={12} /></button><button type="button" className="icon-btn !h-6 !min-w-6" onClick={() => deleteModule(module.id)} aria-label={`Delete ${module.name}`} data-testid={`button-delete-${module.id}`}><Trash2 size={12} /></button></div>
     {!collapsed && <div className="module-controls">
       {module.type === 'gain' && numberInput('db', 'Gain', -30, 30, .1, ' dB', { resetValue: 0, wheelStep: 1 })}
       {module.type === 'fade' && <div className="grid grid-cols-2 gap-3">{numberInput('in', 'Fade in', 0, 10, .1, ' s')}{numberInput('out', 'Fade out', 0, 10, .1, ' s')}</div>}
