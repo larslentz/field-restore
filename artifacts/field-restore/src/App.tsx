@@ -138,6 +138,44 @@ function App() {
   const [moduleDropTarget, setModuleDropTarget] = useState<{ id: string; edge: 'before' | 'after' } | null>(null);
   const [chainDrawerOpen, setChainDrawerOpen] = useState(false);
   const [modal, setModal] = useState<'export' | 'help' | 'settings' | null>(null);
+  const modalOpenerRef = useRef<HTMLButtonElement | null>(null);
+  const openModal = (event: ReactMouseEvent<HTMLButtonElement>, name: 'export' | 'help' | 'settings') => {
+    modalOpenerRef.current = event.currentTarget;
+    setModal(name);
+  };
+  useEffect(() => {
+    if (!modal) return;
+    const dialog = document.querySelector<HTMLElement>('.modal-backdrop .modal-card[role="dialog"]');
+    const opener = modalOpenerRef.current;
+    dialog?.querySelector<HTMLElement>('button:not([disabled])')?.focus();
+    const handleModalKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setModal(null);
+      } else if (event.key === 'Tab' && dialog) {
+        const focusable = Array.from(dialog.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        )).filter((element) => element.getClientRects().length > 0 && getComputedStyle(element).visibility !== 'hidden');
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (!first) {
+          event.preventDefault();
+          dialog.focus();
+        } else if (event.shiftKey && (!dialog.contains(document.activeElement) || document.activeElement === first || document.activeElement === dialog)) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && (!dialog.contains(document.activeElement) || document.activeElement === last)) {
+          event.preventDefault();
+          first.focus();
+        }
+      }
+    };
+    window.addEventListener('keydown', handleModalKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleModalKeyDown);
+      if (opener?.isConnected) opener.focus();
+    };
+  }, [modal]);
   const [title, setTitle] = useState('Coastal dawn / north bluff');
   const [notes, setNotes] = useState('Low-tide ambience. Keep the distant tern call at 07:48 intact.');
   const [savedStatus, setSavedStatus] = useState('Local session');
@@ -1426,13 +1464,14 @@ function App() {
 
   useEffect(() => {
     const keyHandler = (event: KeyboardEvent) => {
+      if (modal) return;
       if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return;
       if (event.code === 'Space') { event.preventDefault(); play(); }
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); event.shiftKey ? redo() : undo(); }
-      if (event.key === 'Escape') { setModal(null); setModuleMenu(false); }
+      if (event.key === 'Escape') setModuleMenu(false);
     };
     window.addEventListener('keydown', keyHandler); return () => window.removeEventListener('keydown', keyHandler);
-  }, [play, redo, undo]);
+  }, [modal, play, redo, undo]);
 
   return (
     <div
@@ -1534,7 +1573,7 @@ function App() {
           <button type="button" className="nav-item" onClick={() => void pickWavFile()} data-testid="nav-import"><FileAudio size={15} /><span className="nav-label">Import WAV</span></button>
           <button type="button" className="nav-item" onClick={() => { stopPlayback(); setLargeSource(null); setSource(createDemoAudio()); setModules(makeDefaultChain()); setSelection([4.1, 7.8]); setMarkers([]); setRegions([]); setTitle('Coastal dawn / north bluff'); setSavedStatus('Demo source loaded'); }} data-testid="nav-demo"><Waves size={15} /><span className="nav-label">Load demo source</span></button>
           <button type="button" className="nav-item" onClick={save} data-testid="nav-save"><Save size={15} /><span className="nav-label">Save locally</span></button>
-          <button type="button" className="nav-item" onClick={() => setModal('export')} data-testid="nav-export"><Download size={15} /><span className="nav-label">Export</span></button>
+          <button type="button" className="nav-item" onClick={(event) => openModal(event, 'export')} data-testid="nav-export"><Download size={15} /><span className="nav-label">Export</span></button>
         </div>
         <div className="mt-auto px-4 pb-5 sidebar-meta">
           <div className="border-t border-[#34454b] pt-4">
@@ -1561,9 +1600,9 @@ function App() {
             <button type="button" className="icon-btn" onClick={undo} disabled={!undoStack.length} aria-label="Undo last edit" data-testid="button-undo"><Undo2 size={16} /></button>
             <button type="button" className="icon-btn" onClick={redo} disabled={!redoStack.length} aria-label="Redo last edit" data-testid="button-redo"><Redo2 size={16} /></button>
             <span className="hidden lg:inline font-mono-value text-[10px] text-muted-foreground mx-2">⌘Z / ⌘⇧Z</span>
-            <button type="button" className="quiet-btn" onClick={() => setModal('help')} data-testid="button-help"><CircleHelp size={14} /> <span className="hidden sm:inline">Help</span></button>
-            <button type="button" className="quiet-btn" onClick={() => setModal('settings')} aria-label="Open settings" data-testid="button-settings"><Settings size={14} /></button>
-            <button type="button" className="primary-btn" onClick={() => setModal('export')} data-testid="button-export"><Download size={14} /> Export</button>
+            <button type="button" className="quiet-btn" onClick={(event) => openModal(event, 'help')} data-testid="button-help"><CircleHelp size={14} /> <span className="hidden sm:inline">Help</span></button>
+            <button type="button" className="quiet-btn" onClick={(event) => openModal(event, 'settings')} aria-label="Open settings" data-testid="button-settings"><Settings size={14} /></button>
+            <button type="button" className="primary-btn" onClick={(event) => openModal(event, 'export')} data-testid="button-export"><Download size={14} /> Export</button>
           </div>
         </header>
         <main className="main-content scrollbar-thin">
@@ -1582,7 +1621,7 @@ function App() {
           <div className="workspace-grid">
             <div className="min-w-0 space-y-4">
               {activeTab === 'project' ? (
-                <ProjectPanel title={title} notes={notes} setTitle={setTitle} setNotes={setNotes} source={source} sourceChannelCount={sourceChannelCount} save={() => void save()} setModal={setModal} />
+                 <ProjectPanel title={title} notes={notes} setTitle={setTitle} setNotes={setNotes} source={source} sourceChannelCount={sourceChannelCount} save={() => void save()} openSettings={(event) => openModal(event, 'settings')} />
               ) : activeTab === 'analyze' ? (
                 <AnalyzePanel originalStats={originalStats} currentStats={currentStats} selectionOriginalStats={selectionOriginalStats} selectionCurrentStats={selectionCurrentStats} duration={duration} selection={[selectionStart, selectionEnd]} hasSelection={hasSelection} modules={modules} />
               ) : (
@@ -1821,8 +1860,8 @@ function SignalComparison({ title, original, current }: { title: string; origina
   );
 }
 
-function ProjectPanel({ title, notes, setTitle, setNotes, source, sourceChannelCount, save, setModal }: { title: string; notes: string; setTitle: (value: string) => void; setNotes: (value: string) => void; source: AudioSource; sourceChannelCount: number; save: () => void; setModal: (value: 'export' | 'help' | 'settings' | null) => void }) {
-  return <div className="space-y-4"><section className="panel"><div className="panel-header"><div><div className="section-title">Project metadata</div><div className="text-[10px] text-muted-foreground mt-1">Stored only in this browser on this device</div></div><button type="button" className="primary-btn" onClick={save} data-testid="button-project-save"><Save size={14} /> Save locally</button></div><div className="panel-body space-y-5 max-w-[740px]"><label><span className="field-label">Project title</span><input className="input-field text-[16px]" value={title} onChange={(event) => setTitle(event.target.value)} data-testid="input-project-title" /></label><label><span className="field-label">Field notes</span><textarea className="textarea-field min-h-[170px]" value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Describe place, mic, weather, handling, and decisions…" data-testid="textarea-project-notes" /></label><div className="grid sm:grid-cols-3 gap-3"><div className="p-3 bg-[hsl(var(--muted))] rounded"><div className="eyebrow">Source</div><div className="font-mono-value text-[11px] mt-2 truncate">{source.name}</div></div><div className="p-3 bg-[hsl(var(--muted))] rounded"><div className="eyebrow">Format</div><div className="font-mono-value text-[11px] mt-2">{source.sampleRate / 1000} kHz / {sourceChannelCount} ch</div></div><div className="p-3 bg-[hsl(var(--muted))] rounded"><div className="eyebrow">Duration</div><div className="font-mono-value text-[11px] mt-2">{formatTime(source.duration)}</div></div></div></div></section><section className="panel"><div className="panel-header"><div className="section-title">Local-first guarantees</div></div><div className="panel-body grid sm:grid-cols-2 gap-3 text-[12px]"><div className="border rounded p-3"><Check size={15} color="hsl(var(--primary))" /><div className="font-semibold mt-2">Original is immutable</div><div className="text-muted-foreground mt-1 leading-relaxed">All processing reads from the original local file. No destructive overwrite occurs.</div></div><div className="border rounded p-3"><Check size={15} color="hsl(var(--primary))" /><div className="font-semibold mt-2">No network required</div><div className="text-muted-foreground mt-1 leading-relaxed">WAV parsing, DSP estimates, playback, persistence, and export happen in this tab.</div></div><button type="button" className="quiet-btn justify-self-start" onClick={() => setModal('settings')} data-testid="button-project-settings"><Settings size={14} /> Storage settings</button></div></section></div>;
+function ProjectPanel({ title, notes, setTitle, setNotes, source, sourceChannelCount, save, openSettings }: { title: string; notes: string; setTitle: (value: string) => void; setNotes: (value: string) => void; source: AudioSource; sourceChannelCount: number; save: () => void; openSettings: (event: ReactMouseEvent<HTMLButtonElement>) => void }) {
+  return <div className="space-y-4"><section className="panel"><div className="panel-header"><div><div className="section-title">Project metadata</div><div className="text-[10px] text-muted-foreground mt-1">Stored only in this browser on this device</div></div><button type="button" className="primary-btn" onClick={save} data-testid="button-project-save"><Save size={14} /> Save locally</button></div><div className="panel-body space-y-5 max-w-[740px]"><label><span className="field-label">Project title</span><input className="input-field text-[16px]" value={title} onChange={(event) => setTitle(event.target.value)} data-testid="input-project-title" /></label><label><span className="field-label">Field notes</span><textarea className="textarea-field min-h-[170px]" value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Describe place, mic, weather, handling, and decisions…" data-testid="textarea-project-notes" /></label><div className="grid sm:grid-cols-3 gap-3"><div className="p-3 bg-[hsl(var(--muted))] rounded"><div className="eyebrow">Source</div><div className="font-mono-value text-[11px] mt-2 truncate">{source.name}</div></div><div className="p-3 bg-[hsl(var(--muted))] rounded"><div className="eyebrow">Format</div><div className="font-mono-value text-[11px] mt-2">{source.sampleRate / 1000} kHz / {sourceChannelCount} ch</div></div><div className="p-3 bg-[hsl(var(--muted))] rounded"><div className="eyebrow">Duration</div><div className="font-mono-value text-[11px] mt-2">{formatTime(source.duration)}</div></div></div></div></section><section className="panel"><div className="panel-header"><div className="section-title">Local-first guarantees</div></div><div className="panel-body grid sm:grid-cols-2 gap-3 text-[12px]"><div className="border rounded p-3"><Check size={15} color="hsl(var(--primary))" /><div className="font-semibold mt-2">Original is immutable</div><div className="text-muted-foreground mt-1 leading-relaxed">All processing reads from the original local file. No destructive overwrite occurs.</div></div><div className="border rounded p-3"><Check size={15} color="hsl(var(--primary))" /><div className="font-semibold mt-2">No network required</div><div className="text-muted-foreground mt-1 leading-relaxed">WAV parsing, DSP estimates, playback, persistence, and export happen in this tab.</div></div><button type="button" className="quiet-btn justify-self-start" onClick={openSettings} data-testid="button-project-settings"><Settings size={14} /> Storage settings</button></div></section></div>;
 }
 
 function ExportModal({ onClose, onExport, title }: { onClose: () => void; onExport: () => void; title: string }) {
