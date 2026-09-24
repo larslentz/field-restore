@@ -290,6 +290,7 @@ function App() {
   const [isRenewingPermission, setIsRenewingPermission] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [canvasBounds, setCanvasBounds] = useState({ width: 0, height: 0 });
   const audioContextRef = useRef<AudioContext | null>(null);
   const audioSourceRef = useRef<AudioBufferSourceNode | null>(null);
   const animationRef = useRef<number | null>(null);
@@ -1616,6 +1617,18 @@ function App() {
   }, [activeTab, onSpectrogramWheel]);
 
   useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => {
+      const width = canvas.clientWidth;
+      const height = canvas.clientHeight;
+      setCanvasBounds((previous) => previous.width === width && previous.height === height ? previous : { width, height });
+    });
+    observer.observe(canvas);
+    return () => observer.disconnect();
+  }, [activeTab]);
+
+  useEffect(() => {
     const canvas = canvasRef.current; if (!canvas) return;
     const context = canvas.getContext('2d'); if (!context) return;
     const ratio = window.devicePixelRatio || 1; const width = canvas.clientWidth; const height = canvas.clientHeight;
@@ -1625,19 +1638,20 @@ function App() {
     const graphRight = width - SPECTROGRAM_RIGHT;
     const graphWidth = Math.max(1, graphRight - graphLeft);
     const paneHeight = graphBottom / 2;
+    const displayHeight = Math.min(256, Math.max(SPECTROGRAM_DISPLAY_HEIGHT, Math.ceil(paneHeight)));
     const frequencyTicks = frequencyScaleTicks(spectrogramMinFrequency, spectrogramMaxFrequency, paneHeight);
     context.fillStyle = '#17242c'; context.fillRect(0, 0, width, height);
 
     const drawSpectrogramPane = (spectrogram: typeof spectrograms.left, top: number) => {
       const imageCanvas = document.createElement('canvas');
       imageCanvas.width = spectrogram.width;
-      imageCanvas.height = SPECTROGRAM_DISPLAY_HEIGHT;
+      imageCanvas.height = displayHeight;
       const imageContext = imageCanvas.getContext('2d');
       if (imageContext) {
-        const image = imageContext.createImageData(spectrogram.width, SPECTROGRAM_DISPLAY_HEIGHT);
+        const image = imageContext.createImageData(spectrogram.width, displayHeight);
         const nyquist = source.sampleRate / 2;
-        for (let row = 0; row < SPECTROGRAM_DISPLAY_HEIGHT; row += 1) {
-          const frequency = spectrogramMaxFrequency - (row / Math.max(1, SPECTROGRAM_DISPLAY_HEIGHT - 1)) * (spectrogramMaxFrequency - spectrogramMinFrequency);
+        for (let row = 0; row < displayHeight; row += 1) {
+          const frequency = spectrogramMaxFrequency - (row / Math.max(1, displayHeight - 1)) * (spectrogramMaxFrequency - spectrogramMinFrequency);
           const sourceRowPosition = Math.max(0, Math.min(spectrogram.height - 1, (1 - frequency / nyquist) * (spectrogram.height - 1)));
           const lowerRow = Math.floor(sourceRowPosition);
           const upperRow = Math.min(spectrogram.height - 1, lowerRow + 1);
@@ -1705,7 +1719,8 @@ function App() {
     const headX = graphLeft + ((playHead - viewStart) / viewDuration) * graphWidth; context.strokeStyle = '#ff8a4c'; context.lineWidth = 2; context.beginPath(); context.moveTo(headX, 0); context.lineTo(headX, graphBottom); context.stroke();
 
     context.fillStyle = '#f2f4e8'; context.font = '10px "Space Mono", monospace'; context.textAlign = 'left';
-    for (let tick = 0; tick <= 6; tick += 1) { const time = viewStart + (tick / 6) * viewDuration; context.fillText(formatTime(time), graphLeft + (tick / 6) * graphWidth + 4, height - 8); }
+    const timeTickCount = Math.max(2, Math.min(6, Math.floor(graphWidth / 90)));
+    for (let tick = 0; tick <= timeTickCount; tick += 1) { const time = viewStart + (tick / timeTickCount) * viewDuration; context.fillText(formatTime(time), graphLeft + (tick / timeTickCount) * graphWidth + 4, height - 8); }
     context.textAlign = 'right';
     for (const top of [0, paneHeight]) {
       for (const { frequency, y } of frequencyTicks) {
@@ -1742,7 +1757,7 @@ function App() {
     context.textAlign = 'center';
     context.fillText('LEVEL (dB)', 0, 0);
     context.restore();
-  }, [activeTab, hasSelection, playHead, selectionEnd, selectionStart, sourceChannelCount, spectrogramCeilingDb, spectrogramFloorDb, spectrogramMaxFrequency, spectrogramMinFrequency, spectrogramPalette, spectrogramSource, spectrograms, trimEnd, trimStart, viewDuration, viewStart]);
+  }, [activeTab, canvasBounds, hasSelection, playHead, selectionEnd, selectionStart, sourceChannelCount, spectrogramCeilingDb, spectrogramFloorDb, spectrogramMaxFrequency, spectrogramMinFrequency, spectrogramPalette, spectrogramSource, spectrograms, trimEnd, trimStart, viewDuration, viewStart]);
 
   useEffect(() => {
     const keyHandler = (event: KeyboardEvent) => {
@@ -1757,7 +1772,7 @@ function App() {
 
   return (
     <div
-      className={`app-shell noise ${isDraggingWav ? 'is-dragging-wav' : ''}`}
+      className={`app-shell noise ${activeTab === 'edit' ? 'has-edit-layout' : ''} ${isDraggingWav ? 'is-dragging-wav' : ''}`}
       onDragEnter={onDragEnter}
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
@@ -1899,7 +1914,7 @@ function App() {
             <button type="button" className="primary-btn" onClick={(event) => openModal(event, 'export')} data-testid="button-export"><Download size={14} /> Export</button>
           </div>
         </header>
-        <main className="main-content scrollbar-thin">
+        <main className={`main-content scrollbar-thin ${activeTab === 'edit' ? 'main-content-edit' : ''}`}>
           {error && <div className="max-w-[1660px] mx-auto mb-3 border border-[#d79c88] bg-[#fff0e9] text-[#8e3a2b] rounded-md px-3 py-2 text-[12px] flex items-center justify-between" role="alert" data-testid="status-error"><span>{error}</span><button type="button" className="icon-btn" onClick={() => setError('')} aria-label="Dismiss error"><X size={14} /></button></div>}
            {pendingPermission && (
              <div className="max-w-[1660px] mx-auto mb-3 border border-[hsl(var(--border))] bg-[hsl(var(--card))] rounded-md px-3 py-2.5 text-[12px] flex flex-wrap items-center gap-3" role="status" data-testid="status-file-permission">
@@ -1913,7 +1928,7 @@ function App() {
              </div>
            )}
           <div className="workspace-grid">
-            <div className="min-w-0 space-y-4">
+             <div className={`min-w-0 ${activeTab === 'edit' ? 'space-y-2' : 'space-y-4'}`}>
               {activeTab === 'project' ? (
                  <ProjectPanel title={title} notes={notes} setTitle={setTitle} setNotes={setNotes} source={source} sourceChannelCount={sourceChannelCount} save={() => void save()} openSettings={(event) => openModal(event, 'settings')} />
               ) : activeTab === 'analyze' ? (
@@ -1971,7 +1986,7 @@ function App() {
                         <div className="hum-overlay-legend">{processingModules.filter((module) => historySegments.some((segment) => segment.moduleId === module.id)).map((module, index) =>
                           <span key={module.id}><i style={{ background: HUM_MARKER_COLORS[index % HUM_MARKER_COLORS.length] }} />{module.name}</span>)}</div>
                       </div>}
-                      <div className="flex flex-wrap items-center justify-between gap-3 mt-3">
+                       <div className="flex flex-wrap items-center justify-between gap-3 mt-2">
                         <div className="flex items-center gap-2 text-[11px] text-muted-foreground"><span className="inline-block w-3 h-3 rounded-sm ring-1 ring-black/20" style={{ background: spectrogramColorCss(0.08, spectrogramPalette) }} /> low energy <span className="inline-block w-3 h-3 rounded-sm ml-2 ring-1 ring-black/20" style={{ background: spectrogramColorCss(0.92, spectrogramPalette) }} /> high energy <span className="inline-block w-3 h-3 rounded-sm bg-[#ff8a4c] ml-2" /> playhead</div>
                         <div className="flex items-center gap-2">
                           <div className="font-mono-value text-[11px]" data-testid="text-selection-time">{hasSelection ? <>{formatTime(selectionStart, true)} — {formatTime(selectionEnd, true)} <span className="text-muted-foreground">({(selectionEnd - selectionStart).toFixed(3)} s selected)</span></> : 'No selection · full track'}</div>

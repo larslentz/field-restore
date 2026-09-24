@@ -138,9 +138,11 @@ test('cancelled and superseded worker results never reach the UI', async ({ page
   await page.getByTestId('button-zoom-in').click();
   const box = await spectrogram.boundingBox();
   expect(box).not.toBeNull();
-  await page.mouse.move(box!.x + box!.width * 0.2, box!.y + box!.height * 0.45);
+  // Keep the selected time span modest as the responsive canvas narrows; this test exercises
+  // worker generations rather than the cost of analyzing most of a long recording.
+  await page.mouse.move(box!.x + box!.width * 0.4, box!.y + box!.height * 0.45);
   await page.mouse.down();
-  await page.mouse.move(box!.x + box!.width * 0.75, box!.y + box!.height * 0.45);
+  await page.mouse.move(box!.x + box!.width * 0.6, box!.y + box!.height * 0.45);
   await page.mouse.up();
   await page.locator('[data-testid^="sidebar-module-"]').first().getByRole('button', { name: 'Bypass Gain' }).click();
   await page.getByTestId('button-zoom-in').click();
