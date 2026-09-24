@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { makeProcessingChain, renderChain } from './edit-chain.ts';
-import { createStreamingEditChain } from './streaming-edit-chain.ts';
+import { analyzeInitialHum, makeProcessingChain, renderChain } from './edit-chain.ts';
+import { analyzeFileInitialHum, createStreamingEditChain } from './streaming-edit-chain.ts';
 import { humAnalysisWindowSize } from './hum-removal.ts';
+import { generateFloat32WavHeader, parseWavMetadata } from './large-wav.ts';
 
 const sampleRate = 48000;
 const totalFrames = 12000;
@@ -92,6 +93,72 @@ function toneLevel(samples, frequency, from = 0) {
   return 2 * Math.hypot(sine, cosine) / (samples.length - from);
 }
 
+test('confirmed opening hum is filtered from frame zero across memory, chunks, and restored loops', () => {
+  const count = sampleRate * 3;
+  const input = [0, 1].map((channel) => Float32Array.from({ length: count }, (_, i) =>
+    .13 * Math.sin(2 * Math.PI * 73 * i / sampleRate + channel * .3) +
+    .07 * Math.sin(2 * Math.PI * 146 * i / sampleRate + channel * .3) +
+    .1 * Math.sin(2 * Math.PI * 510 * i / sampleRate),
+  ));
+  const hum = { id: 'adaptive', type: 'hum', name: 'Hum', enabled: true, params: { mode: 'Adaptive', frequency: 60, reduction: 18 } };
+  const seeds = analyzeInitialHum(input, [hum], sampleRate, count);
+  assert.ok(seeds[0].some((frequency) => Math.abs(frequency - 73) < 2));
+  const whole = renderChain(input, [hum], sampleRate);
+  const openingEnd = Math.floor(sampleRate * .24);
+  for (let channel = 0; channel < 2; channel++) {
+    assert.ok(toneLevel(whole[channel].slice(0, openingEnd), 73) < toneLevel(input[channel].slice(0, openingEnd), 73) * .75, 'opening hum should fall');
+    assert.ok(toneLevel(whole[channel].slice(0, openingEnd), 510) > toneLevel(input[channel].slice(0, openingEnd), 510) * .95, 'wanted opening tone should remain');
+  }
+  const window = humAnalysisWindowSize(sampleRate);
+  for (let segment = 0; segment < 3; segment++) {
+    const from = segment * window;
+    const to = from + window;
+    assert.ok(toneLevel(whole[0].slice(from, to), 73, 0) <
+      toneLevel(input[0].slice(from, to), 73, 0) * .75,
+    `persistent hum should remain filtered in analysis window ${segment + 1}`);
+  }
+  const streamed = input.map(() => new Float32Array(count));
+  const processor = createStreamingEditChain([hum], sampleRate, count, 0, seeds);
+  const loopFrame = 4093 * 3;
+  let loopState;
+  for (let start = 0; start < count; start += 4093) {
+    if (start === loopFrame) loopState = processor.snapshot();
+    processor.process(input.map((channel) => channel.slice(start, start + 4093)), start)
+      .forEach((channel, index) => streamed[index].set(channel, start));
+  }
+  assert.deepEqual(streamed, whole);
+  processor.restore(loopState);
+  assert.deepEqual(processor.process(input.map((channel) => channel.slice(loopFrame, loopFrame + 4093)), loopFrame),
+    whole.map((channel) => channel.slice(loopFrame, loopFrame + 4093)));
+});
+
+test('opening scan does not invent hum from silence, a lone wanted tone, or a short take', () => {
+  const count = sampleRate;
+  const hum = { id: 'adaptive', type: 'hum', name: 'Hum', enabled: true, params: { mode: 'Adaptive', frequency: 60, reduction: 18 } };
+  const silence = [new Float32Array(count)];
+  const wanted = [Float32Array.from({ length: count }, (_, i) => .13 * Math.sin(2 * Math.PI * 230 * i / sampleRate))];
+  const short = [Float32Array.from({ length: humAnalysisWindowSize(sampleRate) }, (_, i) => .13 * Math.sin(2 * Math.PI * 60 * i / sampleRate))];
+  for (const input of [silence, wanted, short]) {
+    assert.deepEqual(analyzeInitialHum(input, [hum], sampleRate, input[0].length), [[]]);
+    assert.deepEqual(renderChain(input, [hum], sampleRate), input);
+  }
+});
+
+test('file-backed opening scan reads only the prefix and matches in-memory detection', async () => {
+  const count = sampleRate * 3;
+  const input = [Float32Array.from({ length: count }, (_, i) =>
+    .12 * Math.sin(2 * Math.PI * 50 * i / sampleRate) + .1 * Math.sin(2 * Math.PI * 500 * i / sampleRate))];
+  const hum = { id: 'adaptive', type: 'hum', name: 'Hum', enabled: true, params: { mode: 'Adaptive', reduction: 18 } };
+  const header = generateFloat32WavHeader({ channels: 1, sampleRate, frameCount: count });
+  const file = new Blob([header, input[0]]);
+  const metadata = await parseWavMetadata(file);
+  const seeds = await analyzeFileInitialHum(file, metadata, [hum]);
+  assert.deepEqual(seeds, analyzeInitialHum(input, [hum], sampleRate, count));
+  const output = createStreamingEditChain([hum], sampleRate, count, 0, seeds).process(input, 0)[0];
+  assert.deepEqual(output, renderChain(input, [hum], sampleRate)[0]);
+  assert.ok(toneLevel(output.slice(0, sampleRate / 4), 50) < toneLevel(input[0].slice(0, sampleRate / 4), 50) * .75);
+});
+
 test('adaptive mode detects non-mains hum and harmonics without attenuating an unrelated tone', () => {
   const count = sampleRate * 2;
   const input = [0, 1].map((channel) => Float32Array.from({ length: count }, (_, i) =>
@@ -131,11 +198,12 @@ test('adaptive detection and filter history agree across chunks, render routes, 
     .08 * Math.sin(2 * Math.PI * 530 * i / sampleRate),
   ));
   const hum = { id: 'adaptive', type: 'hum', name: 'Hum', enabled: true, params: { mode: 'Adaptive', frequency: 60, reduction: 16 } };
-  const whole = createStreamingEditChain([hum], sampleRate, count).process(input, 0);
+  const seeds = analyzeInitialHum(input, [hum], sampleRate, count);
+  const whole = createStreamingEditChain([hum], sampleRate, count, 0, seeds).process(input, 0);
   const memory = renderChain(input, [hum], sampleRate);
   assert.deepEqual(memory, whole);
   const chunked = input.map(() => new Float32Array(count));
-  const processor = createStreamingEditChain([hum], sampleRate, count);
+  const processor = createStreamingEditChain([hum], sampleRate, count, 0, seeds);
   for (let start = 0; start < count; start += 4093) {
     const end = Math.min(count, start + 4093);
     processor.process(input.map((channel) => channel.slice(start, end)), start)
@@ -196,11 +264,12 @@ test('aligned mid-file preview agrees with processing from the beginning', () =>
     .12 * Math.sin(2 * Math.PI * 530 * i / sampleRate),
   )];
   const hum = { id: 'adaptive', type: 'hum', name: 'Hum', enabled: true, params: { mode: 'Adaptive', frequency: 60, reduction: 18 } };
-  const exportAudio = createStreamingEditChain([hum], sampleRate, count).process(input, 0)[0];
+  const seeds = analyzeInitialHum(input, [hum], sampleRate, count);
+  const exportAudio = createStreamingEditChain([hum], sampleRate, count, 0, seeds).process(input, 0)[0];
   const seek = sampleRate * 5;
   const window = humAnalysisWindowSize(sampleRate);
   const warmStart = Math.floor(Math.max(0, seek - sampleRate * 2) / window) * window;
-  const preview = createStreamingEditChain([hum], sampleRate, count, warmStart);
+  const preview = createStreamingEditChain([hum], sampleRate, count, warmStart, seeds);
   preview.process([input[0].slice(warmStart, seek)], warmStart);
   const resumed = preview.process([input[0].slice(seek)], seek)[0];
   let difference = 0;

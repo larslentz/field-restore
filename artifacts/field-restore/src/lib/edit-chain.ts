@@ -1,5 +1,5 @@
 import { cloneChannels, type ChannelData } from './audio';
-import { HumProcessor } from './hum-removal';
+import { HumProcessor, humAnalysisWindowSize, humPrefixFrames } from './hum-removal';
 
 export type ModuleType = 'gain' | 'fade' | 'eq' | 'dc' | 'hum' | 'wind' | 'region' | 'ambient';
 export interface EditModule {
@@ -159,6 +159,7 @@ function averageAt(channels: ChannelData, index: number) {
 export interface RenderContext {
   frameOffset?: number;
   totalFrames?: number;
+  initialHumFrequencies?: number[];
 }
 
 export function applyModule(input: ChannelData, module: EditModule, sampleRate: number, context: RenderContext = {}): ChannelData {
@@ -214,7 +215,7 @@ export function applyModule(input: ChannelData, module: EditModule, sampleRate: 
       });
     }
   } else if (module.type === 'hum') {
-    new HumProcessor(p, sampleRate, output.length).process(output);
+    new HumProcessor(p, sampleRate, output.length, context.initialHumFrequencies).process(output);
   } else if (module.type === 'wind') {
     const cutoff = Math.max(20, Number(p.cutoff) || 100);
     const q = Math.max(0.1, Number(p.q) || 0.7);
@@ -237,6 +238,30 @@ export function applyModule(input: ChannelData, module: EditModule, sampleRate: 
   return output;
 }
 
+/** Analyze only the opening two windows through the preceding modules, without retaining source audio. */
+export function analyzeInitialHum(original: ChannelData, modules: EditModule[], sampleRate: number, totalFrames: number): number[][] {
+  const seeds = modules.map(() => [] as number[]);
+  if (!modules.some((module) => module.enabled && module.type === 'hum' && module.params.mode !== 'Static')) return seeds;
+  const frames = humPrefixFrames(sampleRate, totalFrames);
+  if (frames < 2 * humAnalysisWindowSize(sampleRate) || !original.length ||
+    original.some((channel) => channel.length < frames)) return seeds;
+  let audio: ChannelData = original.map((channel) => channel.slice(0, frames));
+  modules.forEach((module, index) => {
+    if (module.enabled && module.type === 'hum' && module.params.mode !== 'Static') {
+      const processor = new HumProcessor(module.params, sampleRate, audio.length);
+      const next = cloneChannels(audio);
+      processor.process(next);
+      seeds[index] = processor.confirmedFrequencies();
+      audio = next;
+    } else {
+      audio = applyModule(audio, module, sampleRate, { totalFrames });
+    }
+  });
+  return seeds;
+}
+
 export function renderChain(original: ChannelData, modules: EditModule[], sampleRate: number, context: RenderContext = {}) {
-  return modules.reduce((audio, module) => applyModule(audio, module, sampleRate, context), cloneChannels(original));
+  const seeds = context.frameOffset ? [] : analyzeInitialHum(original, modules, sampleRate, context.totalFrames ?? original[0]?.length ?? 0);
+  return modules.reduce((audio, module, index) => applyModule(audio, module, sampleRate,
+    { ...context, initialHumFrequencies: seeds[index] }), cloneChannels(original));
 }

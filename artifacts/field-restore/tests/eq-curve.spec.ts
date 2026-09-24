@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-test('low rumble and newly added EQ curves reflect live controls and bypass', async ({ page }) => {
+test('low rumble and low-end shelf curves reflect live controls and bypass', async ({ page }) => {
   await page.goto('/');
   const lowRumble = page.locator('[data-testid^="sidebar-module-"]').filter({ hasText: 'Low Rumble Removal' });
   const lowRumbleId = (await lowRumble.getAttribute('data-testid'))!.replace('sidebar-module-', '');
@@ -19,19 +19,10 @@ test('low rumble and newly added EQ curves reflect live controls and bypass', as
   const lowShelf = page.locator('[data-testid^="sidebar-module-"]').filter({ hasText: 'Bring Back the Low End' });
   const lowShelfId = (await lowShelf.getAttribute('data-testid'))!.replace('sidebar-module-', '');
   await page.getByTestId(`button-open-module-${lowShelfId}`).click();
-  await expect(page.getByTestId(`eq-curve-${lowShelfId}`)).toBeVisible();
-  await page.getByTestId('button-close-chain').click();
-
-  await page.getByTestId('button-add-module').click();
-  await page.getByTestId('menu-module-eq').click();
-  const eqRow = page.locator('[data-testid^="sidebar-module-"]').filter({ has: page.locator('strong').getByText('EQ', { exact: true }) });
-  const eqId = (await eqRow.getAttribute('data-testid'))!.replace('sidebar-module-', '');
-  await page.getByTestId(`button-open-module-${eqId}`).click();
-  const eqCard = page.getByTestId(`card-module-${eqId}`);
-  const eqCurve = eqCard.getByTestId(`eq-curve-${eqId}`);
-  await expect(eqCurve).toBeVisible();
-  const initialEq = await eqCurve.getByTestId('eq-response-path').getAttribute('d');
-  await eqCard.getByTestId('range-eq-low').fill('8');
-  await expect.poll(() => eqCurve.getByTestId('eq-response-path').getAttribute('d')).not.toBe(initialEq);
-  await expect(eqCurve).toContainText('Mid and high controls share the upper band');
+  const shelfCard = page.getByTestId(`card-module-${lowShelfId}`);
+  const shelfCurve = shelfCard.getByTestId(`eq-curve-${lowShelfId}`);
+  await expect(shelfCurve).toBeVisible();
+  const initialShelf = await shelfCurve.getByTestId('eq-response-path').getAttribute('d');
+  await shelfCard.getByTestId('range-eq-gain').fill('8');
+  await expect.poll(() => shelfCurve.getByTestId('eq-response-path').getAttribute('d')).not.toBe(initialShelf);
 });

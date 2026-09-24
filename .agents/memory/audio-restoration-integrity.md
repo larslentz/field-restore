@@ -32,3 +32,9 @@ Automatic tonal cleanup must prefer missing an ambiguous tone over removing a wa
 **Why:** Field calls, sustained environmental sounds, and music can look like hum in a short analysis window, especially when the cleanup is enabled by default.
 
 **How to apply:** Keep auto-detection conservative and auditionable; manual tuning can target a single known frequency. For seekable file playback, align analysis history with full-file processing so the preview is representative of export.
+
+For automatic hum removal, a bounded opening scan may seed *confirmed frequencies* at source frame zero, but never transplant filter history from the scan into the render. Treat the scan as a decision, not as processed playback time.
+
+**Why:** Reusing warmed histories at frame zero introduces a discontinuity, while letting playback, export, and preview make separate initial decisions leaves the opening inconsistent.
+
+**How to apply:** Run the opening scan through preceding edits, then start fresh filter histories for actual rendering and carry the same frequency decision through seek, loop, analysis, and export routes.

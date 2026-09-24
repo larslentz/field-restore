@@ -10,6 +10,11 @@ export function humAnalysisWindowSize(sampleRate: number) {
   return Math.min(65536, 2 ** Math.ceil(Math.log2(Math.max(4096, sampleRate * .25))));
 }
 
+/** Two complete windows are required to confirm a persistent tone. */
+export function humPrefixFrames(sampleRate: number, totalFrames: number) {
+  return Math.min(totalFrames, 2 * humAnalysisWindowSize(sampleRate));
+}
+
 export interface HumSnapshot {
   collected: number;
   capture: number[][];
@@ -140,7 +145,7 @@ export class HumProcessor {
   private readonly mix: number;
   private state: HumSnapshot;
 
-  constructor(params: Record<string, number | string>, sampleRate: number, channels: number) {
+  constructor(params: Record<string, number | string>, sampleRate: number, channels: number, initialFrequencies: number[] = []) {
     this.sampleRate = sampleRate;
     this.mode = params.mode === 'Adaptive' || params.mode === 'Dynamic' ? String(params.mode) : 'Static';
     this.target = Math.max(40, Math.min(1200, Number(params.frequency) || 60));
@@ -149,10 +154,14 @@ export class HumProcessor {
     this.state = {
       collected: 0,
       capture: Array.from({ length: channels }, () => new Array<number>(this.size).fill(0)),
-      pending: [],
-      notches: this.mode === 'Static' ? this.makeNotches([this.target], channels) : [],
+      pending: [...initialFrequencies],
+      notches: this.makeNotches(this.mode === 'Static' ? [this.target] : initialFrequencies, channels),
       transition: undefined,
     };
+  }
+
+  confirmedFrequencies(): number[] {
+    return this.state.notches.map((filter) => filter.frequency);
   }
 
   private makeNotches(fundamentals: number[], channels: number): Notch[] {

@@ -9,7 +9,7 @@ import { calculateSpectrogram, type SpectrogramData } from '@/lib/spectrogram';
 import { fingerprintWav, parseWavMetadata, readFrames, withLargeExportLeaveWarning, writeFloat32WavChunks, type WavMetadata } from '@/lib/large-wav';
 import { isVerifiedRelink, openVerifiedFileHandle } from '@/lib/file-access';
 import { listProjects, loadProject as loadProjectV2, queryFileHandlePermission, requestFileHandlePermission, saveProject as saveProjectV2, type ProjectRecord } from '@/lib/project-store';
-import { createStreamingEditChain } from '@/lib/streaming-edit-chain';
+import { analyzeFileInitialHum, createStreamingEditChain } from '@/lib/streaming-edit-chain';
 import { humAnalysisWindowSize } from '@/lib/hum-removal';
 import { readChainPresets, saveChainPreset, type ChainPreset } from '@/lib/chain-presets';
 import { EqCurve } from '@/components/EqCurve';
@@ -824,8 +824,21 @@ function App() {
     const warmStart = monitor === 'current'
       ? (trimRef.current?.[0] ? 0 : needsAlignedHumHistory ? Math.floor(recentStart / humWindow) * humWindow : recentStart)
       : nextFrame;
-    const processor = createStreamingEditChain(processingModules, metadata.sampleRate, metadata.frameCount, warmStart);
     setOperationStatus('Buffering playback');
+    let initialHumFrequencies: number[][];
+    try {
+      initialHumFrequencies = monitor === 'current'
+        ? await analyzeFileInitialHum(file, metadata, processingModules)
+        : [];
+    } catch (caught) {
+      if (playbackSessionRef.current === session) {
+        setOperationStatus('');
+        setError(caught instanceof Error ? caught.message : 'Unable to analyze the opening audio.');
+      }
+      return;
+    }
+    if (playbackSessionRef.current !== session) return;
+    const processor = createStreamingEditChain(processingModules, metadata.sampleRate, metadata.frameCount, warmStart, initialHumFrequencies);
     if (monitor === 'current' && warmStart < nextFrame) {
       try {
         await warmFileProcessor(file, metadata, processor, warmStart, nextFrame, undefined, () => playbackSessionRef.current !== session);
@@ -1212,7 +1225,9 @@ function App() {
           const firstFrame = Math.floor(trimStart * metadata.sampleRate);
           const lastFrame = Math.min(metadata.frameCount, Math.ceil(trimEnd * metadata.sampleRate));
           const warmStart = 0;
-          const processor = createStreamingEditChain(processingModules, metadata.sampleRate, metadata.frameCount, warmStart);
+          setOperationStatus('Analyzing opening audio');
+          const initialHumFrequencies = await analyzeFileInitialHum(file, metadata, processingModules, controller.signal);
+          const processor = createStreamingEditChain(processingModules, metadata.sampleRate, metadata.frameCount, warmStart, initialHumFrequencies);
           if (warmStart < firstFrame) {
             setOperationStatus('Preparing trimmed export');
             await warmFileProcessor(file, metadata, processor, warmStart, firstFrame, controller.signal);
@@ -1972,7 +1987,7 @@ function ModuleCard({ module, sampleRate, index, total, collapsed, updateModule,
       {module.type === 'eq' && p.mode === 'low-shelf' && <div className="grid grid-cols-3 gap-2">{numberInput('frequency', 'Low shelf', 20, 240, .5, ' Hz')}{numberInput('q', 'Q', .1, 2, .01)}{numberInput('gain', 'Gain', -12, 12, .1, ' dB')}</div>}
       {module.type === 'eq' && p.mode !== 'low-shelf' && <div className="grid grid-cols-3 gap-2">{numberInput('low', 'Low', -12, 12, .5, ' dB')}{numberInput('mid', 'Mid', -12, 12, .5, ' dB')}{numberInput('high', 'High', -12, 12, .5, ' dB')}</div>}
       {module.type === 'dc' && <div className="grid grid-cols-2 gap-3"><label><span className="field-label">Detection</span><select className="select-field" value={String(p.mode)} onChange={(event) => updateParams(module.id, 'mode', event.target.value)}><option>Auto</option><option>Manual</option></select></label>{p.mode === 'Manual' && numberInput('amount', 'Offset estimate', -100, 100, 1, ' ×10⁻³')}</div>}
-      {module.type === 'hum' && <div className="grid grid-cols-2 gap-3"><label><span className="field-label">Mode</span><select className="select-field" value={String(p.mode)} onChange={(event) => updateParams(module.id, 'mode', event.target.value)} data-testid={`select-hum-mode-${module.id}`}><option>Static</option><option>Dynamic</option><option>Adaptive</option></select></label>{p.mode !== 'Adaptive' && numberInput('frequency', 'Fundamental', 40, 120, 1, ' Hz')}{numberInput('reduction', 'Reduction', 0, 24, 1, ' dB')}<p className="col-span-2 text-[10px] leading-relaxed text-muted-foreground">{p.mode === 'Adaptive' ? 'Scans 40–400 Hz for sustained 50/60 Hz hum or tones with a matching harmonic pattern. Confirmed harmonics are also filtered. Detection takes a moment, so the start may remain untreated. Isolated non-mains hum may be missed to protect wanted tones; some wanted steady tones may still be affected. No frequency setting is used.' : p.mode === 'Dynamic' ? 'Tracks a sustained tone near the selected frequency (±12%) and its harmonics. Detection takes a moment; preview before exporting.' : 'Applies fixed narrow filters at the selected frequency and its first few harmonics. Preview before exporting.'}</p></div>}
+      {module.type === 'hum' && <div className="grid grid-cols-2 gap-3"><label><span className="field-label">Mode</span><select className="select-field" value={String(p.mode)} onChange={(event) => updateParams(module.id, 'mode', event.target.value)} data-testid={`select-hum-mode-${module.id}`}><option>Static</option><option>Dynamic</option><option>Adaptive</option></select></label>{p.mode !== 'Adaptive' && numberInput('frequency', 'Fundamental', 40, 120, 1, ' Hz')}{numberInput('reduction', 'Reduction', 0, 24, 1, ' dB')}<p className="col-span-2 text-[10px] leading-relaxed text-muted-foreground">{p.mode === 'Adaptive' ? 'Scans 40–400 Hz for sustained 50/60 Hz hum or tones with a matching harmonic pattern. Confirmed harmonics are also filtered. A bounded opening scan starts confirmed filters at the first frame; short or changing hum may still take time to detect. Isolated non-mains hum may be missed to protect wanted tones; some wanted steady tones may still be affected. No frequency setting is used.' : p.mode === 'Dynamic' ? 'Tracks a sustained tone near the selected frequency (±12%) and its harmonics. A bounded opening scan starts confirmed filters at the first frame; changing hum may still take time to detect. Preview before exporting.' : 'Applies fixed narrow filters at the selected frequency and its first few harmonics. Preview before exporting.'}</p></div>}
       {module.type === 'wind' && <div className="grid grid-cols-2 gap-3">{numberInput('cutoff', 'High-pass cutoff', 20, 240, .5, ' Hz')}{numberInput('q', 'Q', .1, 2, .01)}</div>}
       {(module.type === 'wind' || module.type === 'eq') && <EqCurve module={module} sampleRate={sampleRate} />}
       {module.type === 'region' && <div className="grid grid-cols-3 gap-2">{numberInput('start', 'Start', 0, 60, .1, ' s')}{numberInput('end', 'End', 0, 60, .1, ' s')}{numberInput('amount', 'Attenuate', -24, 0, .5, ' dB')}</div>}

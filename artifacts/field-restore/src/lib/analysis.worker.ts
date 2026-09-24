@@ -3,7 +3,7 @@
 import { analyzeLargeLoudness } from './large-analysis';
 import { calculateFileSpectrogram } from './large-spectrogram';
 import { readFrames } from './large-wav';
-import { createStreamingEditChain } from './streaming-edit-chain';
+import { analyzeFileInitialHum, createStreamingEditChain } from './streaming-edit-chain';
 import type { WorkerInboundMessage, WorkerJobRequest, WorkerOutboundMessage } from './analysis-worker-protocol';
 
 const scope = self as DedicatedWorkerGlobalScope;
@@ -27,23 +27,25 @@ async function checkpoint() {
 }
 
 async function run(request: WorkerJobRequest) {
+  await checkpoint();
+  const initialHumFrequencies = request.modules
+    ? await analyzeFileInitialHum(request.file, request.kind === 'loudness' ? request.warmup?.metadata ?? request.metadata : request.metadata, request.modules)
+    : [];
+  await checkpoint();
   if (request.kind === 'spectrogram') {
     const channelIndex = request.options.channelIndex ?? 0;
     const result = await calculateFileSpectrogram(request.file, request.metadata, {
       ...request.options,
       checkpoint,
       transform: (channels, frame) => {
-        const selected = channels[channelIndex];
-        if (!selected) return channels;
-        const processed = createStreamingEditChain(
+        if (!channels[channelIndex]) return channels;
+        return createStreamingEditChain(
           request.modules,
           request.metadata.sampleRate,
           request.metadata.frameCount,
           frame,
-        ).process([selected], frame);
-        const output = [...channels];
-        output[channelIndex] = processed[0];
-        return output;
+          initialHumFrequencies,
+        ).process(channels, frame);
       },
       onProgress: (completed, total) => send({ type: 'progress', fraction: total ? completed / total : 1 }),
     });
@@ -53,7 +55,7 @@ async function run(request: WorkerJobRequest) {
 
   const offset = request.frameOffset ?? 0;
   const processor = request.modules
-    ? createStreamingEditChain(request.modules, request.metadata.sampleRate, request.sourceFrameCount ?? request.metadata.frameCount, request.warmup?.startFrame ?? offset)
+    ? createStreamingEditChain(request.modules, request.metadata.sampleRate, request.sourceFrameCount ?? request.metadata.frameCount, request.warmup?.startFrame ?? offset, initialHumFrequencies)
     : null;
   if (processor && request.warmup?.frameCount) {
     const { metadata, startFrame, frameCount } = request.warmup;
