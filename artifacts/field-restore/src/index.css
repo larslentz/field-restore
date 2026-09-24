@@ -297,6 +297,7 @@
 .spectrogram-source-toggle button.active { color: hsl(var(--foreground)); background: hsl(var(--card)); box-shadow: var(--shadow-subtle); }
 .waveform-wrap { position: relative; width: 100%; overflow: hidden; border: 1px solid hsl(var(--border)); border-radius: 6px; background: #17242c; }
 .hum-spectrogram-overlay { position: absolute; top: 0; bottom: 42px; left: 48px; right: 72px; z-index: 2; pointer-events: none; overflow: hidden; }
+.hum-spectrogram-label { position: absolute; top: 5px; right: 5px; padding: 3px 6px; border: 1px solid rgba(216,237,85,.48); border-radius: 3px; background: rgba(23,36,44,.9); color: #e7f6ae; font: 700 9px var(--app-font-mono); white-space: nowrap; }
 .hum-spectrogram-visit { position: absolute; left: 0; right: 0; height: 15px; }
 .hum-spectrogram-span { position: absolute; top: 6px; height: 3px; background: var(--hum-marker-color); box-shadow: 0 0 0 1px #17242c; }
 .hum-spectrogram-span.unfiltered { background: repeating-linear-gradient(90deg, #b0bdc9 0 4px, transparent 4px 7px); }
@@ -424,6 +425,7 @@
   .drawer-module-menu { right: 0; bottom: 38px; }
 }
 @media (max-width: 560px) {
+  .spectrogram-source-label.with-hum-history { display: none; }
   .main-content { padding: 10px; }
   .topbar { height: 52px; flex-basis: 52px; }
   .topbar-processing .topbar-recording-copy, .topbar-processing .topbar-actions { display: none; }

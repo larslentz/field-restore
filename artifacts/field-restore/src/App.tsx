@@ -2087,7 +2087,7 @@ function App() {
                     <div className="panel-body !pt-3">
                       <div className="waveform-wrap">
                         <canvas ref={canvasRef} className="waveform-canvas" onPointerDown={onCanvasPointerDown} onPointerMove={onCanvasPointerMove} onPointerUp={onCanvasPointerUp} onPointerCancel={onCanvasPointerUp} onDoubleClick={(event) => { event.preventDefault(); if (hasSelection) clearSelection(); }} aria-label={`${spectrogramSource === 'original' ? 'Original recording' : 'Edited signal'} interactive spectrogram from ${spectrogramMinFrequency / 1000} to ${spectrogramMaxFrequency / 1000} kilohertz with ${spectrogramFloorDb} to ${spectrogramCeilingDb} decibel scale, time from ${formatTime(viewStart)} to ${formatTime(viewStart + viewDuration)}`} data-testid="canvas-spectrogram" data-request-id={spectrogramRequestId} data-result-id={spectrogramResultId} />
-                        <div className={`spectrogram-source-label ${spectrogramSource}`} data-testid="label-spectrogram-source">{spectrogramSource === 'original' ? 'Original recording' : 'Edited signal · chain applied'}</div>
+                        <div className={`spectrogram-source-label ${spectrogramSource} ${spectrogramSource === 'current' && visibleHumSegments.length > 0 ? 'with-hum-history' : ''}`} data-testid="label-spectrogram-source">{spectrogramSource === 'original' ? 'Original recording' : 'Edited signal · chain applied'}</div>
                         {spectrogramSource === 'current' && visibleHumSegments.length > 0 && <HumSpectrogramOverlay
                           modules={processingModules} segments={visibleHumSegments} sampleRate={source.sampleRate} onSeek={seekTo} />}
                         {spectrogramSource === 'current' && <div className="trim-overlay" aria-label="Edited recording trim handles">
@@ -2114,7 +2114,7 @@ function App() {
                         {trim && (trimStart > 0 || trimEnd < duration) && <button type="button" className="quiet-btn !py-1 !px-2 !text-[10px]" onClick={() => { stopPlayback(); restoreTrim(null, duration); setSavedStatus('Unsaved local changes'); }} data-testid="button-reset-trim">Reset trim</button>}
                       </div>
                       {spectrogramSource === 'current' && historySegments.length > 0 && <div className="hum-overlay-note" data-testid="hum-overlay-note">
-                        <span>Hum marks: retained heard positions only · unmarked gaps are unconfirmed. Select a mark to seek. Gray marks mean no filter confirmed.</span>
+                        <span><strong>Hum Removal playback history — not Noise Reduction.</strong> Colored solid lines show where a hum filter was confirmed during playback; gray dashed lines mean no filter was confirmed. Dots mark heard positions you can select to seek. Unmarked gaps have no retained confirmation.</span>
                         <div className="hum-overlay-legend">{processingModules.filter((module) => historySegments.some((segment) => segment.moduleId === module.id)).map((module, index) =>
                           <span key={module.id}><i style={{ background: HUM_MARKER_COLORS[index % HUM_MARKER_COLORS.length] }} />{module.name}</span>)}</div>
                       </div>}
@@ -2247,7 +2247,8 @@ function HumSpectrogramOverlay({ modules, segments, sampleRate, onSeek }: {
 }) {
   const tracked = modules.filter((module) =>
     module.enabled && module.type === 'hum' && module.params.mode !== 'Static' && Number(module.params.reduction) > 0);
-  return <div className="hum-spectrogram-overlay" aria-label="Retained heard hum positions" data-testid="hum-spectrogram-overlay">
+  return <div className="hum-spectrogram-overlay" aria-label="Hum Removal playback history; colored solid spans have confirmed hum filters, gray dashed spans have no confirmed filter" data-testid="hum-spectrogram-overlay">
+    <span className="hum-spectrogram-label" aria-hidden="true">Hum Removal history</span>
     {segments.map(({ segment, left, right, seekFrame }, index) => {
       const lane = tracked.findIndex((module) => module.id === segment.moduleId);
       if (lane < 0) return null;
