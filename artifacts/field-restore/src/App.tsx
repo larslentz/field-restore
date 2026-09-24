@@ -11,7 +11,7 @@ import { isVerifiedRelink, openVerifiedFileHandle } from '@/lib/file-access';
 import { listProjects, loadProject as loadProjectV2, queryFileHandlePermission, requestFileHandlePermission, saveProject as saveProjectV2, type ProjectRecord } from '@/lib/project-store';
 import { analyzeFileInitialHum, createStreamingEditChain } from '@/lib/streaming-edit-chain';
 import { humAnalysisWindowSize, humPrefixFrames } from '@/lib/hum-removal';
-import { recordHumHistory, type HumHistorySegment } from '@/lib/hum-history';
+import { recordHumHistory, visibleHumHistory, type HumHistorySegment, type VisibleHumSegment } from '@/lib/hum-history';
 import { readChainPresets, saveChainPreset, type ChainPreset } from '@/lib/chain-presets';
 import { EqCurve } from '@/components/EqCurve';
 import { anchoredLevelScaleCeiling, anchoredTimeViewStart } from '@/lib/spectrogram-scale';
@@ -48,6 +48,7 @@ const SPECTROGRAM_DATA_CEILING_DB = 0;
 const SPECTROGRAM_MIN_LEVEL_SPAN_DB = 10;
 const SPECTROGRAM_MAX_LEVEL_SPAN_DB = 180;
 const SPECTROGRAM_DISPLAY_HEIGHT = 110;
+const HUM_MARKER_COLORS = ['#d8ed55', '#75d7ef', '#ffaf78', '#d7a7fa'];
 const EMPTY_STATS: LoudnessStats = { truePeakDbtp: -Infinity, integratedLufs: -Infinity, loudnessRangeLu: 0, maxShortTermLufs: -Infinity };
 const EMPTY_SPECTROGRAM = { width: 480, height: 110, values: new Float32Array(480 * 110) };
 const SPECTROGRAM_PALETTES: Record<SpectrogramPaletteId, { label: string; description: string; stops: Array<[number, string]> }> = {
@@ -443,6 +444,10 @@ function App() {
   const selectionCenter = selectionStart + (selectionEnd - selectionStart) / 2 || duration / 2;
   const viewCenter = timeViewCenter ?? selectionCenter;
   const viewStart = zoom === 1 ? 0 : Math.max(0, Math.min(duration - viewDuration, viewCenter - viewDuration / 2));
+  const visibleHumSegments = useMemo(
+    () => visibleHumHistory(historySegments, source.sampleRate, viewStart, viewDuration),
+    [historySegments, source.sampleRate, viewStart, viewDuration],
+  );
   const spectrogramFloorDb = spectrogramCeilingDb - spectrogramLevelSpanDb;
   const [memorySpectrogramView, setMemorySpectrogramView] = useState(() => ({
     startSeconds: viewStart,
@@ -869,19 +874,6 @@ function App() {
     node.start(0, plan.bufferStartOffset);
     audioSourceRef.current = node; setIsPlaying(true);
     setLiveHum(null);
-    if (monitor === 'current') {
-      const startFrame = plan.timelineStartFrame;
-      processingModules.forEach((module, index) => {
-        if (module.enabled && module.type === 'hum' && module.params.mode !== 'Static' && Number(module.params.reduction) > 0) {
-          let frequencies = memoryHumFrequencies[index] ?? [];
-          for (const event of memoryRender.events) {
-            if (event.frame > startFrame) break;
-            if (event.moduleId === module.id) frequencies = event.frequencies;
-          }
-          recordHeardHum(module.id, startFrame, frequencies, source.sampleRate);
-        }
-      });
-    }
     const tick = () => {
       if (audioSourceRef.current !== node) return;
       const elapsed = (context.currentTime - startedAt) * rate;
@@ -889,7 +881,7 @@ function App() {
       const position = loop ? plan.timelineStart + (elapsed % Math.max(.01, plan.timelineEnd - plan.timelineStart)) : next;
       playHeadRef.current = position;
       setPlayHead(position);
-      if (monitor === 'current') {
+      if (monitor === 'current' && context.state === 'running' && context.currentTime > startedAt) {
         const frame = Math.floor(position * source.sampleRate);
         const frequencies: Record<string, number[]> = {};
         processingModules.forEach((module, index) => {
@@ -1976,6 +1968,8 @@ function App() {
                       <div className="waveform-wrap">
                         <canvas ref={canvasRef} className="waveform-canvas" onPointerDown={onCanvasPointerDown} onPointerMove={onCanvasPointerMove} onPointerUp={onCanvasPointerUp} onPointerCancel={onCanvasPointerUp} onDoubleClick={(event) => { event.preventDefault(); if (hasSelection) clearSelection(); }} aria-label={`${spectrogramSource === 'original' ? 'Original recording' : 'Edited signal'} interactive spectrogram from ${spectrogramMinFrequency / 1000} to ${spectrogramMaxFrequency / 1000} kilohertz with ${spectrogramFloorDb} to ${spectrogramCeilingDb} decibel scale`} data-testid="canvas-spectrogram" data-request-id={spectrogramRequestId} data-result-id={spectrogramResultId} />
                         <div className={`spectrogram-source-label ${spectrogramSource}`} data-testid="label-spectrogram-source">{spectrogramSource === 'original' ? 'Original recording' : 'Edited signal · chain applied'}</div>
+                        {spectrogramSource === 'current' && visibleHumSegments.length > 0 && <HumSpectrogramOverlay
+                          modules={processingModules} segments={visibleHumSegments} sampleRate={source.sampleRate} onSeek={seekTo} />}
                         {spectrogramSource === 'current' && <div className="trim-overlay" aria-label="Edited recording trim handles">
                           {(['start', 'end'] as const).map((edge) => {
                             const position = edge === 'start' ? trimStart : trimEnd;
@@ -1999,6 +1993,11 @@ function App() {
                         <span className="text-muted-foreground">Drag START and END on the edited spectrogram. Original stays untouched.</span>
                         {trim && (trimStart > 0 || trimEnd < duration) && <button type="button" className="quiet-btn !py-1 !px-2 !text-[10px]" onClick={() => { stopPlayback(); restoreTrim(null, duration); setSavedStatus('Unsaved local changes'); }} data-testid="button-reset-trim">Reset trim</button>}
                       </div>
+                      {spectrogramSource === 'current' && historySegments.length > 0 && <div className="hum-overlay-note" data-testid="hum-overlay-note">
+                        <span>Hum marks: retained heard positions only · unmarked gaps are unconfirmed. Select a mark to seek. Gray marks mean no filter confirmed.</span>
+                        <div className="hum-overlay-legend">{processingModules.filter((module) => historySegments.some((segment) => segment.moduleId === module.id)).map((module, index) =>
+                          <span key={module.id}><i style={{ background: HUM_MARKER_COLORS[index % HUM_MARKER_COLORS.length] }} />{module.name}</span>)}</div>
+                      </div>}
                       <div className="flex flex-wrap items-center justify-between gap-3 mt-3">
                         <div className="flex items-center gap-2 text-[11px] text-muted-foreground"><span className="inline-block w-3 h-3 rounded-sm" style={{ background: spectrogramColorCss(0.08, spectrogramPalette) }} /> low energy <span className="inline-block w-3 h-3 rounded-sm ml-2" style={{ background: spectrogramColorCss(0.92, spectrogramPalette) }} /> high energy <span className="inline-block w-3 h-3 rounded-sm bg-[#ff8a4c] ml-2" /> playhead</div>
                         <div className="flex items-center gap-2">
@@ -2101,6 +2100,36 @@ function App() {
       </div>}
     </div>
   );
+}
+
+function HumSpectrogramOverlay({ modules, segments, sampleRate, onSeek }: {
+  modules: EditModule[]; segments: VisibleHumSegment[]; sampleRate: number; onSeek: (seconds: number) => void;
+}) {
+  const tracked = modules.filter((module) =>
+    module.enabled && module.type === 'hum' && module.params.mode !== 'Static' && Number(module.params.reduction) > 0);
+  return <div className="hum-spectrogram-overlay" aria-label="Retained heard hum positions" data-testid="hum-spectrogram-overlay">
+    {segments.map(({ segment, left, right, seekFrame }, index) => {
+      const lane = tracked.findIndex((module) => module.id === segment.moduleId);
+      if (lane < 0) return null;
+      const module = tracked[lane];
+      const description = segment.frequencies.length
+        ? segment.frequencies.map((frequency) => `${frequency.toFixed(1)} Hz`).join(', ')
+        : 'no filter confirmed';
+      const label = `${module.name} · ${formatTime(seekFrame / sampleRate, true)} · ${description} · heard during processed playback`;
+      const position = { top: `${27 + lane * 19}px`, left: `${left * 100}%` };
+      return <div key={`${segment.moduleId}-${index}`} className="hum-spectrogram-visit"
+        style={{ top: position.top, '--hum-marker-color': HUM_MARKER_COLORS[lane % HUM_MARKER_COLORS.length] } as React.CSSProperties}>
+        {right > left && <span className={`hum-spectrogram-span ${segment.frequencies.length ? '' : 'unfiltered'}`}
+          style={{ left: position.left, width: `${(right - left) * 100}%` }} aria-hidden="true" />}
+        <button type="button" className={`hum-spectrogram-marker ${segment.frequencies.length ? '' : 'unfiltered'}`}
+          style={{ left: position.left, width: `max(14px, ${(right - left) * 100}%)`, zIndex: index + 1 }}
+          title={label} aria-label={`Seek to ${label}`} data-testid="hum-spectrogram-marker"
+          onClick={() => onSeek(seekFrame / sampleRate)}>
+          <span aria-hidden="true" className="hum-spectrogram-dot" />
+        </button>
+      </div>;
+    })}
+  </div>;
 }
 
 function StatsGrid({ stats }: { stats: LoudnessStats }) {

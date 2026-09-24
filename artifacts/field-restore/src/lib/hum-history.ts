@@ -8,6 +8,38 @@ export type HumHistorySegment = {
 
 export const MAX_HUM_HISTORY_SEGMENTS = 160;
 
+export type VisibleHumSegment = {
+  segment: HumHistorySegment;
+  left: number;
+  right: number;
+  seekFrame: number;
+};
+
+/** Clip only retained observations to the visible time window; never interpolate gaps. */
+export function visibleHumHistory(
+  history: HumHistorySegment[],
+  sampleRate: number,
+  startSeconds: number,
+  durationSeconds: number,
+): VisibleHumSegment[] {
+  if (!Number.isFinite(sampleRate) || sampleRate <= 0 ||
+      !Number.isFinite(startSeconds) || !Number.isFinite(durationSeconds) || durationSeconds <= 0) return [];
+  const first = startSeconds * sampleRate;
+  const last = (startSeconds + durationSeconds) * sampleRate;
+  const span = last - first;
+  return history.slice(-MAX_HUM_HISTORY_SEGMENTS).flatMap((segment) => {
+    if (!Number.isFinite(segment.startFrame) || !Number.isFinite(segment.endFrame) ||
+        segment.endFrame < segment.startFrame || segment.endFrame < first || segment.startFrame > last) return [];
+    const seekFrame = Math.max(first, segment.startFrame);
+    return [{
+      segment,
+      left: (seekFrame - first) / span,
+      right: (Math.min(last, segment.endFrame) - first) / span,
+      seekFrame,
+    }];
+  });
+}
+
 export function recordHumHistory(
   history: HumHistorySegment[],
   moduleId: string,

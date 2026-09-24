@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { MAX_HUM_HISTORY_SEGMENTS, recordHumHistory } from './hum-history.ts';
+import { MAX_HUM_HISTORY_SEGMENTS, recordHumHistory, visibleHumHistory } from './hum-history.ts';
 
 test('records heard changes, no-filter decisions, and leaves skipped positions uncovered', () => {
   let history = [];
@@ -26,4 +26,31 @@ test('loop and backward seeks create distinct visits; storage remains bounded', 
   assert.equal(history.length, MAX_HUM_HISTORY_SEGMENTS);
   assert.equal(history[0].frequencies[0], 15);
   assert.equal(history.at(-1).frequencies[0], MAX_HUM_HISTORY_SEGMENTS + 14);
+});
+
+test('spectrogram projection clips retained visits but never fills gaps or scans the file', () => {
+  const history = [
+    { moduleId: 'hum-a', startFrame: 100, endFrame: 150, frequencies: [60] },
+    { moduleId: 'hum-b', startFrame: 200, endFrame: 200, frequencies: [] },
+    { moduleId: 'hum-a', startFrame: 800, endFrame: 900, frequencies: [50] },
+  ];
+  const visible = visibleHumHistory(history, 100, 1.2, 1);
+  assert.deepEqual(visible.map(({ segment, seekFrame }) => ({ segment, seekFrame })), [
+    { segment: history[0], seekFrame: 120 },
+    { segment: history[1], seekFrame: 200 },
+  ]);
+  assert.equal(visible[0].left, 0);
+  assert.ok(Math.abs(visible[0].right - .3) < 1e-10);
+  assert.ok(Math.abs(visible[1].left - .8) < 1e-10);
+  assert.equal(visible[1].left, visible[1].right);
+  assert.deepEqual(visibleHumHistory(history, 100, 3, 1), []);
+  assert.deepEqual(visibleHumHistory(history, 0, 0, 1), []);
+});
+
+test('spectrogram projection remains bounded even when given an oversized history', () => {
+  const history = Array.from({ length: MAX_HUM_HISTORY_SEGMENTS + 5 }, (_, frame) =>
+    ({ moduleId: 'hum', startFrame: frame, endFrame: frame, frequencies: [] }));
+  const visible = visibleHumHistory(history, 100, 0, 2);
+  assert.equal(visible.length, MAX_HUM_HISTORY_SEGMENTS);
+  assert.equal(visible[0].seekFrame, 5);
 });
