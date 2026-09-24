@@ -16,13 +16,13 @@ import { readChainPresets, saveChainPreset, type ChainPreset } from '@/lib/chain
 import { EqCurve } from '@/components/EqCurve';
 import { anchoredLevelScaleCeiling, anchoredTimeViewStart } from '@/lib/spectrogram-scale';
 import { SPECTROGRAM_DATA_HEIGHT, SPECTROGRAM_FFT_SIZE } from '@/lib/spectrogram-resolution';
+import { DEFAULT_SPECTROGRAM_PALETTE, SPECTROGRAM_PALETTES, spectrogramColor, spectrogramColorCss, spectrogramLegendStops, type SpectrogramPaletteId } from '@/lib/spectrogram-palette';
 import { startWorkerJob, type WorkerJob } from '@/lib/worker-analysis';
 import type { LargeAnalysisResult } from '@/lib/large-analysis';
 import './index.css';
 
 type ViewTab = 'edit' | 'analyze' | 'project';
 type MonitorMode = 'current' | 'original';
-type SpectrogramPaletteId = 'cyan-orange' | 'field-restore' | 'magma' | 'grayscale';
 type Marker = { id: string; time: number; label: string; color: string };
 type Region = { id: string; start: number; end: number; label: string };
 type LargeSource = { file: File; metadata: WavMetadata; fingerprint: string; fileHandle?: FileSystemFileHandle };
@@ -51,52 +51,6 @@ const SPECTROGRAM_DISPLAY_HEIGHT = 110;
 const HUM_MARKER_COLORS = ['#d8ed55', '#75d7ef', '#ffaf78', '#d7a7fa'];
 const EMPTY_STATS: LoudnessStats = { truePeakDbtp: -Infinity, integratedLufs: -Infinity, loudnessRangeLu: 0, maxShortTermLufs: -Infinity };
 const EMPTY_SPECTROGRAM = { width: 480, height: 110, values: new Float32Array(480 * 110) };
-const SPECTROGRAM_PALETTES: Record<SpectrogramPaletteId, { label: string; description: string; stops: Array<[number, string]> }> = {
-  'cyan-orange': {
-    label: 'Cyan → orange',
-    description: 'Cool detail with warm peaks',
-    stops: [[0, '#071018'], [0.2, '#0a2943'], [0.4, '#075e78'], [0.58, '#09a4b1'], [0.73, '#7bd1be'], [0.86, '#e5cf72'], [1, '#f1873f']],
-  },
-  'field-restore': {
-    label: 'Field Restore',
-    description: 'Original blue, green, and amber scale',
-    stops: [[0, '#0e1b26'], [0.35, '#2d6570'], [0.55, '#547b7b'], [0.72, '#989a56'], [1, '#f0a12e']],
-  },
-  magma: {
-    label: 'Magma',
-    description: 'Dark violet through coral and gold',
-    stops: [[0, '#09071b'], [0.24, '#32115d'], [0.48, '#7b2382'], [0.7, '#d64d68'], [0.86, '#f58b4b'], [1, '#f8df8b']],
-  },
-  grayscale: {
-    label: 'Grayscale',
-    description: 'Neutral monochrome contrast',
-    stops: [[0, '#090d10'], [0.35, '#303b42'], [0.68, '#87949a'], [1, '#f2f4ed']],
-  },
-};
-
-function hexToRgb(hex: string) {
-  const value = Number.parseInt(hex.slice(1), 16);
-  return [value >> 16, (value >> 8) & 255, value & 255] as const;
-}
-
-function spectrogramColor(intensity: number, paletteId: SpectrogramPaletteId) {
-  const stops = SPECTROGRAM_PALETTES[paletteId].stops;
-  const value = Math.max(0, Math.min(1, intensity));
-  const upperIndex = stops.findIndex(([position]) => position >= value);
-  if (upperIndex <= 0) return hexToRgb(stops[0][1]);
-  const [lowerPosition, lowerHex] = stops[upperIndex - 1];
-  const [upperPosition, upperHex] = stops[upperIndex];
-  const amount = (value - lowerPosition) / Math.max(0.0001, upperPosition - lowerPosition);
-  const lower = hexToRgb(lowerHex);
-  const upper = hexToRgb(upperHex);
-  return lower.map((channel, index) => Math.round(channel + (upper[index] - channel) * amount)) as unknown as readonly [number, number, number];
-}
-
-function spectrogramColorCss(intensity: number, paletteId: SpectrogramPaletteId) {
-  const [red, green, blue] = spectrogramColor(intensity, paletteId);
-  return `rgb(${red}, ${green}, ${blue})`;
-}
-
 function formatTime(seconds: number, precise = false) {
   const safe = Math.max(0, seconds || 0);
   const minutes = Math.floor(safe / 60);
@@ -233,7 +187,7 @@ function App() {
   const [spectrogramLevelSpanDb, setSpectrogramLevelSpanDb] = useState(85);
   const [spectrogramPalette, setSpectrogramPalette] = useState<SpectrogramPaletteId>(() => {
     const saved = localStorage.getItem('field-restore-spectrogram-palette');
-    return saved && saved in SPECTROGRAM_PALETTES ? saved as SpectrogramPaletteId : 'cyan-orange';
+    return saved && saved in SPECTROGRAM_PALETTES ? saved as SpectrogramPaletteId : DEFAULT_SPECTROGRAM_PALETTE;
   });
   const [timeViewCenter, setTimeViewCenter] = useState<number | null>(null);
   const [largeSource, setLargeSource] = useState<LargeSource | null>(null);
@@ -1738,9 +1692,7 @@ function App() {
     context.textAlign = 'left';
     for (const top of [0, paneHeight]) {
       const gradient = context.createLinearGradient(0, top + 3, 0, top + paneHeight - 3);
-      gradient.addColorStop(0, spectrogramColorCss(1, spectrogramPalette));
-      gradient.addColorStop(0.5, spectrogramColorCss(0.5, spectrogramPalette));
-      gradient.addColorStop(1, spectrogramColorCss(0, spectrogramPalette));
+      for (const [position, color] of spectrogramLegendStops(spectrogramPalette)) gradient.addColorStop(position, color);
       context.fillStyle = gradient;
       context.fillRect(graphRight + 6, top + 3, 9, paneHeight - 6);
       context.strokeStyle = 'rgba(242, 244, 232, .35)';
@@ -1999,7 +1951,7 @@ function App() {
                           <span key={module.id}><i style={{ background: HUM_MARKER_COLORS[index % HUM_MARKER_COLORS.length] }} />{module.name}</span>)}</div>
                       </div>}
                       <div className="flex flex-wrap items-center justify-between gap-3 mt-3">
-                        <div className="flex items-center gap-2 text-[11px] text-muted-foreground"><span className="inline-block w-3 h-3 rounded-sm" style={{ background: spectrogramColorCss(0.08, spectrogramPalette) }} /> low energy <span className="inline-block w-3 h-3 rounded-sm ml-2" style={{ background: spectrogramColorCss(0.92, spectrogramPalette) }} /> high energy <span className="inline-block w-3 h-3 rounded-sm bg-[#ff8a4c] ml-2" /> playhead</div>
+                        <div className="flex items-center gap-2 text-[11px] text-muted-foreground"><span className="inline-block w-3 h-3 rounded-sm ring-1 ring-black/20" style={{ background: spectrogramColorCss(0.08, spectrogramPalette) }} /> low energy <span className="inline-block w-3 h-3 rounded-sm ml-2 ring-1 ring-black/20" style={{ background: spectrogramColorCss(0.92, spectrogramPalette) }} /> high energy <span className="inline-block w-3 h-3 rounded-sm bg-[#ff8a4c] ml-2" /> playhead</div>
                         <div className="flex items-center gap-2">
                           <div className="font-mono-value text-[11px]" data-testid="text-selection-time">{hasSelection ? <>{formatTime(selectionStart, true)} — {formatTime(selectionEnd, true)} <span className="text-muted-foreground">({(selectionEnd - selectionStart).toFixed(3)} s selected)</span></> : 'No selection · full track'}</div>
                           {hasSelection && <button type="button" className="quiet-btn !py-1 !px-2 !text-[10px]" onClick={clearSelection} title="Clear selection and return playback to the start" data-testid="button-clear-selection"><X size={12} /> Clear selection</button>}
