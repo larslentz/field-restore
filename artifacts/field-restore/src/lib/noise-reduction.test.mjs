@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { makeDefaultChain, makeModule, renderChain } from './edit-chain.ts';
 import { createStreamingEditChain } from './streaming-edit-chain.ts';
-import { parseChainPresets, saveChainPreset, readChainPresets } from './chain-presets.ts';
+import { parseChainPresets, preparePresetModules, saveChainPreset, readChainPresets } from './chain-presets.ts';
 import { measureNoiseProfile, NOISE_PROFILE_BANDS } from './noise-reduction.ts';
 import { generateFloat32WavHeader, parseWavMetadata } from './large-wav.ts';
 import { calculateFileSpectrogram } from './large-spectrogram.ts';
@@ -87,6 +87,41 @@ test('sampled hiss profile changes reduction, persists in presets, and matches s
   const suffix = resumed.process([input.slice(rate * 2)], rate * 2)[0];
   assert.deepEqual(Float32Array.from([...prefix, ...suffix]), sampled);
   assert.throws(() => renderChain([input], [{ ...edit, params: { ...edit.params, profile0: NaN } }], rate), /incomplete/);
+});
+
+test('preset samples only follow the verified original recording, including across reads', () => {
+  const input = signal(.06, .04);
+  const profile = measureNoiseProfile([signal(0, .04).slice(0, rate)], rate);
+  const edit = makeModule('noise', { params: {
+    mode: 'Sample', strength: 75, sampleStart: 0, sampleEnd: 1,
+    ...Object.fromEntries(profile.map((value, i) => [`profile${i}`, value])),
+  } });
+  const storage = new Map();
+  const adapter = { getItem: (key) => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value) };
+  saveChainPreset(adapter, 'From recording A', [edit], 'recording-a');
+  const saved = readChainPresets(adapter)[0];
+  const matching = preparePresetModules(saved, 'recording-a');
+  assert.equal(matching.discardedSamples, false);
+  assert.deepEqual(matching.modules[0].params, edit.params);
+  assert.deepEqual(renderChain([input], matching.modules, rate), renderChain([input], [edit], rate));
+  const stream = createStreamingEditChain(matching.modules, rate, length);
+  assert.deepEqual(stream.process([input], 0)[0], renderChain([input], [edit], rate)[0]);
+
+  for (const fingerprint of ['recording-b', null]) {
+    const changed = preparePresetModules(saved, fingerprint);
+    assert.equal(changed.discardedSamples, true);
+    assert.equal(changed.modules[0].params.mode, 'Automatic');
+    assert.equal(changed.modules[0].params.strength, 75);
+    assert.equal(changed.modules[0].params.profile0, undefined);
+    assert.equal(changed.modules[0].params.sampleStart, undefined);
+    assert.deepEqual(renderChain([input], changed.modules, rate),
+      renderChain([input], [{ ...edit, params: { mode: 'Automatic', strength: 75 } }], rate));
+  }
+  assert.deepEqual(saved.modules[0].params, edit.params, 'preset must not be mutated by loading elsewhere');
+  const legacy = parseChainPresets(JSON.stringify([{ name: 'Old sample', modules: [edit] }]))[0];
+  assert.equal(preparePresetModules(legacy, 'recording-a').modules[0].params.mode, 'Automatic');
+  const dormant = { ...edit, params: { ...edit.params, mode: 'Automatic' } };
+  assert.equal(preparePresetModules({ name: 'Dormant', modules: [dormant], sourceFingerprint: 'recording-a' }, 'recording-b').modules[0].params.profile0, undefined);
 });
 
 test('stereo-linked gains, uneven chunks, and restored state match full rendering', () => {

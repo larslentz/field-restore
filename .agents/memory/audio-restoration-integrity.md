@@ -57,8 +57,8 @@ Automatic broadband cleanup must be judged against wanted audio *inside noise*, 
 
 **How to apply:** Compare quiet and loud mixed tones, late short transients, stereo-only events, and steady hiss at common and high sample rates. For file-backed visual previews, a stateful adaptive floor needs the same source history as playback and export, not an independent short warmup for each visible slice.
 
-Noise-only samples are recording-specific. Keep the compact estimate tied to the original source audio rather than asking each render path to relearn it, and explicitly warn when a preset might be reused with a different source.
+Noise-only samples are recording-specific. Keep the compact estimate tied to the original source audio rather than asking each render path to relearn it. A chain preset may retain a sample only when its recorded source identity matches the active recording; missing identity is not a match. Project restoration is separate and retains samples after its source verification.
 
 **Why:** File-backed previews, worker analysis, seeks, and exports must use one identical noise estimate; silently treating a profile from another recording as universally applicable can soften wanted sounds.
 
-**How to apply:** Preserve the user's sample and mode when saving edits, but make cross-recording reuse visible and encourage recapturing a sample before export.
+**How to apply:** Preserve the user's sample and mode in saved edits; on unverified cross-recording preset use, discard the old estimate and switch to Automatic while offering recapture. Keep preview and export using the same resulting chain.

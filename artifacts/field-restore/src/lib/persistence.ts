@@ -5,6 +5,7 @@ export interface StoredProject {
   title: string;
   notes: string;
   sourceName: string;
+  sourceFingerprint?: string;
   sampleRate: number;
   modules: EditModule[];
   markers: { id: string; time: number; label: string; color: string }[];
@@ -53,8 +54,8 @@ export function loadProject(): StoredProject | null {
     return raw ? JSON.parse(raw) as StoredProject : null;
   } catch { return null; }
 }
-export function projectFromSource(source: AudioSource, modules: EditModule[], markers: StoredProject['markers'], regions: StoredProject['regions'], title: string, notes: string, trim?: [number, number]): StoredProject {
+export function projectFromSource(source: AudioSource, modules: EditModule[], markers: StoredProject['markers'], regions: StoredProject['regions'], title: string, notes: string, trim?: [number, number], sourceFingerprint?: string | null): StoredProject {
   const maxSamples = 1_000_000;
   const originalBase64 = source.channels[0]?.length <= maxSamples ? encodeChannels(source.channels) : undefined;
-  return { title, notes, sourceName: source.name, sampleRate: source.sampleRate, modules, markers, regions, trim, savedAt: new Date().toISOString(), originalBase64, originalLength: source.channels[0]?.length };
+  return { title, notes, sourceName: source.name, ...(sourceFingerprint ? { sourceFingerprint } : {}), sampleRate: source.sampleRate, modules, markers, regions, trim, savedAt: new Date().toISOString(), originalBase64, originalLength: source.channels[0]?.length };
 }

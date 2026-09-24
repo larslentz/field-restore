@@ -16,7 +16,7 @@ import { analyzeFileInitialHum, createStreamingEditChain } from '@/lib/streaming
 import { measureNoiseProfile, NOISE_PROFILE_BANDS, NOISE_SAMPLE_MAX_SECONDS, NOISE_SAMPLE_MIN_SECONDS } from '@/lib/noise-reduction';
 import { humAnalysisWindowSize, humPrefixFrames } from '@/lib/hum-removal';
 import { recordHumHistory, visibleHumHistory, type HumHistorySegment, type VisibleHumSegment } from '@/lib/hum-history';
-import { readChainPresets, saveChainPreset, type ChainPreset } from '@/lib/chain-presets';
+import { preparePresetModules, readChainPresets, saveChainPreset, type ChainPreset } from '@/lib/chain-presets';
 import { EqCurve } from '@/components/EqCurve';
 import { anchoredFrequencyViewMin, anchoredLevelScaleCeiling, anchoredTimeViewStart, frequencyScaleTicks, levelScaleTicks } from '@/lib/spectrogram-scale';
 import { SPECTROGRAM_DATA_HEIGHT, SPECTROGRAM_FFT_SIZE } from '@/lib/spectrogram-resolution';
@@ -213,6 +213,7 @@ function App() {
   });
   const [timeViewCenter, setTimeViewCenter] = useState<number | null>(null);
   const [largeSource, setLargeSource] = useState<LargeSource | null>(null);
+  const [sourceFingerprint, setSourceFingerprint] = useState<string | null>(null);
   const noiseCaptureOwnerRef = useRef<{ source: AudioSource; file: LargeSource | null; modules: EditModule[] } | null>(null);
   noiseCaptureOwnerRef.current = { source, file: largeSource, modules };
   const [largeSpectrograms, setLargeSpectrograms] = useState<SpectrogramView>({
@@ -531,6 +532,9 @@ function App() {
     setRegions([]);
     restoreTrim(record.trim, Number(record.source.duration ?? 0));
     setLargeSource(null);
+    setSourceFingerprint(null);
+    setUndoStack([]);
+    setRedoStack([]);
     setSource({ channels: [], sampleRate: record.source.sampleRate, duration: Number(record.source.duration ?? 0), name: record.source.name });
   }, [restoreTrim]);
 
@@ -538,6 +542,9 @@ function App() {
     if (!record.fileHandle || !verified) return false;
     const { file, metadata, fingerprint } = verified;
     setLargeSource({ file, metadata, fingerprint, fileHandle: record.fileHandle });
+    setSourceFingerprint(fingerprint);
+    setUndoStack([]);
+    setRedoStack([]);
     setSource({ channels: [], sampleRate: metadata.sampleRate, duration: metadata.frameCount / metadata.sampleRate, name: file.name });
     setModules(withoutLegacyDcModules(record.modules));
     setMarkers(record.markers);
@@ -560,12 +567,14 @@ function App() {
       setRestoredProject(true);
       const channels = decodeChannels(saved.originalBase64, saved.originalLength);
       const next: AudioSource = { channels, sampleRate: saved.sampleRate, duration: channels[0].length / saved.sampleRate, name: saved.sourceName };
+      setSourceFingerprint(saved.sourceFingerprint ?? null);
       setSource(next); setTitle(saved.title); setNotes(saved.notes); setModules(withoutLegacyDcModules(saved.modules)); setMarkers(saved.markers); setRegions(saved.regions); restoreTrim(saved.trim, next.duration);
       setSavedStatus(`Restored${saved.modules.some(isLegacyWind) ? ' · Wind Removal converted to automatic' : ''} ${new Date(saved.savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
     } else if (saved?.original?.length) {
       setRestoredProject(true);
       const channels = saved.original.map((channel) => new Float32Array(channel));
       const next: AudioSource = { channels, sampleRate: saved.sampleRate, duration: channels[0].length / saved.sampleRate, name: saved.sourceName };
+      setSourceFingerprint(saved.sourceFingerprint ?? null);
       setSource(next); setTitle(saved.title); setNotes(saved.notes); setModules(withoutLegacyDcModules(saved.modules)); setMarkers(saved.markers); setRegions(saved.regions); restoreTrim(saved.trim, next.duration);
       setSavedStatus(`Restored${saved.modules.some(isLegacyWind) ? ' · Wind Removal converted to automatic' : ''} ${new Date(saved.savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
     }
@@ -1143,7 +1152,7 @@ function App() {
   const saveCurrentChainPreset = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     try {
-      const updated = saveChainPreset(localStorage, presetName, modules);
+      const updated = saveChainPreset(localStorage, presetName, modules, sourceFingerprint);
       setChainPresets(updated);
       setPresetDialogOpen(false);
       setPresetName('');
@@ -1165,12 +1174,14 @@ function App() {
     } else if (value.startsWith('saved:')) {
       const preset = chainPresets[Number(value.slice(6))];
       if (!preset) return;
-      commitModules(withoutLegacyDcModules(preset.modules).map((module) => ({
+      const { modules: presetModules, discardedSamples } = preparePresetModules(preset, sourceFingerprint);
+      commitModules(presetModules.map((module) => ({
         ...module,
         id: `${module.type}-${crypto.randomUUID()}`,
         params: { ...module.params },
       })));
-      setSavedStatus(`Preset “${preset.name}” loaded${preset.modules.some(isLegacyWind) ? ' · Wind Removal converted to automatic' : ''} · project not saved`);
+      setSavedStatus(`Preset “${preset.name}” loaded${discardedSamples ? ' · noise sample removed' : ''}${preset.modules.some(isLegacyWind) ? ' · Wind Removal converted to automatic' : ''} · project not saved`);
+      if (discardedSamples) setError('This preset’s noise-only sample could not be verified for this recording. Noise Reduction is now Automatic. Select a noise-only passage and capture a new sample if you prefer.');
     }
   };
 
@@ -1265,6 +1276,7 @@ function App() {
       if (useFileBackedPath) {
         const next: AudioSource = { channels: [], sampleRate: metadata.sampleRate, duration: metadata.frameCount / metadata.sampleRate, name: file.name };
         setLargeSource({ file, metadata, fingerprint, fileHandle });
+        setSourceFingerprint(fingerprint);
         setSource(next);
         setLargeOriginalStats(EMPTY_STATS);
         setLargeCurrentStats(EMPTY_STATS);
@@ -1274,10 +1286,13 @@ function App() {
       } else {
         const parsed = metadata.format === 'FLAC' ? await decodeFlac(file, metadata) : parseWav(await file.arrayBuffer(), file.name);
         setLargeSource(null);
+        setSourceFingerprint(fingerprint);
         setSource(parsed);
         setSavedStatus('Imported · not saved');
       }
        const savedProject = pendingRelink ?? pendingPermission;
+       setUndoStack([]);
+       setRedoStack([]);
        const relinkMatches = savedProject
          && isVerifiedRelink(savedProject.source.fingerprint, fingerprint);
       if (relinkMatches) {
@@ -1416,7 +1431,7 @@ function App() {
       }
       return;
     }
-    const project = projectFromSource(source, modules, markers, regions, title, notes, trim ?? undefined);
+    const project = projectFromSource(source, modules, markers, regions, title, notes, trim ?? undefined, sourceFingerprint);
     const ok = saveProject(project);
     setSavedStatus(ok ? `Saved locally · ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 'Storage full · export a project report');
   };
@@ -1987,7 +2002,7 @@ function App() {
         <div className="px-3 mt-2 space-y-1">
           <button type="button" className="nav-item" onClick={() => void pickAudioFile()} data-testid="nav-import" aria-describedby="import-format-note"><FileAudio size={15} /><span className="nav-label">Import WAV or FLAC</span></button>
           <p id="import-format-note" className="px-3 pb-2 text-[10px] leading-relaxed text-[#abbdb4]">32-bit float WAV recommended for maximum editing headroom. Lossless FLAC is also supported; lossy formats are not.</p>
-          <button type="button" className="nav-item" onClick={() => { stopPlayback(); setRestoredProject(false); setLargeSource(null); setSource(createDemoAudio()); restoreTrim(null, 18); setModules(makeDefaultChain()); setSelection([4.1, 7.8]); setMarkers([]); setRegions([]); setTitle('Coastal dawn / north bluff'); setSavedStatus('Demo source loaded'); }} data-testid="nav-demo"><Waves size={15} /><span className="nav-label">Load demo source</span></button>
+          <button type="button" className="nav-item" onClick={() => { stopPlayback(); setRestoredProject(false); setLargeSource(null); setSourceFingerprint(null); setUndoStack([]); setRedoStack([]); setSource(createDemoAudio()); restoreTrim(null, 18); setModules(makeDefaultChain()); setSelection([4.1, 7.8]); setMarkers([]); setRegions([]); setTitle('Coastal dawn / north bluff'); setSavedStatus('Demo source loaded'); }} data-testid="nav-demo"><Waves size={15} /><span className="nav-label">Load demo source</span></button>
           <button type="button" className="nav-item" onClick={save} data-testid="nav-save"><Save size={15} /><span className="nav-label">Save locally</span></button>
           <button type="button" className="nav-item" onClick={(event) => openModal(event, 'export')} data-testid="nav-export"><Download size={15} /><span className="nav-label">Export</span></button>
         </div>
@@ -2359,7 +2374,7 @@ function ModuleCard({ module, humReadout, liveFrequencies, windActive, sampleRat
           <label className="block"><span className="field-label">Noise estimate</span><select className="select-field" value={p.mode === 'Sample' ? 'Sample' : 'Automatic'} onChange={(event) => updateParams(module.id, 'mode', event.target.value === 'Sample' ? 'Sample' : 'Automatic')} data-testid={`select-noise-mode-${module.id}`}><option value="Automatic">Automatic</option>{p.profile0 !== undefined && <option value="Sample">Noise-only sample</option>}</select></label>
           <button type="button" className="quiet-btn" onClick={() => void captureNoiseSample(module.id)} disabled={selectionLength < NOISE_SAMPLE_MIN_SECONDS || selectionLength > NOISE_SAMPLE_MAX_SECONDS} data-testid={`button-noise-sample-${module.id}`}>{p.profile0 !== undefined ? 'Replace sample with current selection' : 'Use current selection as noise-only sample'}</button>
           <p className="text-[11px] leading-relaxed text-muted-foreground">Select {NOISE_SAMPLE_MIN_SECONDS}–{NOISE_SAMPLE_MAX_SECONDS} seconds in the timeline. {p.mode === 'Sample' ? `Using ${formatTime(Number(p.sampleStart), true)}–${formatTime(Number(p.sampleEnd), true)} from the original recording. Switch to Automatic to compare; your sample stays available.` : 'Automatic estimation needs no sample.'}</p>
-          <p className="text-[11px] leading-relaxed text-[#ffaf78]" role="note">Choose a passage with only steady background noise. Speech, animal calls, music, or other wanted sounds in the sample may be mistaken for noise and softened throughout the recording. Samples saved in presets belong to the recording they came from; choose a new sample for a different recording.</p>
+           <p className="text-[11px] leading-relaxed text-[#ffaf78]" role="note">Choose a passage with only steady background noise. Speech, animal calls, music, or other wanted sounds in the sample may be mistaken for noise and softened throughout the recording. Preset samples are only reused when the original recording can be verified; otherwise this step switches to Automatic until you capture a new sample.</p>
          {numberInput('strength', 'Reduction strength', 0, 100, 1, '%', { resetValue: 50, wheelStep: 5 })}
           <p className="text-[11px] leading-relaxed text-muted-foreground" data-testid="noise-reduction-usage-note">This gentle, stereo-linked reduction is approximate and may soften wanted ambience. It will not repair clicks, isolate voices, or remove all noise. Compare with bypass before exporting.</p>
        </div>}
