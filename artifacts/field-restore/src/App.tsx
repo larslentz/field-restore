@@ -283,6 +283,7 @@ function App() {
   const viewDuration = duration / zoom;
   const selectionStart = Math.min(...selection);
   const selectionEnd = Math.max(...selection);
+  const hasSelection = selectionEnd - selectionStart >= 0.01;
   const selectionCenter = selectionStart + (selectionEnd - selectionStart) / 2 || duration / 2;
   const viewCenter = timeViewCenter ?? selectionCenter;
   const viewStart = zoom === 1 ? 0 : Math.max(0, Math.min(duration - viewDuration, viewCenter - viewDuration / 2));
@@ -324,8 +325,8 @@ function App() {
     : (largeSource ? largeSpectrograms : memorySpectrograms);
   const memoryOriginalStats = useMemo(() => largeSource ? EMPTY_STATS : analyzeLoudness(source.channels, source.sampleRate), [largeSource, source.channels, source.sampleRate]);
   const memoryCurrentStats = useMemo(() => largeSource ? EMPTY_STATS : analyzeLoudness(currentChannels, source.sampleRate), [currentChannels, largeSource, source.sampleRate]);
-  const memorySelectionOriginalStats = useMemo(() => largeSource ? EMPTY_STATS : analyzeLoudness(source.channels, source.sampleRate, selectionStart * source.sampleRate, selectionEnd * source.sampleRate), [largeSource, source.channels, selectionStart, selectionEnd, source.sampleRate]);
-  const memorySelectionCurrentStats = useMemo(() => largeSource ? EMPTY_STATS : analyzeLoudness(currentChannels, source.sampleRate, selectionStart * source.sampleRate, selectionEnd * source.sampleRate), [currentChannels, largeSource, selectionStart, selectionEnd, source.sampleRate]);
+  const memorySelectionOriginalStats = useMemo(() => largeSource || !hasSelection ? EMPTY_STATS : analyzeLoudness(source.channels, source.sampleRate, selectionStart * source.sampleRate, selectionEnd * source.sampleRate), [hasSelection, largeSource, source.channels, selectionStart, selectionEnd, source.sampleRate]);
+  const memorySelectionCurrentStats = useMemo(() => largeSource || !hasSelection ? EMPTY_STATS : analyzeLoudness(currentChannels, source.sampleRate, selectionStart * source.sampleRate, selectionEnd * source.sampleRate), [currentChannels, hasSelection, largeSource, selectionStart, selectionEnd, source.sampleRate]);
   const originalStats = largeSource ? largeOriginalStats : memoryOriginalStats;
   const currentStats = largeSource ? largeCurrentStats : memoryCurrentStats;
   const selectionOriginalStats = largeSource ? largeSelectionOriginalStats : memorySelectionOriginalStats;
@@ -508,7 +509,7 @@ function App() {
       dataLength: selectionFrames * metadata.frameSize,
       dataLengthBigInt: BigInt(selectionFrames * metadata.frameSize),
     };
-    setAnalysisStatus('Analyzing selection');
+    setAnalysisStatus(hasSelection ? 'Analyzing selection' : 'Analyzing original recording');
     setAnalysisProgress(0);
     setOperationPaused(false);
     const run = (request: Parameters<typeof startWorkerJob<LargeAnalysisResult>>[0]) => {
@@ -520,7 +521,11 @@ function App() {
       if (backgroundPausedRef.current) job.pause();
       return job.promise;
     };
-    void run({ kind: 'loudness', file, metadata: selectionMetadata, frameOffset: selectionStartFrame }).then((stats) => {
+    if (!hasSelection) {
+      setLargeSelectionOriginalStats(EMPTY_STATS);
+      setLargeSelectionCurrentStats(EMPTY_STATS);
+    }
+    const selectionAnalysis = hasSelection ? run({ kind: 'loudness', file, metadata: selectionMetadata, frameOffset: selectionStartFrame }).then((stats) => {
       if (generation !== analysisGenerationRef.current) throw new DOMException('Stale analysis.', 'AbortError');
       setLargeSelectionOriginalStats(stats);
       setAnalysisStatus('Analyzing processed selection');
@@ -538,6 +543,9 @@ function App() {
     }).then((stats) => {
       if (generation !== analysisGenerationRef.current) throw new DOMException('Stale analysis.', 'AbortError');
       setLargeSelectionCurrentStats(stats);
+    }) : Promise.resolve();
+    void selectionAnalysis.then(() => {
+      if (generation !== analysisGenerationRef.current) throw new DOMException('Stale analysis.', 'AbortError');
       setAnalysisStatus('Analyzing original recording');
       return run({ kind: 'loudness', file, metadata });
     }).then((stats) => {
@@ -560,7 +568,7 @@ function App() {
       if (generation === analysisGenerationRef.current) analysisGenerationRef.current += 1;
       analysisJobRef.current?.cancel();
     };
-  }, [largeSource, processingModules, selectionEnd, selectionStart]);
+  }, [hasSelection, largeSource, processingModules, selectionEnd, selectionStart]);
 
   const pauseBackgroundWork = useCallback(() => {
     backgroundPausedRef.current = true;
@@ -609,6 +617,14 @@ function App() {
     animationRef.current = null;
     setIsPlaying(false);
   }, []);
+  const clearSelection = () => {
+    stopPlayback();
+    if (zoom > 1) setTimeViewCenter(viewStart + viewDuration / 2);
+    selectionRef.current = [0, 0];
+    setSelection([0, 0]);
+    playHeadRef.current = 0;
+    setPlayHead(0);
+  };
 
   const startPlayback = useCallback((channels: Float32Array[], startPosition: number) => {
     const AudioContextClass = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
@@ -1353,8 +1369,10 @@ function App() {
 
     const selectedLeft = graphLeft + ((selectionStart - viewStart) / viewDuration) * graphWidth;
     const selectedRight = graphLeft + ((selectionEnd - viewStart) / viewDuration) * graphWidth;
-    context.fillStyle = 'rgba(214, 237, 85, .13)'; context.fillRect(selectedLeft, 0, Math.max(2, selectedRight - selectedLeft), graphBottom);
-    context.strokeStyle = 'rgba(216, 237, 85, .5)'; context.strokeRect(selectedLeft, 0, Math.max(2, selectedRight - selectedLeft), graphBottom);
+    if (hasSelection) {
+      context.fillStyle = 'rgba(214, 237, 85, .13)'; context.fillRect(selectedLeft, 0, selectedRight - selectedLeft, graphBottom);
+      context.strokeStyle = 'rgba(216, 237, 85, .5)'; context.strokeRect(selectedLeft, 0, selectedRight - selectedLeft, graphBottom);
+    }
     const headX = graphLeft + ((playHead - viewStart) / viewDuration) * graphWidth; context.strokeStyle = '#ff8a4c'; context.lineWidth = 2; context.beginPath(); context.moveTo(headX, 0); context.lineTo(headX, graphBottom); context.stroke();
 
     context.fillStyle = '#f2f4e8'; context.font = '10px "Space Mono", monospace'; context.textAlign = 'left';
@@ -1404,7 +1422,7 @@ function App() {
     context.textAlign = 'center';
     context.fillText('LEVEL (dB)', 0, 0);
     context.restore();
-  }, [activeTab, playHead, selectionEnd, selectionStart, sourceChannelCount, spectrogramCeilingDb, spectrogramFloorDb, spectrogramMaxFrequency, spectrogramMinFrequency, spectrogramPalette, spectrograms, viewDuration, viewStart]);
+  }, [activeTab, hasSelection, playHead, selectionEnd, selectionStart, sourceChannelCount, spectrogramCeilingDb, spectrogramFloorDb, spectrogramMaxFrequency, spectrogramMinFrequency, spectrogramPalette, spectrograms, viewDuration, viewStart]);
 
   useEffect(() => {
     const keyHandler = (event: KeyboardEvent) => {
@@ -1566,12 +1584,12 @@ function App() {
               {activeTab === 'project' ? (
                 <ProjectPanel title={title} notes={notes} setTitle={setTitle} setNotes={setNotes} source={source} sourceChannelCount={sourceChannelCount} save={() => void save()} setModal={setModal} />
               ) : activeTab === 'analyze' ? (
-                <AnalyzePanel originalStats={originalStats} currentStats={currentStats} selectionOriginalStats={selectionOriginalStats} selectionCurrentStats={selectionCurrentStats} duration={duration} selection={[selectionStart, selectionEnd]} modules={modules} />
+                <AnalyzePanel originalStats={originalStats} currentStats={currentStats} selectionOriginalStats={selectionOriginalStats} selectionCurrentStats={selectionCurrentStats} duration={duration} selection={[selectionStart, selectionEnd]} hasSelection={hasSelection} modules={modules} />
               ) : (
                 <>
                   <section className="panel instrument-grid" aria-label="Spectrogram editor">
                     <div className="panel-header spectrogram-panel-header">
-                      <div className="flex items-center gap-3"><Waves size={17} color="hsl(var(--primary))" /><div><div className="section-title">Spectrogram / selection</div><div className="text-[10px] text-muted-foreground mt-0.5">Drag to select · scroll/drag the bottom time axis · scroll/drag the left frequency axis · scroll/drag the right dB axis</div></div></div>
+                      <div className="flex items-center gap-3"><Waves size={17} color="hsl(var(--primary))" /><div><div className="section-title">Spectrogram / selection</div><div className="text-[10px] text-muted-foreground mt-0.5">Drag to select · double-click to clear · scroll/drag the bottom time axis · scroll/drag the left frequency axis · scroll/drag the right dB axis</div></div></div>
                       <div className="spectrogram-header-actions">
                         <div className="spectrogram-source-control" aria-label="Spectrogram source">
                           <span className="spectrogram-source-caption">Viewing</span>
@@ -1588,12 +1606,15 @@ function App() {
                     </div>
                     <div className="panel-body !pt-3">
                       <div className="waveform-wrap">
-                        <canvas ref={canvasRef} className="waveform-canvas" onPointerDown={onCanvasPointerDown} onPointerMove={onCanvasPointerMove} onPointerUp={onCanvasPointerUp} onPointerCancel={onCanvasPointerUp} aria-label={`${spectrogramSource === 'original' ? 'Original recording' : 'Edited signal'} interactive spectrogram from ${spectrogramMinFrequency / 1000} to ${spectrogramMaxFrequency / 1000} kilohertz with ${spectrogramFloorDb} to ${spectrogramCeilingDb} decibel scale`} data-testid="canvas-spectrogram" data-request-id={spectrogramRequestId} data-result-id={spectrogramResultId} />
+                        <canvas ref={canvasRef} className="waveform-canvas" onPointerDown={onCanvasPointerDown} onPointerMove={onCanvasPointerMove} onPointerUp={onCanvasPointerUp} onPointerCancel={onCanvasPointerUp} onDoubleClick={(event) => { event.preventDefault(); if (hasSelection) clearSelection(); }} aria-label={`${spectrogramSource === 'original' ? 'Original recording' : 'Edited signal'} interactive spectrogram from ${spectrogramMinFrequency / 1000} to ${spectrogramMaxFrequency / 1000} kilohertz with ${spectrogramFloorDb} to ${spectrogramCeilingDb} decibel scale`} data-testid="canvas-spectrogram" data-request-id={spectrogramRequestId} data-result-id={spectrogramResultId} />
                         <div className={`spectrogram-source-label ${spectrogramSource}`} data-testid="label-spectrogram-source">{spectrogramSource === 'original' ? 'Original recording' : 'Edited signal · chain applied'}</div>
                       </div>
                       <div className="flex flex-wrap items-center justify-between gap-3 mt-3">
                         <div className="flex items-center gap-2 text-[11px] text-muted-foreground"><span className="inline-block w-3 h-3 rounded-sm" style={{ background: spectrogramColorCss(0.08, spectrogramPalette) }} /> low energy <span className="inline-block w-3 h-3 rounded-sm ml-2" style={{ background: spectrogramColorCss(0.92, spectrogramPalette) }} /> high energy <span className="inline-block w-3 h-3 rounded-sm bg-[#ff8a4c] ml-2" /> playhead</div>
-                        <div className="font-mono-value text-[11px]" data-testid="text-selection-time">{formatTime(selectionStart, true)} — {formatTime(selectionEnd, true)} <span className="text-muted-foreground">({(selectionEnd - selectionStart).toFixed(3)} s selected)</span></div>
+                        <div className="flex items-center gap-2">
+                          <div className="font-mono-value text-[11px]" data-testid="text-selection-time">{hasSelection ? <>{formatTime(selectionStart, true)} — {formatTime(selectionEnd, true)} <span className="text-muted-foreground">({(selectionEnd - selectionStart).toFixed(3)} s selected)</span></> : 'No selection · full track'}</div>
+                          {hasSelection && <button type="button" className="quiet-btn !py-1 !px-2 !text-[10px]" onClick={clearSelection} title="Clear selection and return playback to the start" data-testid="button-clear-selection"><X size={12} /> Clear selection</button>}
+                        </div>
                       </div>
                     </div>
                   </section>
@@ -1608,8 +1629,8 @@ function App() {
                          <StatsGrid stats={currentStats} />
                        </div>
                        <div className="signal-stats-group">
-                         <div className="signal-stats-label">Selection · {formatTime(selectionEnd - selectionStart)}</div>
-                         <StatsGrid stats={selectionCurrentStats} />
+                         <div className="signal-stats-label">{hasSelection ? `Selection · ${formatTime(selectionEnd - selectionStart)}` : 'No selection'}</div>
+                          {hasSelection ? <StatsGrid stats={selectionCurrentStats} /> : <div className="stat-grid"><div className="stat-cell text-[11px] text-muted-foreground">No selection · full track playback</div></div>}
                        </div>
                      </div>
                      <div className="signal-stats-note"><Info size={12} />Local BS.1770-style estimates with 4× true-peak interpolation; not certified meter readings.</div>
@@ -1733,7 +1754,7 @@ function ModuleCard({ module, sampleRate, index, total, collapsed, updateModule,
   </div>;
 }
 
-function AnalyzePanel({ originalStats, currentStats, selectionOriginalStats, selectionCurrentStats, duration, selection, modules }: { originalStats: LoudnessStats; currentStats: LoudnessStats; selectionOriginalStats: LoudnessStats; selectionCurrentStats: LoudnessStats; duration: number; selection: [number, number]; modules: EditModule[] }) {
+function AnalyzePanel({ originalStats, currentStats, selectionOriginalStats, selectionCurrentStats, duration, selection, hasSelection, modules }: { originalStats: LoudnessStats; currentStats: LoudnessStats; selectionOriginalStats: LoudnessStats; selectionCurrentStats: LoudnessStats; duration: number; selection: [number, number]; hasSelection: boolean; modules: EditModule[] }) {
   return (
     <div className="space-y-4">
       <section className="panel">
@@ -1750,8 +1771,8 @@ function AnalyzePanel({ originalStats, currentStats, selectionOriginalStats, sel
             <StatsGrid stats={currentStats} />
           </div>
           <div>
-            <div className="eyebrow mb-2">Current / selection · {formatTime(selection[1] - selection[0])}</div>
-            <StatsGrid stats={selectionCurrentStats} />
+            <div className="eyebrow mb-2">{hasSelection ? `Current / selection · ${formatTime(selection[1] - selection[0])}` : 'Current / no selection'}</div>
+            {hasSelection ? <StatsGrid stats={selectionCurrentStats} /> : <div className="text-[11px] text-muted-foreground">Select a range to analyze it.</div>}
           </div>
         </div>
       </section>
@@ -1766,7 +1787,7 @@ function AnalyzePanel({ originalStats, currentStats, selectionOriginalStats, sel
         </div>
         <div className="panel-body grid md:grid-cols-2 gap-5">
           <SignalComparison title={`Full file · ${formatTime(duration)}`} original={originalStats} current={currentStats} />
-          <SignalComparison title={`Selection · ${formatTime(selection[1] - selection[0])}`} original={selectionOriginalStats} current={selectionCurrentStats} />
+          {hasSelection ? <SignalComparison title={`Selection · ${formatTime(selection[1] - selection[0])}`} original={selectionOriginalStats} current={selectionCurrentStats} /> : <div className="text-[11px] text-muted-foreground">No selection · full track playback</div>}
         </div>
       </section>
 
