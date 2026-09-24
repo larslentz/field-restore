@@ -124,6 +124,7 @@ export function makeRestorationReport(input: RestorationReportInput) {
     exportedAt: input.exportedAt ?? new Date().toISOString(),
     limitations: [
       'Automatic DC offset removal is always applied before editable modules.',
+      'Previously saved projects may sound different when reprocessed with the updated DC correction; original recordings remain untouched.',
       'Adaptive hum detection is conservative: it can miss interference or affect wanted steady tones.',
       'Automatic wind/rumble detection may miss interference or reduce wanted low sounds.',
       'Edits are conservative sample-domain approximations in this browser build.',
@@ -133,8 +134,9 @@ export function makeRestorationReport(input: RestorationReportInput) {
 }
 
 const dbToAmp = (db: number) => 10 ** (db / 20);
-export const AUTOMATIC_DC_BLOCKER_POLE = 0.995;
 
+/** A 2 Hz corner settles a constant offset within a second while preserving 20 Hz bass. */
+export const automaticDcBlockerPole = (sampleRate: number) => Math.exp(-2 * Math.PI * 2 / sampleRate);
 interface Biquad {
   b0: number;
   b1: number;
@@ -217,10 +219,11 @@ export function applyModule(input: ChannelData, module: EditModule, sampleRate: 
   } else if (module.type === 'dc') {
     output.forEach((channel) => {
       if (p.mode === 'Auto') {
+        const pole = automaticDcBlockerPole(sampleRate);
         let previousInput = 0;
         let previousOutput = 0;
         channel.forEach((sample, i) => {
-          const value = sample - previousInput + AUTOMATIC_DC_BLOCKER_POLE * previousOutput;
+          const value = sample - previousInput + pole * previousOutput;
           previousInput = sample;
           previousOutput = value;
           channel[i] = Math.max(-1, Math.min(1, value));

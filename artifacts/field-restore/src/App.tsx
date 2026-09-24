@@ -35,7 +35,7 @@ type SpectrogramView = {
   durationSeconds: number;
 };
 
-const MODULE_TYPES = ['gain', 'fade', 'low-rumble', 'hum', 'wind', 'bring-back-low-end', 'ambient'] as const;
+const MODULE_TYPES = ['gain', 'fade', 'low-rumble', 'hum', 'wind', 'bring-back-low-end', 'region', 'ambient'] as const;
 type AddModuleType = typeof MODULE_TYPES[number];
 const moduleOptionLabel = (type: AddModuleType) => type === 'low-rumble' ? 'Low Rumble Removal' : type === 'bring-back-low-end' ? 'Bring Back the Low End' : MODULE_LABELS[type];
 const SPECTROGRAM_LEFT = 48;
@@ -170,6 +170,7 @@ function App() {
   const [title, setTitle] = useState('Coastal dawn / north bluff');
   const [notes, setNotes] = useState('Low-tide ambience. Keep the distant tern call at 07:48 intact.');
   const [savedStatus, setSavedStatus] = useState('Local session');
+  const [restoredProject, setRestoredProject] = useState(false);
   const [error, setError] = useState('');
   const [isDraggingWav, setIsDraggingWav] = useState(false);
   useEffect(() => {
@@ -453,6 +454,7 @@ function App() {
   const statisticsUnavailableLabel = analysisStatus ? 'Calculating statistics…' : 'Statistics unavailable';
 
   const stageSavedProject = useCallback((record: ProjectRecord) => {
+    setRestoredProject(true);
     setProjectId(null);
     setTitle(record.source.name.replace(/\.wav$/i, ''));
     setNotes('');
@@ -476,6 +478,7 @@ function App() {
     setTitle(record.title);
     setNotes(record.notes);
     setProjectId(record.id);
+    setRestoredProject(true);
     setPendingPermission(null);
     setPendingRelink(null);
     setSelection([0, Math.min(5, metadata.frameCount / metadata.sampleRate)]);
@@ -486,11 +489,13 @@ function App() {
   useEffect(() => {
     const saved = loadProject();
     if (saved?.originalBase64?.length && saved.originalLength) {
+      setRestoredProject(true);
       const channels = decodeChannels(saved.originalBase64, saved.originalLength);
       const next: AudioSource = { channels, sampleRate: saved.sampleRate, duration: channels[0].length / saved.sampleRate, name: saved.sourceName };
       setSource(next); setTitle(saved.title); setNotes(saved.notes); setModules(withoutLegacyDcModules(saved.modules)); setMarkers(saved.markers); setRegions(saved.regions); restoreTrim(saved.trim, next.duration);
       setSavedStatus(`Restored${saved.modules.some(isLegacyWind) ? ' · Wind / Rumble Removal converted to automatic' : ''} ${new Date(saved.savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
     } else if (saved?.original?.length) {
+      setRestoredProject(true);
       const channels = saved.original.map((channel) => new Float32Array(channel));
       const next: AudioSource = { channels, sampleRate: saved.sampleRate, duration: channels[0].length / saved.sampleRate, name: saved.sourceName };
       setSource(next); setTitle(saved.title); setNotes(saved.notes); setModules(withoutLegacyDcModules(saved.modules)); setMarkers(saved.markers); setRegions(saved.regions); restoreTrim(saved.trim, next.duration);
@@ -1163,6 +1168,7 @@ function App() {
        const relinkMatches = savedProject
          && isVerifiedRelink(savedProject.source.fingerprint, fingerprint);
       if (relinkMatches) {
+        setRestoredProject(true);
         setModules(withoutLegacyDcModules(savedProject.modules));
         setMarkers(savedProject.markers);
         setRegions(savedProject.regions);
@@ -1174,6 +1180,7 @@ function App() {
         setPendingRelink(null);
          setSavedStatus(`Source relinked · project restored${savedProject.modules.some(isLegacyWind) ? ' · Wind / Rumble Removal converted to automatic' : ''}`);
       } else {
+         setRestoredProject(false);
         setModules(makeDefaultChain()); setMarkers([]); setRegions([]); setTitle(file.name.replace(/\.wav$/i, '')); setProjectId(null);
          restoreTrim(null, metadata.frameCount / metadata.sampleRate);
       }
@@ -1834,7 +1841,7 @@ function App() {
         <div className="px-3 mt-5 sidebar-title eyebrow text-[#91a69d]">Session</div>
         <div className="px-3 mt-2 space-y-1">
           <button type="button" className="nav-item" onClick={() => void pickWavFile()} data-testid="nav-import"><FileAudio size={15} /><span className="nav-label">Import WAV</span></button>
-          <button type="button" className="nav-item" onClick={() => { stopPlayback(); setLargeSource(null); setSource(createDemoAudio()); restoreTrim(null, 18); setModules(makeDefaultChain()); setSelection([4.1, 7.8]); setMarkers([]); setRegions([]); setTitle('Coastal dawn / north bluff'); setSavedStatus('Demo source loaded'); }} data-testid="nav-demo"><Waves size={15} /><span className="nav-label">Load demo source</span></button>
+          <button type="button" className="nav-item" onClick={() => { stopPlayback(); setRestoredProject(false); setLargeSource(null); setSource(createDemoAudio()); restoreTrim(null, 18); setModules(makeDefaultChain()); setSelection([4.1, 7.8]); setMarkers([]); setRegions([]); setTitle('Coastal dawn / north bluff'); setSavedStatus('Demo source loaded'); }} data-testid="nav-demo"><Waves size={15} /><span className="nav-label">Load demo source</span></button>
           <button type="button" className="nav-item" onClick={save} data-testid="nav-save"><Save size={15} /><span className="nav-label">Save locally</span></button>
           <button type="button" className="nav-item" onClick={(event) => openModal(event, 'export')} data-testid="nav-export"><Download size={15} /><span className="nav-label">Export</span></button>
         </div>
@@ -1849,7 +1856,7 @@ function App() {
         <header className={`topbar ${analysisStatus || spectrogramStatus || operationStatus ? 'topbar-processing' : ''}`}>
           <div className="topbar-recording flex items-center gap-3 min-w-0">
             <button type="button" className="icon-btn md:hidden" aria-label="Open navigation" data-testid="button-menu"><Menu size={16} /></button>
-            <div className="topbar-recording-copy min-w-0"><div className="eyebrow">Current recording</div><div className="font-semibold text-[14px] mt-1 truncate max-w-[340px]" data-testid="text-source-name">{source.name}</div></div>
+          <div className="topbar-recording-copy min-w-0"><div className="eyebrow">Current recording</div><div className="font-semibold text-[14px] mt-1 truncate max-w-[340px]" data-testid="text-source-name">{source.name}</div>{restoredProject && <div className="text-[10px] text-[#b7c8bb] max-w-[340px]" role="note">Reprocessing saved projects may sound different with improved DC correction. Your original recording is untouched.</div>}</div>
             <span className="chip hidden sm:inline-flex"><span className="w-1.5 h-1.5 bg-[#d8ed55] rounded-full" />{savedStatus}</span>
              <span className="dc-status hidden lg:inline-flex" data-testid="status-dc-removal"><Check size={12} />DC offset removed automatically</span>
           </div>
@@ -2269,7 +2276,7 @@ function ProjectPanel({ title, notes, setTitle, setNotes, source, sourceChannelC
 }
 
 function ExportModal({ onClose, onExport, title }: { onClose: () => void; onExport: () => void; title: string }) {
-  return <div className="modal-backdrop" role="presentation"><div className="modal-card" role="dialog" aria-modal="true" aria-labelledby="export-title"><div className="modal-header"><div><div className="eyebrow">Output / local files</div><h2 id="export-title" className="text-[17px] font-bold mt-1">Export restoration</h2></div><button type="button" className="icon-btn" onClick={onClose} aria-label="Close export dialog" data-testid="button-close-export"><X size={16} /></button></div><div className="modal-body space-y-4"><div className="p-3 bg-[hsl(var(--muted))] rounded text-[12px]"><div className="font-semibold">{title || 'Untitled project'}</div><div className="text-muted-foreground mt-1">Two files will be created: a valid WAV and a machine-readable restoration report.</div></div><div className="block p-3 border border-[hsl(var(--primary))] bg-[hsl(var(--muted))] rounded"><strong className="text-[12px]">Archival WAV · 32-bit IEEE float</strong><span className="block text-[11px] text-muted-foreground mt-1">Preserves floating-point precision, source sample rate, channel count, and stereo relationship. No normalization or dither is applied.</span></div><div className="text-[11px] text-muted-foreground border-l-2 border-[#ff8a4c] pl-3">Exports use enabled modules only. The original recording is never replaced.</div></div><div className="modal-footer"><button type="button" className="quiet-btn" onClick={onClose} data-testid="button-cancel-export">Cancel</button><button type="button" className="primary-btn" onClick={onExport} data-testid="button-confirm-export"><Download size={14} /> Export 32-bit float WAV + report</button></div></div></div>;
+  return <div className="modal-backdrop" role="presentation"><div className="modal-card" role="dialog" aria-modal="true" aria-labelledby="export-title"><div className="modal-header"><div><div className="eyebrow">Output / local files</div><h2 id="export-title" className="text-[17px] font-bold mt-1">Export restoration</h2></div><button type="button" className="icon-btn" onClick={onClose} aria-label="Close export dialog" data-testid="button-close-export"><X size={16} /></button></div><div className="modal-body space-y-4"><div className="p-3 bg-[hsl(var(--muted))] rounded text-[12px]"><div className="font-semibold">{title || 'Untitled project'}</div><div className="text-muted-foreground mt-1">Two files will be created: a valid WAV and a machine-readable restoration report.</div></div><div className="block p-3 border border-[hsl(var(--primary))] bg-[hsl(var(--muted))] rounded"><strong className="text-[12px]">Archival WAV · 32-bit IEEE float</strong><span className="block text-[11px] text-muted-foreground mt-1">Preserves floating-point precision, source sample rate, channel count, and stereo relationship. No normalization or dither is applied.</span></div><div className="text-[11px] text-muted-foreground border-l-2 border-[#ff8a4c] pl-3">Previously saved projects may sound different when reprocessed with the improved DC correction. The original recording stays untouched and is never replaced.</div></div><div className="modal-footer"><button type="button" className="quiet-btn" onClick={onClose} data-testid="button-cancel-export">Cancel</button><button type="button" className="primary-btn" onClick={onExport} data-testid="button-confirm-export"><Download size={14} /> Export 32-bit float WAV + report</button></div></div></div>;
 }
 
 function HelpModal({ onClose }: { onClose: () => void }) {

@@ -1,5 +1,5 @@
 import type { ChannelData } from './audio';
-import { AUTOMATIC_DC_BLOCKER_POLE, analyzeInitialHum, isFixedLowRumble, type EditModule } from './edit-chain';
+import { automaticDcBlockerPole, analyzeInitialHum, isFixedLowRumble, type EditModule } from './edit-chain';
 import { WindProcessor, windLevel, type WindSnapshot } from './wind-reduction';
 import { HumProcessor, humPrefixFrames, type HumSnapshot } from './hum-removal';
 import { readFrames, type WavMetadata } from './large-wav';
@@ -77,6 +77,7 @@ export class StreamingEditChain {
   private readonly state: ModuleState[];
   private readonly modules: EditModule[];
   private readonly sampleRate: number;
+  private readonly dcPole: number;
   private readonly totalFrames: number;
   private readonly initialHumFrequencies: number[][];
   private nextFrame: number;
@@ -92,6 +93,7 @@ export class StreamingEditChain {
   ) {
     this.modules = modules;
     this.sampleRate = sampleRate;
+    this.dcPole = automaticDcBlockerPole(sampleRate);
     this.totalFrames = totalFrames;
     this.initialHumFrequencies = initialHumFrequencies;
     this.state = modules.map(() => ({
@@ -207,7 +209,7 @@ export class StreamingEditChain {
           if (p.mode === 'Auto') {
             // A leaky DC blocker, unlike a chunk mean, has continuous history.
             const x = finite(sample);
-            const y = x - state.dcX[c] + AUTOMATIC_DC_BLOCKER_POLE * state.dcY[c];
+            const y = x - state.dcX[c] + this.dcPole * state.dcY[c];
             state.dcX[c] = x; state.dcY[c] = y; value = y;
           } else value = sample - (Number(p.amount) || 0) / 1000;
           channel[i] = clamp(finite(value));

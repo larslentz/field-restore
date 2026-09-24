@@ -4,6 +4,8 @@ import { analyzeInitialHum, humOpeningReadout, makeProcessingChain, renderChain 
 import { analyzeFileInitialHum, createStreamingEditChain } from './streaming-edit-chain.ts';
 import { humAnalysisWindowSize } from './hum-removal.ts';
 import { generateFloat32WavHeader, parseWavMetadata } from './large-wav.ts';
+import { readFrames, writeFloat32WavChunks } from './large-wav.ts';
+import { encodeWav, parseWav } from './audio.ts';
 
 const sampleRate = 48000;
 const totalFrames = 12000;
@@ -76,10 +78,97 @@ test('file-backed processing includes one automatic DC stage after legacy normal
   assert.equal(processingModules.filter((module) => module.type === 'dc').length, 1);
   assert.equal(processingModules[0].id, 'automatic-dc-removal');
 
-  const constant = [Float32Array.from({ length: 4096 }, () => 0.2)];
-  const output = createStreamingEditChain(processingModules, sampleRate, 4096).process(constant, 0);
+  const constant = [Float32Array.from({ length: sampleRate }, () => 0.2)];
+  const output = createStreamingEditChain(processingModules, sampleRate, sampleRate).process(constant, 0);
   const tailMean = output[0].slice(-512).reduce((sum, value) => sum + value, 0) / 512;
   assert.ok(Math.abs(tailMean) < 0.001, `expected DC-corrected tail, received ${tailMean}`);
+});
+
+function measuredTone(samples, rate, frequency, start, frames) {
+  let sine = 0; let cosine = 0;
+  for (let i = start; i < start + frames; i++) {
+    const phase = 2 * Math.PI * frequency * i / rate;
+    sine += samples[i] * Math.sin(phase);
+    cosine += samples[i] * Math.cos(phase);
+  }
+  return 2 * Math.hypot(sine, cosine) / frames;
+}
+
+test('automatic DC removal preserves 20–100 Hz with and without offset at common sample rates, mono and stereo', () => {
+  for (const rate of [44100, 48000, 96000, 192000]) {
+    const count = rate * 2;
+    for (const channelCount of [1, 2]) {
+      const constant = Array.from({ length: channelCount }, (_, channel) =>
+        Float32Array.from({ length: count }, () => channel ? -.32 : .23));
+      const removed = createStreamingEditChain(makeProcessingChain([]), rate, count).process(constant, 0);
+      for (let channel = 0; channel < channelCount; channel++) {
+        assert.ok(Math.abs(removed[channel][count - 1]) < .001, `${rate} Hz channel ${channel}: constant DC remains`);
+      }
+      for (const offset of [0, .18]) {
+        for (const frequency of [20, 50, 100]) {
+          const input = Array.from({ length: channelCount }, (_, channel) =>
+            Float32Array.from({ length: count }, (_, i) =>
+              (channel ? -.7 : 1) * offset + .4 * Math.sin(2 * Math.PI * frequency * i / rate + channel * .4)));
+          const memory = renderChain(input, makeProcessingChain([]), rate);
+          const streaming = createStreamingEditChain(makeProcessingChain([]), rate, count).process(input, 0);
+          for (let channel = 0; channel < channelCount; channel++) {
+            const level = measuredTone(memory[channel], rate, frequency, rate, rate);
+            assert.ok(Math.abs(level / .4 - 1) < .01, `${rate} Hz, ${frequency} Hz, offset ${offset}, channel ${channel}: ${level}`);
+            const mean = memory[channel].subarray(rate).reduce((sum, sample) => sum + sample, 0) / rate;
+            assert.ok(Math.abs(mean) < .001, `${rate} Hz, DC residual ${mean}`);
+            assert.deepEqual(streaming[channel], memory[channel], 'render paths must produce identical samples');
+          }
+        }
+      }
+    }
+  }
+});
+
+test('DC startup and near-full-scale input remain bounded with continuous state at chunk and loop boundaries', () => {
+  const rate = 48000, count = rate * 2, modules = makeProcessingChain([]);
+  const input = [Float32Array.from({ length: count }, (_, i) => .03 + .94 * Math.sin(2 * Math.PI * 20 * i / rate))];
+  const whole = renderChain(input, modules, rate)[0];
+  assert.ok(Math.abs(whole[0] - input[0][0]) < 1e-7);
+  assert.ok(whole.every((value) => Number.isFinite(value) && Math.abs(value) <= 1));
+  const processor = createStreamingEditChain(modules, rate, count);
+  const joined = new Float32Array(count);
+  let loopState;
+  const loopAt = 4093 * 3;
+  for (let start = 0; start < count; start += 4093) {
+    if (start === loopAt) loopState = processor.snapshot();
+    joined.set(processor.process([input[0].slice(start, start + 4093)], start)[0], start);
+    if (start) assert.equal(joined[start] - joined[start - 1], whole[start] - whole[start - 1]);
+  }
+  assert.deepEqual(joined, whole);
+  processor.restore(loopState);
+  assert.deepEqual(processor.process([input[0].slice(loopAt, loopAt + 4093)], loopAt)[0],
+    whole.slice(loopAt, loopAt + 4093));
+  const seek = rate;
+  const seekProcessor = createStreamingEditChain(modules, rate, count);
+  seekProcessor.process([input[0].slice(0, seek)], 0);
+  assert.deepEqual(seekProcessor.process([input[0].slice(seek, seek + 4093)], seek)[0],
+    whole.slice(seek, seek + 4093));
+});
+
+test('file-backed chunked export matches in-memory output and preserves source bytes', async () => {
+  const rate = 44100, count = rate * 2, modules = makeProcessingChain([]);
+  const input = [0, 1].map((channel) => Float32Array.from({ length: count }, (_, i) =>
+    (channel ? -.12 : .17) + .45 * Math.sin(2 * Math.PI * 20 * i / rate + channel * .3)));
+  const file = encodeWav({ channels: input, sampleRate: rate, duration: 2, name: 'original.wav' });
+  const originalBytes = new Uint8Array(await file.arrayBuffer());
+  const metadata = await parseWavMetadata(file);
+  const processor = createStreamingEditChain(modules, rate, count);
+  const parts = [];
+  const stream = { write: async (part) => { parts.push(part); }, close: async () => {}, abort: async () => {} };
+  await writeFloat32WavChunks(stream, {
+    channels: 2, sampleRate: rate, frameCount: count, chunkFrames: 4093,
+    readFrames: (start, frames) => readFrames(file, metadata, start, frames),
+    processFrames: (channels, start) => processor.process(channels, start),
+  });
+  const exported = parseWav(await new Blob(parts).arrayBuffer()).channels;
+  const memory = renderChain(input, modules, rate);
+  for (let channel = 0; channel < 2; channel++) assert.deepEqual(exported[channel], memory[channel]);
+  assert.deepEqual(new Uint8Array(await file.arrayBuffer()), originalBytes);
 });
 
 function toneLevel(samples, frequency, from = 0) {

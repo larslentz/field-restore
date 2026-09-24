@@ -51,10 +51,11 @@ test('legacy DC modules are absorbed into exactly one automatic baseline stage',
 });
 
 test('in-memory processing includes automatic DC correction', () => {
-  const input = [Float32Array.from({ length: 4096 }, () => 0.25)];
+  const input = [Float32Array.from({ length: 48000 }, () => 0.25)];
   const output = renderChain(input, makeProcessingChain([]), 48000);
   const tailMean = output[0].slice(-512).reduce((sum, value) => sum + value, 0) / 512;
   assert.ok(Math.abs(tailMean) < 0.001, `expected DC-corrected tail, received ${tailMean}`);
+  assert.ok(Math.abs(output[0][0] - input[0][0]) < 1e-7, 'the filter must not invent a startup step');
 });
 
 test('restoration reports record automatic DC correction without editable DC modules', () => {
@@ -72,4 +73,5 @@ test('restoration reports record automatic DC correction without editable DC mod
   assert.equal(report.automaticDcOffsetRemoval, true);
   assert.equal(report.modules.some((module) => module.type === 'dc'), false);
   assert.match(report.limitations[0], /Automatic DC offset removal/);
+  assert.match(report.limitations[1], /Previously saved projects may sound different.*original recordings remain untouched/);
 });
