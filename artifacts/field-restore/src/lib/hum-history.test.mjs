@@ -47,6 +47,25 @@ test('spectrogram projection clips retained visits but never fills gaps or scans
   assert.deepEqual(visibleHumHistory(history, 0, 0, 1), []);
 });
 
+test('replaying a hum dot does not draw copies over the same heard positions', () => {
+  const history = [
+    { moduleId: 'hum', startFrame: 100, endFrame: 200, frequencies: [60] },
+    { moduleId: 'hum', startFrame: 150, endFrame: 230, frequencies: [60] },
+    { moduleId: 'hum', startFrame: 225, endFrame: 250, frequencies: [60] },
+    { moduleId: 'hum', startFrame: 300, endFrame: 320, frequencies: [60] },
+    { moduleId: 'hum', startFrame: 160, endFrame: 180, frequencies: [] },
+    { moduleId: 'other-hum', startFrame: 160, endFrame: 180, frequencies: [60] },
+  ];
+  const visible = visibleHumHistory(history, 100, 0, 4);
+  assert.deepEqual(visible.map(({ segment, seekFrame, right }) =>
+    ({ moduleId: segment.moduleId, frequencies: segment.frequencies, seekFrame, endFrame: right * 400 })), [
+    { moduleId: 'hum', frequencies: [60], seekFrame: 100, endFrame: 250 },
+    { moduleId: 'hum', frequencies: [], seekFrame: 160, endFrame: 180 },
+    { moduleId: 'other-hum', frequencies: [60], seekFrame: 160, endFrame: 180 },
+    { moduleId: 'hum', frequencies: [60], seekFrame: 300, endFrame: 320 },
+  ]);
+});
+
 test('spectrogram projection remains bounded even when given an oversized history', () => {
   const history = Array.from({ length: MAX_HUM_HISTORY_SEGMENTS + 5 }, (_, frame) =>
     ({ moduleId: 'hum', startFrame: frame, endFrame: frame, frequencies: [] }));

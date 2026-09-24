@@ -2123,7 +2123,7 @@ function App() {
                         {trim && (trimStart > 0 || trimEnd < duration) && <button type="button" className="quiet-btn !py-1 !px-2 !text-[10px]" onClick={() => { stopPlayback(); restoreTrim(null, duration); setSavedStatus('Unsaved local changes'); }} data-testid="button-reset-trim">Reset trim</button>}
                       </div>
                       {spectrogramSource === 'current' && historySegments.length > 0 && <div className="hum-overlay-note" data-testid="hum-overlay-note">
-                        <span><strong>Hum Removal playback history — not Noise Reduction.</strong> Colored solid lines show where a hum filter was confirmed during playback; gray dashed lines mean no filter was confirmed. Dots mark heard positions you can select to seek. Unmarked gaps have no retained confirmation.</span>
+                        <span><strong>Hum Removal playback history.</strong> Colored solid lines show where a hum filter was confirmed during playback; gray dashed lines mean no filter was confirmed. Dots mark heard positions you can select to seek. Unmarked gaps have no retained confirmation.</span>
                         <div className="hum-overlay-legend">{processingModules.filter((module) => historySegments.some((segment) => segment.moduleId === module.id)).map((module, index) =>
                           <span key={module.id}><i style={{ background: HUM_MARKER_COLORS[index % HUM_MARKER_COLORS.length] }} />{module.name}</span>)}</div>
                       </div>}
