@@ -48,7 +48,7 @@ test('new bring back the low end matches the default low-shelf preset with an in
   assert.equal(addedModule.params.mode, 'low-shelf');
   assert.equal(addedModule.params.frequency, 55);
   assert.equal(addedModule.params.q, 0.4);
-  assert.equal(addedModule.params.gain, 3);
+  assert.equal(addedModule.params.gain, 2);
   assert.deepEqual(addedModule.params, presetModule.params);
   assert.notEqual(addedModule.id, presetModule.id);
 });

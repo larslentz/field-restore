@@ -40,7 +40,7 @@ export const makeLowRumbleRemoval = (): EditModule => {
 };
 
 export const makeBringBackLowEnd = (): EditModule =>
-  makeModule('eq', { name: 'Bring Back the Low End', params: { mode: 'low-shelf', frequency: 55, q: 0.4, gain: 3 } });
+  makeModule('eq', { name: 'Bring Back the Low End', params: { mode: 'low-shelf', frequency: 55, q: 0.4, gain: 2 } });
 
 export const makeDefaultChain = (): EditModule[] => [
   makeModule('gain', { name: 'Gain', params: { db: 0 } }),
