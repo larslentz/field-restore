@@ -17,6 +17,7 @@ export interface PlaybackRangePlan {
   hasSelection: boolean;
   emptySelection: boolean;
   timelineEnd: number;
+  timelineLoopStart: number;
   timelineStart: number;
   timelineStartFrame: number;
 }
@@ -49,13 +50,21 @@ export function createPlaybackRangePlan({
   return {
     bufferEndFrame,
     bufferLoopEnd: hasSelection ? selectedBufferDuration : (bufferEndFrame - bufferStartFrame) / sampleRate,
-    bufferLoopStart: hasSelection ? 0 : timelineStart - bufferStartFrame / sampleRate,
+    bufferLoopStart: 0,
     bufferStartFrame,
     bufferStartOffset: hasSelection ? 0 : timelineStart - bufferStartFrame / sampleRate,
     hasSelection,
     emptySelection,
     timelineEnd,
+    timelineLoopStart: bufferStartFrame / sampleRate,
     timelineStart,
     timelineStartFrame: hasSelection ? bufferStartFrame : Math.max(trimStart, Math.min(trimEnd - 1, Math.floor(timelineStart * sampleRate))),
   };
+}
+
+export function playbackPositionAtElapsed(plan: PlaybackRangePlan, elapsed: number, loop: boolean): number {
+  const firstPass = plan.timelineEnd - plan.timelineStart;
+  if (!loop || elapsed < firstPass) return Math.min(plan.timelineEnd, plan.timelineStart + elapsed);
+  const repeatDuration = plan.timelineEnd - plan.timelineLoopStart;
+  return plan.timelineLoopStart + ((elapsed - firstPass) % repeatDuration);
 }

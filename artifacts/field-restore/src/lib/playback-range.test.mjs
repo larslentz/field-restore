@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createPlaybackRangePlan } from './playback-range.ts';
+import { createPlaybackRangePlan, playbackPositionAtElapsed } from './playback-range.ts';
 
 const base = {
   duration: 10,
@@ -24,7 +24,9 @@ test('looped selection repeats only the selected buffer', () => {
   assert.equal(plan.bufferLoopStart, 0);
   assert.equal(plan.bufferLoopEnd, 2);
   assert.equal(plan.timelineStart, 2);
+  assert.equal(plan.timelineLoopStart, 2);
   assert.equal(plan.timelineEnd, 4);
+  assert.equal(playbackPositionAtElapsed(plan, 2.5, true), 2.5);
 });
 
 test('right-to-left selection normalizes to the same boundaries', () => {
@@ -52,11 +54,17 @@ test('a click without a range seeks into the full recording', () => {
   assert.equal(plan.timelineEnd, 10);
 });
 
-test('a full-file loop preserves its nonzero seek frame as the loop boundary', () => {
+test('seeking to a hum marker does not shorten a full-file loop', () => {
   const plan = createPlaybackRangePlan({ ...base, loop: true, selection: [6, 6], startPosition: 8.5 });
   assert.equal(plan.hasSelection, false);
   assert.equal(plan.timelineStart, 8.5);
   assert.equal(plan.timelineStartFrame, 8500);
+  assert.equal(plan.bufferLoopStart, 0);
+  assert.equal(plan.timelineLoopStart, 0);
+  assert.equal(playbackPositionAtElapsed(plan, 1, true), 9.5);
+  assert.equal(playbackPositionAtElapsed(plan, 1.5, true), 0);
+  assert.equal(playbackPositionAtElapsed(plan, 2, true), 0.5);
+  assert.equal(playbackPositionAtElapsed(plan, 2, false), 10);
 });
 
 test('current and original monitor sources receive identical timeline boundaries', () => {
@@ -71,11 +79,15 @@ test('edited trim clips full-track playback and offsets the buffer without chang
   assert.equal(edited.bufferStartFrame, 2000);
   assert.equal(edited.bufferEndFrame, 8000);
   assert.equal(edited.bufferStartOffset, 4);
-  assert.equal(edited.bufferLoopStart, 4);
+  assert.equal(edited.bufferLoopStart, 0);
   assert.equal(edited.bufferLoopEnd, 6);
+  assert.equal(edited.timelineLoopStart, 2);
   assert.equal(edited.timelineEnd, 8);
+  assert.equal(playbackPositionAtElapsed(edited, 2, true), 2);
+  assert.equal(playbackPositionAtElapsed(edited, 3, true), 3);
   assert.equal(original.bufferStartFrame, 0);
   assert.equal(original.bufferEndFrame, 10000);
+  assert.equal(original.timelineLoopStart, 0);
 });
 
 test('edited selection intersects trim and an outside selection is marked unplayable', () => {

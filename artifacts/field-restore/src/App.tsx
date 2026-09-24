@@ -5,7 +5,7 @@ import { createDemoAudio, downloadBlob, encodeWav, parseWav, type AudioSource } 
 import { decodeChannels, loadProject, projectFromSource, saveProject } from '@/lib/persistence';
 import { AUTOMATIC_DC_REMOVAL, analyzeInitialHum, humOpeningReadout, isFixedLowRumble, isLegacyWind, makeBringBackLowEnd, makeDefaultChain, makeFadeIn, makeFadeOut, makeLowRumbleRemoval, makeModule, makeProcessingChain, makeRestorationReport, MODULE_LABELS, renderChain, toggleEditableModules, withFadeRange, withoutLegacyDcModules, type EditModule, type HumScanState } from '@/lib/edit-chain';
 import { analyzeLoudness, type LoudnessStats } from '@/lib/loudness';
-import { createPlaybackRangePlan } from '@/lib/playback-range';
+import { createPlaybackRangePlan, playbackPositionAtElapsed } from '@/lib/playback-range';
 import { calculateSpectrogram, type SpectrogramData } from '@/lib/spectrogram';
 import { withLargeExportLeaveWarning, writeFloat32WavChunks } from '@/lib/large-wav';
 import { audioRange, fingerprintAudio, parseAudioMetadata, readAudioFrames, type AudioMetadata } from '@/lib/source-audio';
@@ -919,8 +919,7 @@ function App() {
     const tick = () => {
       if (audioSourceRef.current !== node) return;
       const elapsed = (context.currentTime - startedAt) * rate;
-      const next = Math.min(plan.timelineEnd, plan.timelineStart + elapsed);
-      const position = loop ? plan.timelineStart + (elapsed % Math.max(.01, plan.timelineEnd - plan.timelineStart)) : next;
+      const position = playbackPositionAtElapsed(plan, elapsed, loop);
       playHeadRef.current = position;
       setPlayHead(position);
       if (monitor === 'current' && context.state === 'running' && context.currentTime > startedAt) {
@@ -958,13 +957,11 @@ function App() {
     const { file, metadata } = largeSource;
     const plan = createPlaybackRangePlan({ duration, loop, sampleRate: metadata.sampleRate, selection: selectionRef.current, startPosition, totalFrames: metadata.frameCount, trim: monitor === 'current' ? trimRef.current ?? undefined : undefined });
     if (plan.emptySelection) { setError('Selection is outside the edited range. Clear the selection or move it inside the kept range to play.'); return; }
-    const rangeStart = plan.bufferStartFrame;
     const rangeEnd = plan.bufferEndFrame;
     let nextFrame = plan.timelineStartFrame;
-    const loopStartFrame = nextFrame;
+    const loopStartFrame = plan.bufferStartFrame;
     let scheduledAt = context.currentTime + 0.08;
     const startedAt = scheduledAt;
-    const playbackStart = nextFrame / metadata.sampleRate;
     const chunkFrames = Math.max(4096, Math.floor(metadata.sampleRate * 4));
     const recentStart = Math.max(0, nextFrame - Math.floor(metadata.sampleRate * 2));
     const needsAlignedHumHistory = monitor === 'current' && processingModules.some((module) =>
@@ -972,9 +969,10 @@ function App() {
     const needsFullNoiseHistory = monitor === 'current' && processingModules.some((module) =>
       module.enabled && module.type === 'noise' && Number(module.params.strength) > 0);
     const humWindow = humAnalysisWindowSize(metadata.sampleRate);
-    const warmStart = monitor === 'current'
+    const seekWarmStart = monitor === 'current'
       ? (trimRef.current?.[0] || needsFullNoiseHistory ? 0 : needsAlignedHumHistory ? Math.floor(recentStart / humWindow) * humWindow : recentStart)
       : nextFrame;
+    const warmStart = loop ? Math.min(seekWarmStart, loopStartFrame) : seekWarmStart;
     setOperationStatus('Buffering playback');
     let initialHumFrequencies: number[][];
     try {
@@ -998,9 +996,10 @@ function App() {
         if (windEvents.length > 512) windEvents.splice(0, windEvents.length - 512);
         setLiveWind({ source, chain: processingModules, events: [...windEvents] });
       });
-    if (monitor === 'current' && warmStart < nextFrame) {
+    const loopStateFrame = loop ? loopStartFrame : nextFrame;
+    if (monitor === 'current' && warmStart < loopStateFrame) {
       try {
-        await warmFileProcessor(file, metadata, processor, warmStart, nextFrame, undefined, () => playbackSessionRef.current !== session);
+        await warmFileProcessor(file, metadata, processor, warmStart, loopStateFrame, undefined, () => playbackSessionRef.current !== session);
       } catch (caught) {
         if (playbackSessionRef.current === session) {
           setOperationStatus('');
@@ -1010,7 +1009,20 @@ function App() {
       }
     }
     if (playbackSessionRef.current !== session) return;
+    // Save the processing state at the repeat boundary, before warming to the initial seek.
     const loopState = processor.snapshot();
+    if (monitor === 'current' && loopStateFrame < nextFrame) {
+      try {
+        await warmFileProcessor(file, metadata, processor, loopStateFrame, nextFrame, undefined, () => playbackSessionRef.current !== session);
+      } catch (caught) {
+        if (playbackSessionRef.current === session) {
+          setOperationStatus('');
+          if ((caught as Error).name !== 'AbortError') setError(caught instanceof Error ? caught.message : 'Unable to buffer playback.');
+        }
+        return;
+      }
+    }
+    if (playbackSessionRef.current !== session) return;
     const pending: Array<{ at: number; frame: number; moduleId: string; frequencies: number[] }> = [];
     let audible = processor.trackedHumFrequencies();
     setLiveHum({ source, chain: processingModules, frequencies: audible });
@@ -1084,10 +1096,7 @@ function App() {
     const tick = () => {
       if (playbackSessionRef.current !== session) return;
       const elapsed = Math.max(0, context.currentTime - startedAt) * rate;
-      const span = Math.max(0.01, plan.timelineEnd - (plan.hasSelection ? plan.timelineStart : playbackStart));
-      const position = loop
-        ? (plan.hasSelection ? plan.timelineStart : playbackStart) + (elapsed % span)
-        : Math.min(plan.timelineEnd, playbackStart + elapsed);
+      const position = playbackPositionAtElapsed(plan, elapsed, loop);
       playHeadRef.current = position;
       setPlayHead(position);
       if (monitor === 'current' && context.currentTime >= startedAt) {
