@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, ty
 import { Activity, ArrowDown, ArrowUp, Check, ChevronDown, CircleHelp, Download, FileAudio, FolderOpen, Gauge, GripVertical, Info, Keyboard, Layers3, LoaderCircle, Menu, PanelRightOpen, Pause, Play, Plus, Redo2, RotateCcw, Save, Settings, Square, Trash2, Undo2, Waves, X, ZoomIn, ZoomOut } from 'lucide-react';
 import { createDemoAudio, downloadBlob, encodeWav, parseWav, type AudioSource } from '@/lib/audio';
 import { decodeChannels, loadProject, projectFromSource, saveProject } from '@/lib/persistence';
-import { AUTOMATIC_DC_REMOVAL, analyzeInitialHum, humOpeningReadout, isFixedLowRumble, isLegacyWind, makeBringBackLowEnd, makeDefaultChain, makeLowRumbleRemoval, makeModule, makeProcessingChain, makeRestorationReport, MODULE_LABELS, renderChain, toggleEditableModules, withoutLegacyDcModules, type EditModule, type HumScanState } from '@/lib/edit-chain';
+import { AUTOMATIC_DC_REMOVAL, analyzeInitialHum, humOpeningReadout, isFixedLowRumble, isLegacyWind, makeBringBackLowEnd, makeDefaultChain, makeFadeIn, makeFadeOut, makeLowRumbleRemoval, makeModule, makeProcessingChain, makeRestorationReport, MODULE_LABELS, renderChain, toggleEditableModules, withFadeRange, withoutLegacyDcModules, type EditModule, type HumScanState } from '@/lib/edit-chain';
 import { analyzeLoudness, type LoudnessStats } from '@/lib/loudness';
 import { createPlaybackRangePlan } from '@/lib/playback-range';
 import { calculateSpectrogram, type SpectrogramData } from '@/lib/spectrogram';
@@ -35,9 +35,9 @@ type SpectrogramView = {
   durationSeconds: number;
 };
 
-const MODULE_TYPES = ['gain', 'fade', 'low-rumble', 'hum', 'wind', 'bring-back-low-end', 'region', 'ambient'] as const;
+const MODULE_TYPES = ['gain', 'fade-in', 'fade-out', 'low-rumble', 'hum', 'wind', 'bring-back-low-end', 'region', 'ambient'] as const;
 type AddModuleType = typeof MODULE_TYPES[number];
-const moduleOptionLabel = (type: AddModuleType) => type === 'low-rumble' ? 'Low Rumble Removal' : type === 'bring-back-low-end' ? 'Bring Back the Low End' : MODULE_LABELS[type];
+const moduleOptionLabel = (type: AddModuleType) => type === 'low-rumble' ? 'Low Rumble Removal' : type === 'bring-back-low-end' ? 'Bring Back the Low End' : type === 'fade-in' ? 'Fade In' : type === 'fade-out' ? 'Fade Out' : MODULE_LABELS[type];
 const SPECTROGRAM_LEFT = 48;
 const SPECTROGRAM_RIGHT = 72;
 const SPECTROGRAM_BOTTOM = 28;
@@ -83,13 +83,22 @@ function formatLevel(value: number, unit: 'dBTP' | 'LUFS' | 'LU') {
   return `${value > 0 ? '+' : ''}${value.toFixed(1)} ${unit}`;
 }
 
+function fadeControlDirection(module: EditModule): 'in' | 'out' | 'both' {
+  const p = module.params;
+  if (p.direction === 'in' || p.direction === 'out') return p.direction;
+  if (module.name === 'Fade In' && Number(p.out) === 0) return 'in';
+  if (module.name === 'Fade Out' && Number(p.in) === 0) return 'out';
+  return 'both';
+}
+
 function moduleSummary(module: EditModule, humReadout?: ReturnType<typeof humOpeningReadout>) {
   const p = module.params;
   return module.type === 'gain' ? `${p.db} dB`
     : module.type === 'hum' ? humReadout?.summary ?? `${p.mode} · ${p.frequency} Hz`
       : module.type === 'wind' ? (isFixedLowRumble(module) ? `HPF ${p.cutoff} Hz` : `Auto · ${p.detection ?? 'Medium'} detection · ${p.removal ?? 'Medium'} removal`)
         : module.type === 'eq' && p.mode === 'low-shelf' ? `${p.gain} dB · ${p.frequency} Hz`
-          : module.type === 'fade' ? (Number(p.in) > 0 ? `${p.in} s in` : `${p.out} s out`)
+          : module.type === 'fade' ? (fadeControlDirection(module) === 'in' ? `${p.in} s in`
+            : fadeControlDirection(module) === 'out' ? `${p.out} s out` : `${p.in} s in · ${p.out} s out`)
             : module.type;
 }
 
@@ -316,7 +325,11 @@ function App() {
     setCommittedTrim(next);
   }, []);
 
-  const processingModules = useMemo(() => makeProcessingChain(modules), [modules]);
+  const processingModules = useMemo(() => withFadeRange(
+    makeProcessingChain(modules),
+    Math.floor((committedTrim?.[0] ?? 0) * source.sampleRate),
+    Math.min(Math.floor(source.duration * source.sampleRate), Math.ceil((committedTrim?.[1] ?? source.duration) * source.sampleRate)),
+  ), [modules, committedTrim, source.sampleRate, source.duration]);
   useEffect(() => {
     humHistoryRef.current = [];
     humHistoryOwnerRef.current = null;
@@ -1108,7 +1121,7 @@ function App() {
   };
   const updateParams = (id: string, key: string, value: number | string) => commitModules(modules.map((module) => module.id === id ? { ...module, params: { ...module.params, [key]: value } } : module));
   const addModule = (type: AddModuleType) => {
-    const module = type === 'low-rumble' ? makeLowRumbleRemoval() : type === 'bring-back-low-end' ? makeBringBackLowEnd() : makeModule(type);
+    const module = type === 'low-rumble' ? makeLowRumbleRemoval() : type === 'bring-back-low-end' ? makeBringBackLowEnd() : type === 'fade-in' ? makeFadeIn() : type === 'fade-out' ? makeFadeOut() : makeModule(type);
     commitModules([...modules, module]);
     setModuleMenu(false);
   };
@@ -2204,11 +2217,15 @@ function HumHistoryView({ modules, segments, sampleRate, duration, onSeek }: {
 
 function ModuleCard({ module, humReadout, liveFrequencies, windActive, sampleRate, index, total, collapsed, updateModule, updateParams, deleteModule, duplicateModule, moveModule }: { module: EditModule; humReadout?: ReturnType<typeof humOpeningReadout>; liveFrequencies?: number[]; windActive?: boolean | null; sampleRate: number; index: number; total: number; collapsed: boolean; updateModule: (id: string, patch: Partial<EditModule>) => void; updateParams: (id: string, key: string, value: number | string) => void; deleteModule: (id: string) => void; duplicateModule: (module: EditModule) => void; moveModule: (index: number, direction: -1 | 1) => void }) {
   const p = module.params;
+  const fadeDirection = fadeControlDirection(module);
   const numberInput = (key: string, label: string, min: number, max: number, step: number, suffix = '', options?: { resetValue?: number; wheelStep?: number }) => <RangeControl label={label} value={Number(p[key])} min={min} max={max} step={step} suffix={suffix} resetValue={options?.resetValue} wheelStep={options?.wheelStep} onChange={(value) => updateParams(module.id, key, value)} testId={`range-${module.type}-${key}`} />;
   return <div className={`module-card ${module.enabled ? '' : 'bypassed'}`} data-testid={`card-module-${module.id}`}><div className="module-head"><span className="module-index">{String(index + 2).padStart(2, '0')}</span><span className="module-dot" /><button type="button" className="module-name text-left" onDoubleClick={() => { const name = window.prompt('Rename module', module.name); if (name?.trim()) updateModule(module.id, { name: name.trim() }); }} title="Double-click to rename" data-testid={`button-rename-${module.id}`}>{module.name}</button><span className="module-summary">{moduleSummary(module, humReadout)}</span><button type="button" className={`icon-btn !h-6 !min-w-6 ${module.enabled ? 'text-[hsl(var(--primary))]' : ''}`} onClick={() => updateModule(module.id, { enabled: !module.enabled })} aria-label={`${module.enabled ? 'Bypass' : 'Enable'} ${module.name}`} aria-pressed={module.enabled} data-testid={`button-bypass-${module.id}`}><Check size={13} /></button><button type="button" className="icon-btn !h-6 !min-w-6" onClick={() => moveModule(index, -1)} disabled={index === 0} aria-label="Move module up" data-testid={`button-up-${module.id}`}><ArrowUp size={12} /></button><button type="button" className="icon-btn !h-6 !min-w-6" onClick={() => moveModule(index, 1)} disabled={index === total - 1} aria-label="Move module down" data-testid={`button-down-${module.id}`}><ArrowDown size={12} /></button><button type="button" className="icon-btn !h-6 !min-w-6" onClick={() => duplicateModule(module)} aria-label={`Duplicate ${module.name}`} data-testid={`button-duplicate-${module.id}`}><Layers3 size={12} /></button><button type="button" className="icon-btn !h-6 !min-w-6" onClick={() => deleteModule(module.id)} aria-label={`Delete ${module.name}`} data-testid={`button-delete-${module.id}`}><Trash2 size={12} /></button></div>
     {!collapsed && <div className="module-controls">
       {module.type === 'gain' && numberInput('db', 'Gain', -30, 30, .1, ' dB', { resetValue: 0, wheelStep: 1 })}
-      {module.type === 'fade' && <div className="grid grid-cols-2 gap-3">{numberInput('in', 'Fade in', 0, 10, .1, ' s')}{numberInput('out', 'Fade out', 0, 10, .1, ' s')}</div>}
+      {module.type === 'fade' && <div className={fadeDirection === 'both' ? 'grid grid-cols-2 gap-3' : 'space-y-2'}>
+        {fadeDirection !== 'out' && numberInput('in', 'Fade in', 0, 20, .1, ' s')}
+        {fadeDirection !== 'in' && numberInput('out', 'Fade out', 0, 20, .1, ' s')}
+      </div>}
       {module.type === 'eq' && p.mode === 'low-shelf' && <div className="space-y-2">
         <div className="grid grid-cols-3 gap-2">{numberInput('frequency', 'Low shelf', 20, 240, .5, ' Hz')}{numberInput('q', 'Q', .1, 2, .01)}{numberInput('gain', 'Gain', -12, 12, .1, ' dB')}</div>
         <p className="text-[11px] leading-relaxed text-muted-foreground" data-testid="bring-back-low-end-usage-note">Only use this filter if you previously used the Low Rumble Removal filter. This one attempts to bring back a bit of low end to smooth and compensate for what was removed with Low Rumble Removal. Adjust values to somewhat match what was used in the Low Rumble Removal filter, or adjust to taste.</p>

@@ -42,14 +42,20 @@ export const makeLowRumbleRemoval = (): EditModule => {
 export const makeBringBackLowEnd = (): EditModule =>
   makeModule('eq', { name: 'Bring Back the Low End', params: { mode: 'low-shelf', frequency: 55, q: 0.4, gain: 2 } });
 
+export const makeFadeIn = (): EditModule =>
+  makeModule('fade', { name: 'Fade In', params: { in: 7, out: 0, direction: 'in' } });
+
+export const makeFadeOut = (): EditModule =>
+  makeModule('fade', { name: 'Fade Out', params: { in: 0, out: 7, direction: 'out' } });
+
 export const makeDefaultChain = (): EditModule[] => [
   makeModule('gain', { name: 'Gain', params: { db: 0 } }),
   makeLowRumbleRemoval(),
   makeModule('hum', { name: 'Hum Removal', params: { mode: 'Adaptive', frequency: 60, reduction: 12 } }),
   makeModule('wind'),
   makeBringBackLowEnd(),
-  makeModule('fade', { name: 'Fade In', params: { in: 7, out: 0 } }),
-  makeModule('fade', { name: 'Fade Out', params: { in: 0, out: 7 } }),
+  makeFadeIn(),
+  makeFadeOut(),
   makeModule('gain', { name: 'Gain', params: { db: 0 } }),
 ];
 
@@ -94,6 +100,22 @@ export const makeProcessingChain = (modules: EditModule[]): EditModule[] => [
   AUTOMATIC_DC_REMOVAL,
   ...withoutLegacyDcModules(modules),
 ];
+
+export const withFadeRange = (modules: EditModule[], startFrame: number, endFrame: number): EditModule[] =>
+  modules.map((module) => module.type === 'fade'
+    ? { ...module, params: { ...module.params, fadeStartFrame: startFrame, fadeEndFrame: endFrame } }
+    : module);
+
+export function fadeGainAtFrame(params: EditModule['params'], frame: number, sampleRate: number, totalFrames: number): number {
+  const start = Number(params.fadeStartFrame ?? 0);
+  const end = Number(params.fadeEndFrame ?? totalFrames);
+  const fadeIn = params.direction === 'out' ? 0 : Math.floor(Number(params.in) * sampleRate);
+  const fadeOut = params.direction === 'in' ? 0 : Math.floor(Number(params.out) * sampleRate);
+  let factor = 1;
+  if (fadeIn > 0 && frame < start + fadeIn) factor *= Math.max(0, (frame - start) / fadeIn);
+  if (fadeOut > 0 && frame > end - fadeOut) factor *= Math.max(0, (end - frame) / fadeOut);
+  return factor;
+}
 
 export const toggleEditableModules = (modules: EditModule[]): EditModule[] => {
   if (modules.length === 0) return modules;
@@ -215,14 +237,8 @@ export function applyModule(input: ChannelData, module: EditModule, sampleRate: 
     const amp = dbToAmp(Number(p.db) || 0);
     output.forEach((channel) => channel.forEach((sample, i) => { channel[i] = Math.max(-1, Math.min(1, sample * amp)); }));
   } else if (module.type === 'fade') {
-    const fadeIn = Math.floor(Number(p.in) * sampleRate);
-    const fadeOut = Math.floor(Number(p.out) * sampleRate);
     output.forEach((channel) => channel.forEach((sample, i) => {
-      let factor = 1;
-      const absoluteFrame = frameOffset + i;
-      if (fadeIn > 0 && absoluteFrame < fadeIn) factor *= absoluteFrame / fadeIn;
-      if (fadeOut > 0 && absoluteFrame > totalFrames - fadeOut) factor *= Math.max(0, (totalFrames - absoluteFrame) / fadeOut);
-      channel[i] = sample * factor;
+      channel[i] = sample * fadeGainAtFrame(p, frameOffset + i, sampleRate, totalFrames);
     }));
   } else if (module.type === 'dc') {
     output.forEach((channel) => {

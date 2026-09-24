@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { analyzeInitialHum, humOpeningReadout, makeProcessingChain, renderChain } from './edit-chain.ts';
+import { analyzeInitialHum, humOpeningReadout, makeFadeIn, makeFadeOut, makeProcessingChain, renderChain, withFadeRange } from './edit-chain.ts';
 import { analyzeFileInitialHum, createStreamingEditChain } from './streaming-edit-chain.ts';
 import { humAnalysisWindowSize } from './hum-removal.ts';
 import { generateFloat32WavHeader, parseWavMetadata } from './large-wav.ts';
@@ -53,6 +53,32 @@ test('in-memory and file-backed routes produce equivalent restored audio', () =>
     greatestDifference <= 1e-6,
     `expected route outputs within tolerance, greatest difference was ${greatestDifference}`,
   );
+});
+
+test('in-memory and streamed fades follow edited Start and End markers, including across chunks', () => {
+  const rate = 10;
+  const frames = 30;
+  const fadeIn = makeFadeIn();
+  const fadeOut = makeFadeOut();
+  fadeIn.params.in = 1;
+  fadeOut.params.out = 1;
+  const anchored = withFadeRange([fadeIn, fadeOut], 5, 25);
+  const input = [Float32Array.from({ length: frames }, () => 1)];
+  const memory = renderChain(input, anchored, rate)[0];
+  const processor = createStreamingEditChain(anchored, rate, frames);
+  const streamed = new Float32Array(frames);
+  for (let start = 0; start < frames; start += 7) {
+    const end = Math.min(frames, start + 7);
+    streamed.set(processor.process([input[0].slice(start, end)], start)[0], start);
+  }
+  for (const [frame, value] of [[0, 0], [5, 0], [10, .5], [15, 1], [20, .5], [25, 0]]) {
+    assert.ok(Math.abs(memory[frame] - value) < 1e-6, `frame ${frame} should be ${value}, got ${memory[frame]}`);
+  }
+  assert.deepEqual(streamed, memory);
+  const trimmedExport = createStreamingEditChain(anchored, rate, frames, 5)
+    .process([input[0].slice(5, 25)], 5)[0];
+  assert.deepEqual(trimmedExport, memory.slice(5, 25));
+  assert.equal(fadeIn.params.fadeStartFrame, undefined, 'render-only bounds must not modify saved edits');
 });
 
 test('restoring warmed state makes repeated selection loops deterministic', () => {

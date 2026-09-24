@@ -1,5 +1,5 @@
 import type { ChannelData } from './audio';
-import { automaticDcBlockerPole, analyzeInitialHum, isFixedLowRumble, type EditModule } from './edit-chain';
+import { automaticDcBlockerPole, analyzeInitialHum, fadeGainAtFrame, isFixedLowRumble, type EditModule } from './edit-chain';
 import { WindProcessor, windLevel, type WindSnapshot } from './wind-reduction';
 import { HumProcessor, humPrefixFrames, type HumSnapshot } from './hum-removal';
 import { readFrames, type WavMetadata } from './large-wav';
@@ -192,16 +192,8 @@ export class StreamingEditChain {
         const amp = dbToAmp(Number(p.db) || 0);
         output.forEach((channel) => channel.forEach((sample, i) => { channel[i] = clamp(finite(sample * amp)); }));
       } else if (module.type === 'fade') {
-        const fadeIn = Math.floor(Number(p.in) * this.sampleRate);
-        const fadeOut = Math.floor(Number(p.out) * this.sampleRate);
         output.forEach((channel) => channel.forEach((sample, i) => {
-          const frame = startFrame + i;
-          let factor = 1;
-          if (fadeIn > 0 && frame < fadeIn) factor *= frame / fadeIn;
-          if (fadeOut > 0 && frame > this.totalFrames - fadeOut) {
-            factor *= Math.max(0, (this.totalFrames - frame) / fadeOut);
-          }
-          channel[i] = finite(sample * factor);
+          channel[i] = finite(sample * fadeGainAtFrame(p, startFrame + i, this.sampleRate, this.totalFrames));
         }));
       } else if (module.type === 'dc') {
         output.forEach((channel, c) => channel.forEach((sample, i) => {
