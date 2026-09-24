@@ -12,6 +12,7 @@ import { decodeFlac } from '@/lib/flac';
 import { isVerifiedRelink, openVerifiedFileHandle } from '@/lib/file-access';
 import { listProjects, loadProject as loadProjectV2, queryFileHandlePermission, requestFileHandlePermission, saveProject as saveProjectV2, type ProjectRecord } from '@/lib/project-store';
 import { analyzeFileInitialHum, createStreamingEditChain } from '@/lib/streaming-edit-chain';
+import { measureNoiseProfile, NOISE_PROFILE_BANDS, NOISE_SAMPLE_MAX_SECONDS, NOISE_SAMPLE_MIN_SECONDS } from '@/lib/noise-reduction';
 import { humAnalysisWindowSize, humPrefixFrames } from '@/lib/hum-removal';
 import { recordHumHistory, visibleHumHistory, type HumHistorySegment, type VisibleHumSegment } from '@/lib/hum-history';
 import { readChainPresets, saveChainPreset, type ChainPreset } from '@/lib/chain-presets';
@@ -98,7 +99,7 @@ function moduleSummary(module: EditModule, humReadout?: ReturnType<typeof humOpe
   return module.type === 'gain' ? `${p.db} dB`
     : module.type === 'hum' ? humReadout?.summary ?? `${p.mode} · ${p.frequency} Hz`
       : module.type === 'wind' ? (isFixedLowRumble(module) ? `HPF ${p.cutoff} Hz` : `Auto · ${p.detection ?? 'Medium'} detection · ${p.removal ?? 'Medium'} removal`)
-        : module.type === 'noise' ? `Auto · ${p.strength ?? 50}% strength`
+        : module.type === 'noise' ? `${p.mode === 'Sample' ? 'Noise-only sample' : 'Auto'} · ${p.strength ?? 50}% strength`
         : module.type === 'eq' && p.mode === 'low-shelf' ? `${p.gain} dB · ${p.frequency} Hz`
           : module.type === 'fade' ? (fadeControlDirection(module) === 'in' ? `${p.in} s in`
             : fadeControlDirection(module) === 'out' ? `${p.out} s out` : `${p.in} s in · ${p.out} s out`)
@@ -209,6 +210,8 @@ function App() {
   });
   const [timeViewCenter, setTimeViewCenter] = useState<number | null>(null);
   const [largeSource, setLargeSource] = useState<LargeSource | null>(null);
+  const noiseCaptureOwnerRef = useRef<{ source: AudioSource; file: LargeSource | null; modules: EditModule[] } | null>(null);
+  noiseCaptureOwnerRef.current = { source, file: largeSource, modules };
   const [largeSpectrograms, setLargeSpectrograms] = useState<SpectrogramView>({
     left: EMPTY_SPECTROGRAM,
     right: EMPTY_SPECTROGRAM,
@@ -1139,6 +1142,37 @@ function App() {
     if (modules.length) commitModules(toggleEditableModules(modules));
   };
   const updateParams = (id: string, key: string, value: number | string) => commitModules(modules.map((module) => module.id === id ? { ...module, params: { ...module.params, [key]: value } } : module));
+  const captureNoiseSample = async (id: string) => {
+    const start = Math.max(0, Math.floor(selectionStart * source.sampleRate));
+    const end = Math.min(Math.floor(duration * source.sampleRate), Math.ceil(selectionEnd * source.sampleRate),
+      start + Math.floor(NOISE_SAMPLE_MAX_SECONDS * source.sampleRate));
+    const length = (end - start) / source.sampleRate;
+    if (length < NOISE_SAMPLE_MIN_SECONDS || length > NOISE_SAMPLE_MAX_SECONDS) {
+      setError(`Select ${NOISE_SAMPLE_MIN_SECONDS}–${NOISE_SAMPLE_MAX_SECONDS} seconds of noise only.`);
+      return;
+    }
+    const selectedSource = source;
+    const selectedFile = largeSource;
+    try {
+      setError('');
+      const lead = Math.min(start, Math.ceil(source.sampleRate * .1));
+      const channels = selectedFile
+        ? await readAudioFrames(selectedFile.file, selectedFile.metadata, start - lead, end - start + lead)
+        : source.channels.map((channel) => channel.slice(start - lead, end));
+      const owner = noiseCaptureOwnerRef.current;
+      if (owner?.source !== selectedSource || owner.file !== selectedFile || owner.modules !== modules) return;
+      const profile = measureNoiseProfile(channels, source.sampleRate, lead);
+      commitModules(modules.map((module) => module.id === id ? {
+        ...module,
+        params: {
+          ...module.params, mode: 'Sample', sampleStart: start / source.sampleRate, sampleEnd: end / source.sampleRate,
+          ...Object.fromEntries(Array.from({ length: NOISE_PROFILE_BANDS }, (_, i) => [`profile${i}`, profile[i]])),
+        },
+      } : module));
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Could not read the selected noise-only sample.');
+    }
+  };
   const addModule = (type: AddModuleType) => {
     const module = type === 'low-rumble' ? makeLowRumbleRemoval() : type === 'bring-back-low-end' ? makeBringBackLowEnd() : type === 'fade-in' ? makeFadeIn() : type === 'fade-out' ? makeFadeOut() : makeModule(type);
     commitModules([...modules, module]);
@@ -2125,7 +2159,7 @@ function App() {
              <div className="relative"><button type="button" className="quiet-btn w-full" onClick={() => setModuleMenu(!moduleMenu)}><Plus size={13} /> Add module</button>{moduleMenu && <div className="drawer-module-menu">{MODULE_TYPES.map((type) => <button type="button" key={type} onClick={() => addModule(type)}>{moduleOptionLabel(type)}</button>)}</div>}</div>
           </div>
           <div className="chain-drawer-body">
-             {automaticDcSelected ? <AutomaticDcCard /> : selectedModule ? <ModuleCard module={selectedModule} humReadout={selectedModule.type === 'hum' ? humReadoutFor(selectedModule) : undefined} liveFrequencies={liveHumFrequencies?.[selectedModule.id]} windActive={windActivityFor(selectedModule.id)} sampleRate={source.sampleRate} index={modules.findIndex((module) => module.id === selectedModule.id)} total={modules.length} collapsed={false} updateModule={updateModule} updateParams={updateParams} deleteModule={deleteModule} duplicateModule={duplicateModule} moveModule={moveModule} /> : <div className="chain-drawer-full-list"><AutomaticDcCard />{modules.map((module, index) => <ModuleCard key={module.id} module={module} humReadout={module.type === 'hum' ? humReadoutFor(module) : undefined} liveFrequencies={liveHumFrequencies?.[module.id]} windActive={windActivityFor(module.id)} sampleRate={source.sampleRate} index={index} total={modules.length} collapsed={false} updateModule={updateModule} updateParams={updateParams} deleteModule={deleteModule} duplicateModule={duplicateModule} moveModule={moveModule} />)}{modules.length === 0 && <div className="empty-state">No additional edits yet.</div>}</div>}
+             {automaticDcSelected ? <AutomaticDcCard /> : selectedModule ? <ModuleCard module={selectedModule} humReadout={selectedModule.type === 'hum' ? humReadoutFor(selectedModule) : undefined} liveFrequencies={liveHumFrequencies?.[selectedModule.id]} windActive={windActivityFor(selectedModule.id)} sampleRate={source.sampleRate} index={modules.findIndex((module) => module.id === selectedModule.id)} total={modules.length} collapsed={false} updateModule={updateModule} updateParams={updateParams} captureNoiseSample={captureNoiseSample} selectionLength={selectionEnd - selectionStart} deleteModule={deleteModule} duplicateModule={duplicateModule} moveModule={moveModule} /> : <div className="chain-drawer-full-list"><AutomaticDcCard />{modules.map((module, index) => <ModuleCard key={module.id} module={module} humReadout={module.type === 'hum' ? humReadoutFor(module) : undefined} liveFrequencies={liveHumFrequencies?.[module.id]} windActive={windActivityFor(module.id)} sampleRate={source.sampleRate} index={index} total={modules.length} collapsed={false} updateModule={updateModule} updateParams={updateParams} captureNoiseSample={captureNoiseSample} selectionLength={selectionEnd - selectionStart} deleteModule={deleteModule} duplicateModule={duplicateModule} moveModule={moveModule} />)}{modules.length === 0 && <div className="empty-state">No additional edits yet.</div>}</div>}
           </div>
           <div className="chain-drawer-footer">processing is local · original stays untouched</div>
         </aside>
@@ -2261,7 +2295,7 @@ function HumHistoryView({ modules, segments, sampleRate, duration, onSeek }: {
   </section>;
 }
 
-function ModuleCard({ module, humReadout, liveFrequencies, windActive, sampleRate, index, total, collapsed, updateModule, updateParams, deleteModule, duplicateModule, moveModule }: { module: EditModule; humReadout?: ReturnType<typeof humOpeningReadout>; liveFrequencies?: number[]; windActive?: boolean | null; sampleRate: number; index: number; total: number; collapsed: boolean; updateModule: (id: string, patch: Partial<EditModule>) => void; updateParams: (id: string, key: string, value: number | string) => void; deleteModule: (id: string) => void; duplicateModule: (module: EditModule) => void; moveModule: (index: number, direction: -1 | 1) => void }) {
+function ModuleCard({ module, humReadout, liveFrequencies, windActive, sampleRate, index, total, collapsed, updateModule, updateParams, captureNoiseSample, selectionLength, deleteModule, duplicateModule, moveModule }: { module: EditModule; humReadout?: ReturnType<typeof humOpeningReadout>; liveFrequencies?: number[]; windActive?: boolean | null; sampleRate: number; index: number; total: number; collapsed: boolean; updateModule: (id: string, patch: Partial<EditModule>) => void; updateParams: (id: string, key: string, value: number | string) => void; captureNoiseSample: (id: string) => Promise<void>; selectionLength: number; deleteModule: (id: string) => void; duplicateModule: (module: EditModule) => void; moveModule: (index: number, direction: -1 | 1) => void }) {
   const p = module.params;
   const fadeDirection = fadeControlDirection(module);
   const numberInput = (key: string, label: string, min: number, max: number, step: number, suffix = '', options?: { resetValue?: number; wheelStep?: number }) => <RangeControl label={label} value={Number(p[key])} min={min} max={max} step={step} suffix={suffix} resetValue={options?.resetValue} wheelStep={options?.wheelStep} onChange={(value) => updateParams(module.id, key, value)} testId={`range-${module.type}-${key}`} />;
@@ -2282,8 +2316,12 @@ function ModuleCard({ module, humReadout, liveFrequencies, windActive, sampleRat
       {module.type === 'dc' && <div className="grid grid-cols-2 gap-3"><label><span className="field-label">Detection</span><select className="select-field" value={String(p.mode)} onChange={(event) => updateParams(module.id, 'mode', event.target.value)}><option>Auto</option><option>Manual</option></select></label>{p.mode === 'Manual' && numberInput('amount', 'Offset estimate', -100, 100, 1, ' ×10⁻³')}</div>}
        {module.type === 'hum' && <div className="grid grid-cols-2 gap-3"><label><span className="field-label">Mode</span><select className="select-field" value={String(p.mode)} onChange={(event) => updateParams(module.id, 'mode', event.target.value)} data-testid={`select-hum-mode-${module.id}`}><option>Static</option><option>Dynamic</option><option>Adaptive</option></select></label>{p.mode !== 'Adaptive' && numberInput('frequency', 'Fundamental', 40, 120, 1, ' Hz')}{numberInput('reduction', 'Reduction', 0, 24, 1, ' dB')}<p className="col-span-2 text-[11px] leading-relaxed" data-testid={`hum-scan-${module.id}`} role="status">{humReadout?.detail}</p>{liveFrequencies && <p className="col-span-2 text-[11px] leading-relaxed" data-testid={`hum-live-${module.id}`}>Now playing · estimated filters: {liveFrequencies.length ? liveFrequencies.map((frequency) => `${frequency.toFixed(1)} Hz`).join(', ') : 'none currently confirmed'}. Current position only, not a whole-recording measurement.</p>}<p className="col-span-2 text-[10px] leading-relaxed text-muted-foreground">{p.mode === 'Adaptive' ? 'Scans 40–400 Hz for sustained 50/60 Hz hum or tones with a matching harmonic pattern. Confirmed harmonics are also filtered. A bounded opening scan starts confirmed filters at the first frame; short or changing hum may still take time to detect. Isolated non-mains hum may be missed to protect wanted tones; some wanted steady tones may still be affected. No frequency setting is used.' : p.mode === 'Dynamic' ? 'Tracks a sustained tone near the selected frequency (±12%) and its harmonics. A bounded opening scan starts confirmed filters at the first frame; changing hum may still take time to detect. Preview before exporting.' : 'Applies fixed narrow filters at the selected frequency and its first few harmonics. Preview before exporting.'}</p></div>}
        {module.type === 'noise' && <div className="space-y-2">
+          <label className="block"><span className="field-label">Noise estimate</span><select className="select-field" value={p.mode === 'Sample' ? 'Sample' : 'Automatic'} onChange={(event) => updateParams(module.id, 'mode', event.target.value === 'Sample' ? 'Sample' : 'Automatic')} data-testid={`select-noise-mode-${module.id}`}><option value="Automatic">Automatic</option>{p.profile0 !== undefined && <option value="Sample">Noise-only sample</option>}</select></label>
+          <button type="button" className="quiet-btn" onClick={() => void captureNoiseSample(module.id)} disabled={selectionLength < NOISE_SAMPLE_MIN_SECONDS || selectionLength > NOISE_SAMPLE_MAX_SECONDS} data-testid={`button-noise-sample-${module.id}`}>{p.profile0 !== undefined ? 'Replace sample with current selection' : 'Use current selection as noise-only sample'}</button>
+          <p className="text-[11px] leading-relaxed text-muted-foreground">Select {NOISE_SAMPLE_MIN_SECONDS}–{NOISE_SAMPLE_MAX_SECONDS} seconds in the timeline. {p.mode === 'Sample' ? `Using ${formatTime(Number(p.sampleStart), true)}–${formatTime(Number(p.sampleEnd), true)} from the original recording. Switch to Automatic to compare; your sample stays available.` : 'Automatic estimation needs no sample.'}</p>
+          <p className="text-[11px] leading-relaxed text-[#ffaf78]" role="note">Choose a passage with only steady background noise. Speech, animal calls, music, or other wanted sounds in the sample may be mistaken for noise and softened throughout the recording. Samples saved in presets belong to the recording they came from; choose a new sample for a different recording.</p>
          {numberInput('strength', 'Reduction strength', 0, 100, 1, '%', { resetValue: 50, wheelStep: 5 })}
-         <p className="text-[11px] leading-relaxed text-muted-foreground" data-testid="noise-reduction-usage-note">Automatically estimates steady background hiss or room tone; no noise-only selection is needed. This gentle, stereo-linked reduction is approximate and may soften wanted ambience. It will not repair clicks, isolate voices, or remove all noise. Compare with bypass before exporting.</p>
+          <p className="text-[11px] leading-relaxed text-muted-foreground" data-testid="noise-reduction-usage-note">This gentle, stereo-linked reduction is approximate and may soften wanted ambience. It will not repair clicks, isolate voices, or remove all noise. Compare with bypass before exporting.</p>
        </div>}
        {module.type === 'wind' && (isFixedLowRumble(module)
           ? <div className="space-y-2">

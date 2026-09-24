@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { makeDefaultChain, makeModule, renderChain } from './edit-chain.ts';
 import { createStreamingEditChain } from './streaming-edit-chain.ts';
-import { parseChainPresets } from './chain-presets.ts';
+import { parseChainPresets, saveChainPreset, readChainPresets } from './chain-presets.ts';
+import { measureNoiseProfile, NOISE_PROFILE_BANDS } from './noise-reduction.ts';
 import { generateFloat32WavHeader, parseWavMetadata } from './large-wav.ts';
 import { calculateFileSpectrogram } from './large-spectrogram.ts';
 import { calculateSpectrogram } from './spectrogram.ts';
@@ -59,6 +60,33 @@ test('bypass and zero strength leave audio unchanged, and presets retain the ite
   const restored = parseChainPresets(JSON.stringify([{ name: 'Gentle cleanup', modules: [module()] }]));
   assert.equal(restored[0].modules[0].type, 'noise');
   assert.equal(restored[0].modules[0].params.strength, 50);
+});
+
+test('sampled hiss profile changes reduction, persists in presets, and matches streamed chunks and restored state', () => {
+  const input = signal(.06, .04);
+  const quiet = signal(0, .04).slice(0, rate);
+  const profile = measureNoiseProfile([quiet], rate);
+  assert.equal(profile.length, NOISE_PROFILE_BANDS);
+  const edit = makeModule('noise', { params: {
+    mode: 'Sample', sampleStart: 0, sampleEnd: 1,
+    ...Object.fromEntries(profile.map((value, i) => [`profile${i}`, value])),
+  } });
+  const sampled = renderChain([input], [edit], rate)[0];
+  const automatic = renderChain([input], [{ ...edit, params: { ...edit.params, mode: 'Automatic' } }], rate)[0];
+  assert.ok(sampled.every(Number.isFinite));
+  assert.ok(sampled.some((value, i) => Math.abs(value - automatic[i]) > 1e-6), 'the chosen sample must influence processing');
+  const storage = new Map();
+  const adapter = { getItem: (key) => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value) };
+  saveChainPreset(adapter, 'Sampled hiss', [edit]);
+  const loaded = readChainPresets(adapter)[0].modules[0];
+  assert.deepEqual(loaded.params, edit.params);
+  const streamed = createStreamingEditChain([loaded], rate, length);
+  const prefix = streamed.process([input.slice(0, rate * 2)], 0)[0];
+  const resumed = createStreamingEditChain([loaded], rate, length);
+  resumed.restore(streamed.snapshot());
+  const suffix = resumed.process([input.slice(rate * 2)], rate * 2)[0];
+  assert.deepEqual(Float32Array.from([...prefix, ...suffix]), sampled);
+  assert.throws(() => renderChain([input], [{ ...edit, params: { ...edit.params, profile0: NaN } }], rate), /incomplete/);
 });
 
 test('stereo-linked gains, uneven chunks, and restored state match full rendering', () => {

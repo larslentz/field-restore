@@ -1,7 +1,8 @@
 /**
  * A conservative, causal multiband expander for steady broadband noise.
- * There is no learned "noise print": each band follows a slowly rising,
- * quickly falling floor and all channels use the same smoothed gain per band.
+ * In automatic mode each band follows a slowly rising, quickly falling floor.
+ * Sample mode uses a bounded profile measured from the original recording.
+ * All channels use the same smoothed gain per band.
  * The bounded state makes preview, chunked export and restored loops agree.
  */
 export interface NoiseReductionSnapshot {
@@ -18,7 +19,49 @@ export interface NoiseReductionSnapshot {
 
 const CROSSOVERS = [150, 360, 800, 1700, 3400, 6500, 11000];
 const BANDS = CROSSOVERS.length + 1;
+export const NOISE_PROFILE_BANDS = BANDS;
+export const NOISE_SAMPLE_MIN_SECONDS = .2;
+export const NOISE_SAMPLE_MAX_SECONDS = 5;
 const PERIOD_LAGS = [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 20, 24, 28, 32, 36, 42, 48, 52, 56, 60, 64, 72, 80, 96, 104, 112, 128, 144, 160, 176, 192, 208, 224];
+
+export function noiseProfileFromParams(params: Record<string, number | string>): number[] | undefined {
+  if (params.mode !== 'Sample') return undefined;
+  const profile = Array.from({ length: BANDS }, (_, i) => Number(params[`profile${i}`]));
+  if (profile.some((value) => !Number.isFinite(value) || value < 0) ||
+    !Number.isFinite(Number(params.sampleStart)) || !Number.isFinite(Number(params.sampleEnd)) ||
+    Number(params.sampleEnd) - Number(params.sampleStart) < NOISE_SAMPLE_MIN_SECONDS - 1e-6 ||
+    Number(params.sampleEnd) - Number(params.sampleStart) > NOISE_SAMPLE_MAX_SECONDS + 1e-6) {
+    throw new Error('Noise-only sample settings are incomplete. Choose a new sample or switch to Automatic.');
+  }
+  return profile;
+}
+
+/** Mean absolute energy per crossover band, shared across channels. The brief lead-in
+ * settles the crossover filters without retaining or serializing any source audio. */
+export function measureNoiseProfile(channels: Float32Array[], sampleRate: number, leadFrames = 0): number[] {
+  if (!channels.length || !channels[0]?.length || channels.some((channel) => channel.length !== channels[0].length)) {
+    throw new Error('The noise-only sample could not be read.');
+  }
+  const coefficients = CROSSOVERS.map((frequency) =>
+    1 - Math.exp(-2 * Math.PI * Math.min(frequency, sampleRate * .45) / sampleRate));
+  const sums = new Float64Array(BANDS);
+  const count = channels[0].length - leadFrames;
+  if (count <= 0) throw new Error('Select a longer noise-only sample.');
+  for (const channel of channels) {
+    const lows = new Float64Array(CROSSOVERS.length);
+    for (let frame = 0; frame < channel.length; frame++) {
+      const sample = channel[frame];
+      let previous = 0;
+      for (let band = 0; band < CROSSOVERS.length; band++) {
+        lows[band] += coefficients[band] * (sample - lows[band]);
+        if (frame >= leadFrames) sums[band] += Math.abs(lows[band] - previous);
+        previous = lows[band];
+      }
+      if (frame >= leadFrames) sums[BANDS - 1] += Math.abs(sample - previous);
+    }
+  }
+  return Array.from(sums, (sum) => sum / (count * channels.length));
+}
 
 export class NoiseReductionProcessor {
   private readonly lows: Float64Array[];
@@ -37,9 +80,14 @@ export class NoiseReductionProcessor {
   private readonly floorFall: number;
   private readonly gainSmooth: number;
   private readonly reduction: number;
+  private readonly sampleProfile?: number[];
   private readonly transientFrames: number;
 
-  constructor(sampleRate: number, channelCount: number, strength: number) {
+  constructor(sampleRate: number, channelCount: number, strength: number, sampleProfile?: number[]) {
+    if (sampleProfile && (sampleProfile.length !== BANDS || sampleProfile.some((value) => !Number.isFinite(value) || value < 0))) {
+      throw new Error('Invalid noise-only sample profile.');
+    }
+    this.sampleProfile = sampleProfile;
     this.lows = Array.from({ length: channelCount }, () => new Float64Array(CROSSOVERS.length));
     this.recent = Array.from({ length: channelCount }, () => new Float64Array(512));
     this.transientFrames = Math.ceil(sampleRate * .025);
@@ -149,7 +197,7 @@ export class NoiseReductionProcessor {
           this.gain[band] = 1;
           continue;
         }
-        const noiseShare = Math.min(1, this.floor[band] / (this.envelope[band] + 1e-8));
+        const noiseShare = Math.min(1, (this.sampleProfile?.[band] ?? this.floor[band]) / (this.envelope[band] + 1e-8));
         const target = 1 - this.reduction * tonalProtection * noiseShare;
         this.gain[band] += this.gainSmooth * (target - this.gain[band]);
       }

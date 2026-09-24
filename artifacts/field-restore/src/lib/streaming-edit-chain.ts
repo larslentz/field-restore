@@ -2,7 +2,7 @@ import type { ChannelData } from './audio';
 import { automaticDcBlockerPole, analyzeInitialHum, fadeGainAtFrame, isFixedLowRumble, type EditModule } from './edit-chain';
 import { WindProcessor, windLevel, type WindSnapshot } from './wind-reduction';
 import { HumProcessor, humPrefixFrames, type HumSnapshot } from './hum-removal';
-import { NoiseReductionProcessor, type NoiseReductionSnapshot } from './noise-reduction';
+import { NoiseReductionProcessor, noiseProfileFromParams, type NoiseReductionSnapshot } from './noise-reduction';
 import { readAudioFrames, type AudioMetadata } from './source-audio';
 
 interface FilterState {
@@ -174,7 +174,8 @@ export class StreamingEditChain {
         : undefined;
       if (saved.wind) target.wind?.restore(saved.wind);
       target.noise = saved.noise
-        ? new NoiseReductionProcessor(this.sampleRate, saved.noise.lows.length, Number(this.modules[index].params.strength))
+        ? new NoiseReductionProcessor(this.sampleRate, saved.noise.lows.length, Number(this.modules[index].params.strength),
+          noiseProfileFromParams(this.modules[index].params))
         : undefined;
       if (saved.noise) target.noise?.restore(saved.noise);
     });
@@ -256,7 +257,7 @@ export class StreamingEditChain {
           state.wind.process(output);
         }
       } else if (module.type === 'noise') {
-        state.noise ??= new NoiseReductionProcessor(this.sampleRate, output.length, Number(p.strength));
+        state.noise ??= new NoiseReductionProcessor(this.sampleRate, output.length, Number(p.strength), noiseProfileFromParams(p));
         state.noise.process(output);
       } else if (module.type === 'region') {
         const start = Math.max(0, Math.floor(Math.max(0, Number(p.start)) * this.sampleRate));

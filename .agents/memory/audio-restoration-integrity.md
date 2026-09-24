@@ -56,3 +56,9 @@ Automatic broadband cleanup must be judged against wanted audio *inside noise*, 
 **Why:** An estimate learned from steady hiss can attenuate the first milliseconds of a wanted sound; a tone protected in silence can still be softened when mixed with hiss. Broad frequency-band ratios change with the recording's Nyquist frequency and can mistake high-rate white noise for a tonal signal.
 
 **How to apply:** Compare quiet and loud mixed tones, late short transients, stereo-only events, and steady hiss at common and high sample rates. For file-backed visual previews, a stateful adaptive floor needs the same source history as playback and export, not an independent short warmup for each visible slice.
+
+Noise-only samples are recording-specific. Keep the compact estimate tied to the original source audio rather than asking each render path to relearn it, and explicitly warn when a preset might be reused with a different source.
+
+**Why:** File-backed previews, worker analysis, seeks, and exports must use one identical noise estimate; silently treating a profile from another recording as universally applicable can soften wanted sounds.
+
+**How to apply:** Preserve the user's sample and mode when saving edits, but make cross-recording reuse visible and encourage recapturing a sample before export.

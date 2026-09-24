@@ -1,7 +1,7 @@
 import { cloneChannels, type ChannelData } from './audio';
 import { HumProcessor, humAnalysisWindowSize, humPrefixFrames } from './hum-removal';
 import { WindProcessor, WIND_DEFAULTS, windLevel } from './wind-reduction';
-import { NoiseReductionProcessor } from './noise-reduction';
+import { NoiseReductionProcessor, noiseProfileFromParams } from './noise-reduction';
 
 export type ModuleType = 'gain' | 'fade' | 'eq' | 'dc' | 'hum' | 'wind' | 'noise' | 'region' | 'ambient';
 export interface EditModule {
@@ -286,7 +286,7 @@ export function applyModule(input: ChannelData, module: EditModule, sampleRate: 
         context.onWindChange && ((frame, active) => context.onWindChange!(frameOffset + frame, active))).process(output);
     }
   } else if (module.type === 'noise') {
-    new NoiseReductionProcessor(sampleRate, output.length, Number(p.strength)).process(output);
+    new NoiseReductionProcessor(sampleRate, output.length, Number(p.strength), noiseProfileFromParams(p)).process(output);
   } else if (module.type === 'region') {
     const start = Math.max(0, Math.floor(Math.max(0, Number(p.start)) * sampleRate) - frameOffset);
     const end = Math.min(length, Math.floor(Math.max(Number(p.end), Number(p.start)) * sampleRate) - frameOffset);
