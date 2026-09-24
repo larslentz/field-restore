@@ -42,7 +42,7 @@ type AddModuleType = typeof MODULE_TYPES[number];
 const moduleOptionLabel = (type: AddModuleType) => type === 'low-rumble' ? 'Low Rumble Removal' : type === 'bring-back-low-end' ? 'Bring Back the Low End' : type === 'fade-in' ? 'Fade In' : type === 'fade-out' ? 'Fade Out' : MODULE_LABELS[type];
 const SPECTROGRAM_LEFT = 48;
 const SPECTROGRAM_RIGHT = 72;
-const SPECTROGRAM_BOTTOM = 28;
+const SPECTROGRAM_BOTTOM = 42;
 const SPECTROGRAM_MAX_CEILING_DB = 24;
 const SPECTROGRAM_DATA_FLOOR_DB = -180;
 const SPECTROGRAM_DATA_CEILING_DB = 0;
@@ -1720,7 +1720,7 @@ function App() {
 
     context.fillStyle = '#f2f4e8'; context.font = '10px "Space Mono", monospace'; context.textAlign = 'left';
     const timeTickCount = Math.max(2, Math.min(6, Math.floor(graphWidth / 90)));
-    for (let tick = 0; tick <= timeTickCount; tick += 1) { const time = viewStart + (tick / timeTickCount) * viewDuration; context.fillText(formatTime(time), graphLeft + (tick / timeTickCount) * graphWidth + 4, height - 8); }
+    for (let tick = 0; tick <= timeTickCount; tick += 1) { const time = viewStart + (tick / timeTickCount) * viewDuration; context.fillText(formatTime(time), graphLeft + (tick / timeTickCount) * graphWidth + 4, graphBottom + 13); }
     context.textAlign = 'right';
     for (const top of [0, paneHeight]) {
       for (const { frequency, y } of frequencyTicks) {
@@ -1743,18 +1743,18 @@ function App() {
     context.fillStyle = '#d8ed55';
     context.fillText(sourceChannelCount > 1 ? 'L' : 'MONO', graphLeft + 6, 14);
     context.fillText(sourceChannelCount > 1 ? 'R' : 'MONO', graphLeft + 6, paneHeight + 14);
-    context.save();
-    context.translate(11, graphBottom / 2);
-    context.rotate(-Math.PI / 2);
-    context.fillStyle = '#91a69d';
+    context.font = '600 10px "Space Mono", monospace';
+    context.fillStyle = '#b8cbbf';
     context.textAlign = 'center';
+    context.fillText('TIME (mm:ss.s)', graphLeft + graphWidth / 2, height - 8);
+    context.save();
+    context.translate(15, graphBottom / 2);
+    context.rotate(-Math.PI / 2);
     context.fillText('FREQUENCY (Hz)', 0, 0);
     context.restore();
     context.save();
-    context.translate(width - 7, graphBottom / 2);
+    context.translate(width - 16, graphBottom / 2);
     context.rotate(Math.PI / 2);
-    context.fillStyle = '#91a69d';
-    context.textAlign = 'center';
     context.fillText('LEVEL (dB)', 0, 0);
     context.restore();
   }, [activeTab, canvasBounds, hasSelection, playHead, selectionEnd, selectionStart, sourceChannelCount, spectrogramCeilingDb, spectrogramFloorDb, spectrogramMaxFrequency, spectrogramMinFrequency, spectrogramPalette, spectrogramSource, spectrograms, trimEnd, trimStart, viewDuration, viewStart]);
@@ -1963,7 +1963,7 @@ function App() {
                     </div>
                     <div className="panel-body !pt-3">
                       <div className="waveform-wrap">
-                        <canvas ref={canvasRef} className="waveform-canvas" onPointerDown={onCanvasPointerDown} onPointerMove={onCanvasPointerMove} onPointerUp={onCanvasPointerUp} onPointerCancel={onCanvasPointerUp} onDoubleClick={(event) => { event.preventDefault(); if (hasSelection) clearSelection(); }} aria-label={`${spectrogramSource === 'original' ? 'Original recording' : 'Edited signal'} interactive spectrogram from ${spectrogramMinFrequency / 1000} to ${spectrogramMaxFrequency / 1000} kilohertz with ${spectrogramFloorDb} to ${spectrogramCeilingDb} decibel scale`} data-testid="canvas-spectrogram" data-request-id={spectrogramRequestId} data-result-id={spectrogramResultId} />
+                        <canvas ref={canvasRef} className="waveform-canvas" onPointerDown={onCanvasPointerDown} onPointerMove={onCanvasPointerMove} onPointerUp={onCanvasPointerUp} onPointerCancel={onCanvasPointerUp} onDoubleClick={(event) => { event.preventDefault(); if (hasSelection) clearSelection(); }} aria-label={`${spectrogramSource === 'original' ? 'Original recording' : 'Edited signal'} interactive spectrogram from ${spectrogramMinFrequency / 1000} to ${spectrogramMaxFrequency / 1000} kilohertz with ${spectrogramFloorDb} to ${spectrogramCeilingDb} decibel scale, time from ${formatTime(viewStart)} to ${formatTime(viewStart + viewDuration)}`} data-testid="canvas-spectrogram" data-request-id={spectrogramRequestId} data-result-id={spectrogramResultId} />
                         <div className={`spectrogram-source-label ${spectrogramSource}`} data-testid="label-spectrogram-source">{spectrogramSource === 'original' ? 'Original recording' : 'Edited signal · chain applied'}</div>
                         {spectrogramSource === 'current' && visibleHumSegments.length > 0 && <HumSpectrogramOverlay
                           modules={processingModules} segments={visibleHumSegments} sampleRate={source.sampleRate} onSeek={seekTo} />}

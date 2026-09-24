@@ -296,7 +296,7 @@
 .spectrogram-source-toggle button { padding: 5px 8px; border-radius: 4px; color: hsl(var(--muted-foreground)); font-size: 10px; font-weight: 700; }
 .spectrogram-source-toggle button.active { color: hsl(var(--foreground)); background: hsl(var(--card)); box-shadow: var(--shadow-subtle); }
 .waveform-wrap { position: relative; width: 100%; overflow: hidden; border: 1px solid hsl(var(--border)); border-radius: 6px; background: #17242c; }
-.hum-spectrogram-overlay { position: absolute; top: 0; bottom: 28px; left: 48px; right: 72px; z-index: 2; pointer-events: none; overflow: hidden; }
+.hum-spectrogram-overlay { position: absolute; top: 0; bottom: 42px; left: 48px; right: 72px; z-index: 2; pointer-events: none; overflow: hidden; }
 .hum-spectrogram-visit { position: absolute; left: 0; right: 0; height: 15px; }
 .hum-spectrogram-span { position: absolute; top: 6px; height: 3px; background: var(--hum-marker-color); box-shadow: 0 0 0 1px #17242c; }
 .hum-spectrogram-span.unfiltered { background: repeating-linear-gradient(90deg, #b0bdc9 0 4px, transparent 4px 7px); }
@@ -309,7 +309,7 @@
 .hum-overlay-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 4px; }
 .hum-overlay-legend span { display: inline-flex; align-items: center; gap: 5px; }
 .hum-overlay-legend i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; }
-.trim-overlay { position: absolute; top: 0; bottom: 28px; left: 48px; right: 72px; z-index: 3; pointer-events: none; }
+.trim-overlay { position: absolute; top: 0; bottom: 42px; left: 48px; right: 72px; z-index: 3; pointer-events: none; }
 .trim-handle { position: absolute; top: 0; bottom: 0; width: 24px; padding: 0; transform: translateX(-50%); border: 0; background: transparent; color: #f4fae0; cursor: ew-resize; touch-action: none; pointer-events: auto; }
 .trim-handle::before { content: ''; position: absolute; top: 0; bottom: 0; left: calc(50% - 1px); width: 2px; background: #d8ed55; box-shadow: 0 0 0 1px #17242c, 0 0 10px rgba(216,237,85,.7); }
 .trim-handle:hover::before, .trim-handle:focus-visible::before { width: 4px; left: calc(50% - 2px); }
