@@ -1,4 +1,5 @@
 import { cloneChannels, type ChannelData } from './audio';
+import { HumProcessor } from './hum-removal';
 
 export type ModuleType = 'gain' | 'fade' | 'eq' | 'dc' | 'hum' | 'wind' | 'region' | 'ambient';
 export interface EditModule {
@@ -94,6 +95,7 @@ export function makeRestorationReport(input: RestorationReportInput) {
     exportedAt: input.exportedAt ?? new Date().toISOString(),
     limitations: [
       'Automatic DC offset removal is always applied before editable modules.',
+      'Adaptive hum detection is conservative: it can miss interference or affect wanted steady tones.',
       'Edits are conservative sample-domain approximations in this browser build.',
       'Original source remains immutable; export reflects automatic DC correction and enabled modules.',
     ],
@@ -212,16 +214,7 @@ export function applyModule(input: ChannelData, module: EditModule, sampleRate: 
       });
     }
   } else if (module.type === 'hum') {
-    const frequency = Math.max(20, Number(p.frequency) || 60);
-    const reduction = dbToAmp(-(Number(p.reduction) || 0));
-    output.forEach((channel) => {
-      let phase = 0;
-      channel.forEach((sample, i) => {
-        phase = (2 * Math.PI * frequency * (frameOffset + i + 1)) / sampleRate;
-        const hum = Math.sin(phase) * sample * .16;
-        channel[i] = sample - hum * (1 - reduction);
-      });
-    });
+    new HumProcessor(p, sampleRate, output.length).process(output);
   } else if (module.type === 'wind') {
     const cutoff = Math.max(20, Number(p.cutoff) || 100);
     const q = Math.max(0.1, Number(p.q) || 0.7);

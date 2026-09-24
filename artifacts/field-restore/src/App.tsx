@@ -10,6 +10,7 @@ import { fingerprintWav, parseWavMetadata, readFrames, withLargeExportLeaveWarni
 import { isVerifiedRelink, openVerifiedFileHandle } from '@/lib/file-access';
 import { listProjects, loadProject as loadProjectV2, queryFileHandlePermission, requestFileHandlePermission, saveProject as saveProjectV2, type ProjectRecord } from '@/lib/project-store';
 import { createStreamingEditChain } from '@/lib/streaming-edit-chain';
+import { humAnalysisWindowSize } from '@/lib/hum-removal';
 import { readChainPresets, saveChainPreset, type ChainPreset } from '@/lib/chain-presets';
 import { EqCurve } from '@/components/EqCurve';
 import { anchoredLevelScaleCeiling, anchoredTimeViewStart } from '@/lib/spectrogram-scale';
@@ -128,7 +129,7 @@ function formatLevel(value: number, unit: 'dBTP' | 'LUFS' | 'LU') {
 function moduleSummary(module: EditModule) {
   const p = module.params;
   return module.type === 'gain' ? `${p.db} dB`
-    : module.type === 'hum' ? `${p.mode} · ${p.frequency} Hz`
+    : module.type === 'hum' ? p.mode === 'Adaptive' ? 'Adaptive · auto scan' : `${p.mode} · ${p.frequency} Hz`
       : module.type === 'wind' ? `HPF ${p.cutoff} Hz`
         : module.type === 'eq' && p.mode === 'low-shelf' ? `${p.gain} dB · ${p.frequency} Hz`
           : module.type === 'fade' ? (Number(p.in) > 0 ? `${p.in} s in` : `${p.out} s out`)
@@ -816,7 +817,13 @@ function App() {
     const startedAt = scheduledAt;
     const playbackStart = nextFrame / metadata.sampleRate;
     const chunkFrames = Math.max(4096, Math.floor(metadata.sampleRate * 4));
-    const warmStart = monitor === 'current' ? (trimRef.current?.[0] ? 0 : Math.max(0, nextFrame - Math.floor(metadata.sampleRate * 2))) : nextFrame;
+    const recentStart = Math.max(0, nextFrame - Math.floor(metadata.sampleRate * 2));
+    const needsAlignedHumHistory = monitor === 'current' && processingModules.some((module) =>
+      module.enabled && module.type === 'hum' && module.params.mode !== 'Static');
+    const humWindow = humAnalysisWindowSize(metadata.sampleRate);
+    const warmStart = monitor === 'current'
+      ? (trimRef.current?.[0] ? 0 : needsAlignedHumHistory ? Math.floor(recentStart / humWindow) * humWindow : recentStart)
+      : nextFrame;
     const processor = createStreamingEditChain(processingModules, metadata.sampleRate, metadata.frameCount, warmStart);
     setOperationStatus('Buffering playback');
     if (monitor === 'current' && warmStart < nextFrame) {
@@ -1965,7 +1972,7 @@ function ModuleCard({ module, sampleRate, index, total, collapsed, updateModule,
       {module.type === 'eq' && p.mode === 'low-shelf' && <div className="grid grid-cols-3 gap-2">{numberInput('frequency', 'Low shelf', 20, 240, .5, ' Hz')}{numberInput('q', 'Q', .1, 2, .01)}{numberInput('gain', 'Gain', -12, 12, .1, ' dB')}</div>}
       {module.type === 'eq' && p.mode !== 'low-shelf' && <div className="grid grid-cols-3 gap-2">{numberInput('low', 'Low', -12, 12, .5, ' dB')}{numberInput('mid', 'Mid', -12, 12, .5, ' dB')}{numberInput('high', 'High', -12, 12, .5, ' dB')}</div>}
       {module.type === 'dc' && <div className="grid grid-cols-2 gap-3"><label><span className="field-label">Detection</span><select className="select-field" value={String(p.mode)} onChange={(event) => updateParams(module.id, 'mode', event.target.value)}><option>Auto</option><option>Manual</option></select></label>{p.mode === 'Manual' && numberInput('amount', 'Offset estimate', -100, 100, 1, ' ×10⁻³')}</div>}
-      {module.type === 'hum' && <div className="grid grid-cols-2 gap-3"><label><span className="field-label">Mode</span><select className="select-field" value={String(p.mode)} onChange={(event) => updateParams(module.id, 'mode', event.target.value)} data-testid={`select-hum-mode-${module.id}`}><option>Static</option><option>Dynamic</option><option>Adaptive</option></select></label>{numberInput('frequency', 'Fundamental', 40, 120, 1, ' Hz')}{numberInput('reduction', 'Reduction', 0, 24, 1, ' dB')}</div>}
+      {module.type === 'hum' && <div className="grid grid-cols-2 gap-3"><label><span className="field-label">Mode</span><select className="select-field" value={String(p.mode)} onChange={(event) => updateParams(module.id, 'mode', event.target.value)} data-testid={`select-hum-mode-${module.id}`}><option>Static</option><option>Dynamic</option><option>Adaptive</option></select></label>{p.mode !== 'Adaptive' && numberInput('frequency', 'Fundamental', 40, 120, 1, ' Hz')}{numberInput('reduction', 'Reduction', 0, 24, 1, ' dB')}<p className="col-span-2 text-[10px] leading-relaxed text-muted-foreground">{p.mode === 'Adaptive' ? 'Scans 40–400 Hz for sustained 50/60 Hz hum or tones with a matching harmonic pattern. Confirmed harmonics are also filtered. Detection takes a moment, so the start may remain untreated. Isolated non-mains hum may be missed to protect wanted tones; some wanted steady tones may still be affected. No frequency setting is used.' : p.mode === 'Dynamic' ? 'Tracks a sustained tone near the selected frequency (±12%) and its harmonics. Detection takes a moment; preview before exporting.' : 'Applies fixed narrow filters at the selected frequency and its first few harmonics. Preview before exporting.'}</p></div>}
       {module.type === 'wind' && <div className="grid grid-cols-2 gap-3">{numberInput('cutoff', 'High-pass cutoff', 20, 240, .5, ' Hz')}{numberInput('q', 'Q', .1, 2, .01)}</div>}
       {(module.type === 'wind' || module.type === 'eq') && <EqCurve module={module} sampleRate={sampleRate} />}
       {module.type === 'region' && <div className="grid grid-cols-3 gap-2">{numberInput('start', 'Start', 0, 60, .1, ' s')}{numberInput('end', 'End', 0, 60, .1, ' s')}{numberInput('amount', 'Attenuate', -24, 0, .5, ' dB')}</div>}

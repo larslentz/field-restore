@@ -26,3 +26,9 @@ DC offset removal is a mandatory hidden baseline stage, not an editable module. 
 **Why:** DC correction is required for every recording and must not be bypassed, deleted, or applied twice when older projects are restored.
 
 **How to apply:** Keep the original source immutable for A/B comparison, identify processed output as automatically DC-corrected, and record the baseline stage in restoration reports.
+
+Automatic tonal cleanup must prefer missing an ambiguous tone over removing a wanted one. A single sustained spectral peak is not enough evidence for unsupervised removal; look for a convincing interference pattern and expose the limits.
+
+**Why:** Field calls, sustained environmental sounds, and music can look like hum in a short analysis window, especially when the cleanup is enabled by default.
+
+**How to apply:** Keep auto-detection conservative and auditionable; manual tuning can target a single known frequency. For seekable file playback, align analysis history with full-file processing so the preview is representative of export.

@@ -1,5 +1,6 @@
 import type { ChannelData } from './audio';
 import { AUTOMATIC_DC_BLOCKER_POLE, type EditModule } from './edit-chain';
+import { HumProcessor, type HumSnapshot } from './hum-removal';
 
 interface FilterState {
   x1: number;
@@ -15,11 +16,12 @@ interface ModuleState {
   dcY: number[];
   phase: number;
   ambientBed: number[] | undefined;
+  hum: HumProcessor | undefined;
 }
 
 export interface StreamingEditChainSnapshot {
   nextFrame: number;
-  state: ModuleState[];
+  state: Array<Omit<ModuleState, 'hum'> & { hum: HumSnapshot | undefined }>;
 }
 
 interface Biquad {
@@ -91,6 +93,7 @@ export class StreamingEditChain {
       dcY: [],
       phase: 0,
       ambientBed: undefined,
+      hum: undefined,
     }));
     this.nextFrame = initialFrame;
   }
@@ -103,6 +106,7 @@ export class StreamingEditChain {
       state.dcY = [];
       state.phase = (2 * Math.PI * 60 * startFrame) / this.sampleRate;
       state.ambientBed = undefined;
+      state.hum = undefined;
     });
     this.nextFrame = startFrame;
   }
@@ -117,6 +121,7 @@ export class StreamingEditChain {
         dcY: [...state.dcY],
         phase: state.phase,
         ambientBed: state.ambientBed ? [...state.ambientBed] : undefined,
+        hum: state.hum?.snapshot(),
       })),
     };
   }
@@ -131,6 +136,10 @@ export class StreamingEditChain {
       target.dcY = [...saved.dcY];
       target.phase = saved.phase;
       target.ambientBed = saved.ambientBed ? [...saved.ambientBed] : undefined;
+        target.hum = saved.hum
+          ? new HumProcessor(this.modules[index].params, this.sampleRate, saved.hum.capture.length)
+          : undefined;
+        if (saved.hum) target.hum?.restore(saved.hum);
     });
     this.nextFrame = snapshot.nextFrame;
   }
@@ -199,12 +208,8 @@ export class StreamingEditChain {
           }));
         }
       } else if (module.type === 'hum') {
-        const frequency = Math.max(20, Number(p.frequency) || 60);
-        const reduction = dbToAmp(-(Number(p.reduction) || 0));
-        output.forEach((channel) => channel.forEach((sample, i) => {
-          const phase = (2 * Math.PI * frequency * (startFrame + i + 1)) / this.sampleRate;
-          channel[i] = finite(sample - Math.sin(phase) * sample * .16 * (1 - reduction));
-        }));
+        state.hum ??= new HumProcessor(p, this.sampleRate, output.length);
+        state.hum.process(output);
       } else if (module.type === 'wind') {
         const coefficients = highPass(this.sampleRate, Math.max(20, Number(p.cutoff) || 100),
           Math.max(0.1, Number(p.q) || 0.7));
