@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent as ReactDragEvent, type FormEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react';
-import { Activity, ArrowDown, ArrowUp, Check, ChevronDown, CircleHelp, Download, FileAudio, FolderOpen, Gauge, GripVertical, Info, Keyboard, Layers3, Menu, PanelRightOpen, Pause, Play, Plus, Redo2, RotateCcw, Save, Settings, Square, Trash2, Undo2, Waves, X, ZoomIn, ZoomOut } from 'lucide-react';
+import { Activity, ArrowDown, ArrowUp, Check, ChevronDown, CircleHelp, Download, FileAudio, FolderOpen, Gauge, GripVertical, Info, Keyboard, Layers3, LoaderCircle, Menu, PanelRightOpen, Pause, Play, Plus, Redo2, RotateCcw, Save, Settings, Square, Trash2, Undo2, Waves, X, ZoomIn, ZoomOut } from 'lucide-react';
 import { createDemoAudio, downloadBlob, encodeWav, parseWav, type AudioSource } from '@/lib/audio';
 import { decodeChannels, loadProject, projectFromSource, saveProject } from '@/lib/persistence';
 import { AUTOMATIC_DC_REMOVAL, makeDefaultChain, makeModule, makeProcessingChain, makeRestorationReport, MODULE_LABELS, renderChain, withoutLegacyDcModules, type EditModule, type ModuleType } from '@/lib/edit-chain';
@@ -369,6 +369,11 @@ function App() {
   const currentStats = largeSource ? largeCurrentStats : memoryCurrentStats;
   const selectionOriginalStats = largeSource ? largeSelectionOriginalStats : memorySelectionOriginalStats;
   const selectionCurrentStats = largeSource ? largeSelectionCurrentStats : memorySelectionCurrentStats;
+  const displayedStats = spectrogramSource === 'original' ? originalStats : currentStats;
+  const displayedSelectionStats = spectrogramSource === 'original' ? selectionOriginalStats : selectionCurrentStats;
+  const displayedSourceLabel = spectrogramSource === 'original' ? 'Original' : 'Edited';
+  const statisticsPending = Boolean(largeSource && analysisRequestId !== analysisResultId);
+  const statisticsUnavailableLabel = analysisStatus ? 'Calculating statistics…' : 'Statistics unavailable';
 
   const stageSavedProject = useCallback((record: ProjectRecord) => {
     setProjectId(null);
@@ -515,11 +520,17 @@ function App() {
             setSpectrogramProgress(1);
             spectrogramJobRef.current = [];
           }).catch((caught) => {
-            if ((caught as Error).name !== 'AbortError') setError(caught instanceof Error ? caught.message : 'Unable to build the edited spectrogram.');
+            if (generation === spectrogramGenerationRef.current && (caught as Error).name !== 'AbortError') {
+              setSpectrogramStatus('');
+              setError(caught instanceof Error ? caught.message : 'Unable to build the edited spectrogram.');
+            }
           });
         }
       }).catch((caught) => {
-        if ((caught as Error).name !== 'AbortError') setError(caught instanceof Error ? caught.message : 'Unable to build the visible spectrogram.');
+        if (generation === spectrogramGenerationRef.current && (caught as Error).name !== 'AbortError') {
+          setSpectrogramStatus('');
+          setError(caught instanceof Error ? caught.message : 'Unable to build the visible spectrogram.');
+        }
       });
     }, 100);
     return () => {
@@ -550,10 +561,14 @@ function App() {
     setAnalysisStatus(hasSelection ? 'Analyzing selection' : 'Analyzing original recording');
     setAnalysisProgress(0);
     setOperationPaused(false);
-    const run = (request: Parameters<typeof startWorkerJob<LargeAnalysisResult>>[0]) => {
+    const run = (request: Parameters<typeof startWorkerJob<LargeAnalysisResult>>[0], stage: number) => {
       const job = startWorkerJob<LargeAnalysisResult>(
         request,
-        (fraction) => { if (generation === analysisGenerationRef.current) setAnalysisProgress(fraction); },
+        (fraction) => {
+          if (generation === analysisGenerationRef.current) {
+            setAnalysisProgress((stage + Math.max(0, Math.min(1, fraction))) / (hasSelection ? 4 : 2));
+          }
+        },
       );
       analysisJobRef.current = job;
       if (backgroundPausedRef.current) job.pause();
@@ -563,7 +578,7 @@ function App() {
       setLargeSelectionOriginalStats(EMPTY_STATS);
       setLargeSelectionCurrentStats(EMPTY_STATS);
     }
-    const selectionAnalysis = hasSelection ? run({ kind: 'loudness', file, metadata: selectionMetadata, frameOffset: selectionStartFrame }).then((stats) => {
+    const selectionAnalysis = hasSelection ? run({ kind: 'loudness', file, metadata: selectionMetadata, frameOffset: selectionStartFrame }, 0).then((stats) => {
       if (generation !== analysisGenerationRef.current) throw new DOMException('Stale analysis.', 'AbortError');
       setLargeSelectionOriginalStats(stats);
       setAnalysisStatus('Analyzing processed selection');
@@ -577,7 +592,7 @@ function App() {
         warmup: selectionWarmStart < selectionStartFrame
           ? { metadata, startFrame: selectionWarmStart, frameCount: selectionStartFrame - selectionWarmStart }
           : undefined,
-      });
+      }, 1);
     }).then((stats) => {
       if (generation !== analysisGenerationRef.current) throw new DOMException('Stale analysis.', 'AbortError');
       setLargeSelectionCurrentStats(stats);
@@ -585,12 +600,12 @@ function App() {
     void selectionAnalysis.then(() => {
       if (generation !== analysisGenerationRef.current) throw new DOMException('Stale analysis.', 'AbortError');
       setAnalysisStatus('Analyzing original recording');
-      return run({ kind: 'loudness', file, metadata });
+      return run({ kind: 'loudness', file, metadata }, hasSelection ? 2 : 0);
     }).then((stats) => {
       if (generation !== analysisGenerationRef.current) throw new DOMException('Stale analysis.', 'AbortError');
       setLargeOriginalStats(stats);
       setAnalysisStatus('Analyzing processed recording');
-      return run({ kind: 'loudness', file, metadata, modules: processingModules });
+      return run({ kind: 'loudness', file, metadata, modules: processingModules }, hasSelection ? 3 : 1);
     }).then((stats) => {
       if (generation === analysisGenerationRef.current) {
         setLargeCurrentStats(stats);
@@ -600,7 +615,10 @@ function App() {
         analysisJobRef.current = null;
       }
     }).catch((caught) => {
-      if ((caught as Error).name !== 'AbortError') setError(caught instanceof Error ? caught.message : 'Unable to analyze this recording.');
+      if (generation === analysisGenerationRef.current && (caught as Error).name !== 'AbortError') {
+        setAnalysisStatus('');
+        setError(caught instanceof Error ? caught.message : 'Unable to analyze this recording.');
+      }
     });
     return () => {
       if (generation === analysisGenerationRef.current) analysisGenerationRef.current += 1;
@@ -964,7 +982,10 @@ function App() {
         setModules(makeDefaultChain()); setMarkers([]); setRegions([]); setTitle(file.name.replace(/\.wav$/i, '')); setProjectId(null);
       }
       setSelection([0, Math.min(metadata.frameCount / metadata.sampleRate, 5)]); setOperationStatus('');
-    } catch (caught) { setError(caught instanceof Error ? caught.message : 'Unable to read this WAV file.'); }
+    } catch (caught) {
+      setOperationStatus('');
+      setError(caught instanceof Error ? caught.message : 'Unable to read this WAV file.');
+    }
   }, [pendingPermission, pendingRelink, stopPlayback]);
 
   const pickWavFile = useCallback(async () => {
@@ -1583,10 +1604,10 @@ function App() {
         </div>
       </aside>
       <section className="main-shell">
-        <header className="topbar">
-          <div className="flex items-center gap-3 min-w-0">
+        <header className={`topbar ${analysisStatus || spectrogramStatus || operationStatus ? 'topbar-processing' : ''}`}>
+          <div className="topbar-recording flex items-center gap-3 min-w-0">
             <button type="button" className="icon-btn md:hidden" aria-label="Open navigation" data-testid="button-menu"><Menu size={16} /></button>
-            <div className="min-w-0"><div className="eyebrow">Current recording</div><div className="font-semibold text-[14px] mt-1 truncate max-w-[340px]" data-testid="text-source-name">{source.name}</div></div>
+            <div className="topbar-recording-copy min-w-0"><div className="eyebrow">Current recording</div><div className="font-semibold text-[14px] mt-1 truncate max-w-[340px]" data-testid="text-source-name">{source.name}</div></div>
             <span className="chip hidden sm:inline-flex"><span className="w-1.5 h-1.5 bg-[#d8ed55] rounded-full" />{savedStatus}</span>
              <span className="dc-status hidden lg:inline-flex" data-testid="status-dc-removal"><Check size={12} />DC offset removed automatically</span>
           </div>
@@ -1594,9 +1615,19 @@ function App() {
             const backgroundStatus = analysisStatus || spectrogramStatus;
             const visibleStatus = backgroundStatus || operationStatus;
             const visibleProgress = analysisStatus ? analysisProgress : spectrogramStatus ? spectrogramProgress : operationProgress;
-            return <div className="topbar-work-status" role="status" data-testid="status-background-work" data-progress={visibleProgress}><span className="truncate">{operationPaused && backgroundStatus ? `${visibleStatus} · paused` : visibleStatus}</span><div className="h-1.5 flex-1 bg-[hsl(var(--muted))] rounded overflow-hidden"><div className="h-full bg-[hsl(var(--primary))]" style={{ width: `${Math.max(4, visibleProgress * 100)}%` }} /></div><span className="font-mono-value">{Math.round(visibleProgress * 100)}%</span>{backgroundStatus && <><button type="button" className="quiet-btn !py-1" onClick={operationPaused ? resumeBackgroundWork : pauseBackgroundWork} data-testid="button-analysis-pause">{operationPaused ? <Play size={12} /> : <Pause size={12} />}{operationPaused ? 'Resume' : 'Pause'}</button><button type="button" className="icon-btn !h-7 !min-w-7" onClick={cancelBackgroundWork} aria-label="Cancel background analysis" data-testid="button-analysis-cancel"><X size={13} /></button></>}</div>;
+            const measuredProgress = Boolean(backgroundStatus || operationStatus.startsWith('Exporting'));
+            const title = analysisStatus ? 'Analyzing recording' : spectrogramStatus ? 'Building spectrogram' : operationStatus === 'Reading WAV metadata' ? 'Opening recording' : operationStatus;
+            return <div className="work-banner" role="status" data-testid="status-background-work" data-progress={visibleProgress}>
+              <LoaderCircle size={18} className={`work-banner-spinner ${operationPaused && backgroundStatus ? 'paused' : ''}`} aria-hidden="true" />
+              <div className="work-banner-copy"><strong>{title}{operationPaused && backgroundStatus ? ' · paused' : ''}</strong><span>{visibleStatus} · Your recording is still being processed.</span></div>
+              <div className="work-banner-progress">
+                <div className={`work-banner-meter ${measuredProgress ? '' : 'indeterminate'}`} role="progressbar" aria-label={title} aria-valuemin={0} aria-valuemax={100} aria-valuenow={measuredProgress ? Math.round(visibleProgress * 100) : undefined}><span style={measuredProgress ? { width: `${Math.max(4, visibleProgress * 100)}%` } : undefined} /></div>
+                <span className="font-mono-value">{measuredProgress ? `${Math.round(visibleProgress * 100)}%` : 'Working…'}</span>
+              </div>
+              {backgroundStatus && <div className="work-banner-actions"><button type="button" className="quiet-btn" onClick={operationPaused ? resumeBackgroundWork : pauseBackgroundWork} aria-label={operationPaused ? 'Resume analysis' : 'Pause analysis'} title={operationPaused ? 'Resume analysis' : 'Pause analysis'} data-testid="button-analysis-pause">{operationPaused ? <Play size={12} /> : <Pause size={12} />}</button><button type="button" className="icon-btn" onClick={cancelBackgroundWork} aria-label="Cancel background analysis" title="Cancel background analysis" data-testid="button-analysis-cancel"><X size={13} /></button></div>}
+            </div>;
           })()}
-          <div className="flex items-center gap-1.5">
+          <div className="topbar-actions flex items-center gap-1.5">
             <button type="button" className="icon-btn" onClick={undo} disabled={!undoStack.length} aria-label="Undo last edit" data-testid="button-undo"><Undo2 size={16} /></button>
             <button type="button" className="icon-btn" onClick={redo} disabled={!redoStack.length} aria-label="Redo last edit" data-testid="button-redo"><Redo2 size={16} /></button>
             <span className="hidden lg:inline font-mono-value text-[10px] text-muted-foreground mx-2">⌘Z / ⌘⇧Z</span>
@@ -1660,16 +1691,16 @@ function App() {
                    <section className="panel signal-stats-bar" data-testid="panel-signal-statistics" data-request-id={analysisRequestId} data-result-id={analysisResultId}>
                      <div className="signal-stats-heading">
                        <div className="flex items-center gap-2"><Gauge size={15} color="hsl(var(--primary))" /><div className="section-title">Signal statistics</div></div>
-                       <span className="chip">estimate</span>
+                       <div className="flex flex-wrap gap-1"><span className="chip" data-testid="label-statistics-source">{displayedSourceLabel}</span><span className="chip">estimate</span></div>
                      </div>
                      <div className="signal-stats-groups">
                        <div className="signal-stats-group">
-                         <div className="signal-stats-label">Current / full file</div>
-                         <StatsGrid stats={currentStats} />
+                         <div className="signal-stats-label">{displayedSourceLabel} / full file</div>
+                         {statisticsPending ? <div className="signal-stats-pending">{statisticsUnavailableLabel}</div> : <StatsGrid stats={displayedStats} />}
                        </div>
                        <div className="signal-stats-group">
-                         <div className="signal-stats-label">{hasSelection ? `Selection · ${formatTime(selectionEnd - selectionStart)}` : 'No selection'}</div>
-                          {hasSelection ? <StatsGrid stats={selectionCurrentStats} /> : <div className="stat-grid"><div className="stat-cell text-[11px] text-muted-foreground">No selection · full track playback</div></div>}
+                         <div className="signal-stats-label">{hasSelection ? `${displayedSourceLabel} / selection · ${formatTime(selectionEnd - selectionStart)}` : 'No selection'}</div>
+                          {hasSelection ? statisticsPending ? <div className="signal-stats-pending">{statisticsUnavailableLabel}</div> : <StatsGrid stats={displayedSelectionStats} /> : <div className="stat-grid"><div className="stat-cell text-[11px] text-muted-foreground">No selection · full track playback</div></div>}
                        </div>
                      </div>
                      <div className="signal-stats-note"><Info size={12} />Local BS.1770-style estimates with 4× true-peak interpolation; not certified meter readings.</div>

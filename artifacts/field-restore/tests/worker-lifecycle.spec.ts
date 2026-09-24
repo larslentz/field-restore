@@ -43,6 +43,20 @@ async function ids(locator: Locator) {
 
 test.beforeAll(createLargeWav);
 
+test('import shows a prominent recording analysis banner while workers run', async ({ page }) => {
+  await page.goto('/');
+  const spectrogramTop = (await page.getByTestId('canvas-spectrogram').boundingBox())!.y;
+  await page.getByTestId('input-import-wav').setInputFiles(wavPath);
+  await expect(page.getByTestId('text-source-name')).toHaveText('large-worker-lifecycle.wav');
+  const banner = page.locator('header.topbar').getByTestId('status-background-work');
+  await expect(banner).toBeVisible();
+  await expect(banner).toContainText('Analyzing recording');
+  await expect(banner).toContainText('Your recording is still being processed');
+  expect(Math.abs((await page.getByTestId('canvas-spectrogram').boundingBox())!.y - spectrogramTop)).toBeLessThan(2);
+  await expect(banner.getByRole('progressbar')).toBeVisible();
+  await expect(page.getByTestId('panel-signal-statistics')).toContainText('Calculating statistics');
+});
+
 test('large stereo spectrogram stays interactive and cancels superseded viewports', async ({ page }) => {
   await page.goto('/');
   const startedAt = performance.now();

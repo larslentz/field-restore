@@ -171,9 +171,31 @@
 .brand-mark { width: 28px; height: 28px; border: 2px solid hsl(var(--sidebar-primary)); border-radius: 50%; position: relative; display: grid; place-items: center; }
 .brand-mark::after { content: ''; width: 6px; height: 6px; background: hsl(var(--sidebar-primary)); border-radius: 50%; box-shadow: 0 0 0 4px rgba(183, 221, 47, .12); }
 .main-shell { min-width: 0; flex: 1; display: flex; flex-direction: column; }
-.topbar { height: 58px; flex: 0 0 58px; border-bottom: 1px solid hsl(var(--border)); display: flex; align-items: center; justify-content: space-between; padding: 0 24px; background: hsl(var(--card)); }
+.topbar { height: 58px; flex: 0 0 58px; border-bottom: 1px solid hsl(var(--border)); display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 24px; background: hsl(var(--card)); }
+.topbar-actions { flex: 0 0 auto; }
+.topbar-processing .topbar-recording { flex: 0 1 auto; }
+.topbar-processing .topbar-recording .chip, .topbar-processing .topbar-recording .dc-status { display: none; }
 .main-content { min-height: 0; flex: 1; overflow: auto; padding: 18px 24px 26px; }
-.topbar-work-status { min-width: 240px; max-width: 520px; height: 38px; margin: 0 16px; padding: 0 10px; border: 1px solid hsl(var(--border)); border-radius: 6px; background: hsl(var(--background)); display: flex; align-items: center; gap: 9px; font-size: 10px; }
+.work-banner { min-width: 0; flex: 1 1 400px; height: 42px; padding: 4px 8px; display: flex; align-items: center; gap: 8px; color: #f2f4e8; background: #263746; border: 2px solid #b7dd2f; border-radius: 6px; box-shadow: 0 2px 10px rgba(24,35,31,.14); }
+.work-banner-spinner { flex: 0 0 auto; color: #d8ed55; animation: work-spin 1.4s linear infinite; }
+.work-banner-spinner.paused { animation-play-state: paused; }
+.work-banner-copy { min-width: 0; flex: 1 1 auto; display: grid; gap: 2px; }
+.work-banner-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; line-height: 1.2; }
+.work-banner-copy span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #d2decf; font-size: 9px; line-height: 1.3; }
+.work-banner-progress { width: 110px; flex: 0 1 110px; display: flex; align-items: center; gap: 5px; font-size: 9px; white-space: nowrap; }
+.work-banner-meter { flex: 1; min-width: 18px; height: 6px; overflow: hidden; border-radius: 99px; background: rgba(255,255,255,.18); }
+.work-banner-meter > span { display: block; height: 100%; border-radius: inherit; background: #d8ed55; }
+.work-banner-meter.indeterminate > span { width: 34%; animation: work-progress 1.5s ease-in-out infinite alternate; }
+.work-banner-actions { flex: 0 0 auto; display: flex; align-items: center; gap: 2px; }
+.work-banner-actions .quiet-btn, .work-banner-actions .icon-btn { width: 26px; height: 26px; min-width: 26px; padding: 0; }
+.work-banner .quiet-btn { background: rgba(255,255,255,.1); border-color: rgba(255,255,255,.25); color: #f2f4e8; }
+.work-banner .quiet-btn:hover, .work-banner .icon-btn:hover { background: rgba(255,255,255,.2); }
+.work-banner .icon-btn { color: #f2f4e8; }
+@keyframes work-spin { to { transform: rotate(360deg); } }
+@keyframes work-progress { to { transform: translateX(195%); } }
+@media (prefers-reduced-motion: reduce) {
+  .work-banner-spinner, .work-banner-meter.indeterminate > span { animation: none; }
+}
 .workspace-grid { max-width: 1660px; margin: 0 auto; }
 .panel { background: hsl(var(--card)); border: 1px solid hsl(var(--card-border)); border-radius: 8px; box-shadow: var(--shadow-subtle); }
 .panel-header { padding: 14px 16px; border-bottom: 1px solid hsl(var(--border)); display: flex; align-items: center; justify-content: space-between; gap: 12px; }
@@ -308,6 +330,7 @@
 .signal-stats-group { min-width: 0; display: grid; grid-template-columns: 112px minmax(0, 1fr); align-items: stretch; border-right: 1px solid hsl(var(--border)); }
 .signal-stats-group:last-child { border-right: 0; }
 .signal-stats-label { padding: 12px; display: flex; align-items: center; background: hsl(var(--muted)); color: hsl(var(--muted-foreground)); font-size: 9px; font-weight: 700; line-height: 1.45; letter-spacing: .07em; text-transform: uppercase; }
+.signal-stats-pending { padding: 16px 12px; display: flex; align-items: center; color: hsl(var(--muted-foreground)); font-size: 11px; }
 .signal-stats-bar .stat-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); border: 0; }
 .signal-stats-bar .stat-cell { min-width: 0; padding: 11px 9px; }
 .signal-stats-bar .stat-value { font-size: 12px; white-space: nowrap; }
@@ -324,7 +347,9 @@
 .empty-state { padding: 34px 20px; text-align: center; color: hsl(var(--muted-foreground)); }
 @media (max-width: 1100px) {
   .main-content { padding-left: 15px; padding-right: 15px; }
-  .topbar-work-status { position: absolute; left: 50%; transform: translateX(-50%); width: min(420px, 46vw); }
+  .topbar-processing .topbar-recording-copy { max-width: 145px; }
+  .work-banner-copy span { display: none; }
+  .work-banner-progress { width: 75px; flex-basis: 75px; }
   .spectrogram-panel-header { align-items: flex-start; }
   .spectrogram-header-actions { flex-direction: column; align-items: flex-end; gap: 6px; }
   .signal-stats-bar { grid-template-columns: 1fr; }
@@ -336,7 +361,10 @@
   .compact-chain-trigger { display: flex; }
   .nav-item { justify-content: center; padding: 10px 0; }
   .topbar { padding: 0 14px; }
-  .topbar-work-status { position: fixed; top: 66px; left: 70px; right: 10px; z-index: 30; width: auto; max-width: none; margin: 0; transform: none; box-shadow: var(--shadow-subtle); }
+  .topbar-processing .topbar-recording-copy { max-width: 120px; }
+  .topbar-processing .topbar-actions [data-testid="button-undo"], .topbar-processing .topbar-actions [data-testid="button-redo"] { display: none; }
+  .topbar-processing .topbar-actions { gap: 2px; }
+  .work-banner-progress { width: 55px; flex-basis: 55px; }
   .spectrogram-panel-header { flex-direction: column; }
   .spectrogram-header-actions { width: 100%; flex-direction: row; align-items: center; justify-content: space-between; }
   .spectrogram-source-caption { display: none; }
@@ -354,7 +382,11 @@
 @media (max-width: 560px) {
   .main-content { padding: 10px; }
   .topbar { height: 52px; flex-basis: 52px; }
-  .topbar-work-status { top: 60px; }
+  .topbar-processing .topbar-recording-copy, .topbar-processing .topbar-actions { display: none; }
+  .topbar-processing .topbar-recording { flex: 0 0 auto; }
+  .topbar-processing .work-banner { flex-basis: 0; }
+  .work-banner-progress { width: auto; flex: 0 0 auto; }
+  .work-banner-meter { display: none; }
   .waveform-canvas { height: 330px; }
   .spectrogram-header-actions { align-items: flex-start; flex-direction: column; }
   .spectrogram-source-label { left: 48px; }
