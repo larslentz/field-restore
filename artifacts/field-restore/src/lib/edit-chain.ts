@@ -1,5 +1,6 @@
 import { cloneChannels, type ChannelData } from './audio';
 import { HumProcessor, humAnalysisWindowSize, humPrefixFrames } from './hum-removal';
+import { WindProcessor, WIND_DEFAULTS, windLevel } from './wind-reduction';
 
 export type ModuleType = 'gain' | 'fade' | 'eq' | 'dc' | 'hum' | 'wind' | 'region' | 'ambient';
 export interface EditModule {
@@ -19,7 +20,7 @@ let idCounter = 1;
 export const makeModule = (type: ModuleType, options?: { name?: string; params?: Record<string, number | string> }): EditModule => {
   const defaults: Record<ModuleType, Record<string, number | string>> = {
     gain: { db: -2 }, fade: { in: 0, out: 0 }, eq: { mode: 'three-band', low: 0, mid: 0, high: -1, frequency: 55, q: 0.4, gain: 0 }, dc: { mode: 'Auto', amount: 0 },
-    hum: { mode: 'Static', frequency: 60, reduction: 12 }, wind: { cutoff: 100, q: 0.7 },
+    hum: { mode: 'Static', frequency: 60, reduction: 12 }, wind: { mode: 'Automatic', ...WIND_DEFAULTS },
     region: { start: 0, end: 0, amount: -8 }, ambient: { start: 0, end: 0, length: 1 },
   };
   return {
@@ -31,8 +32,10 @@ export const makeModule = (type: ModuleType, options?: { name?: string; params?:
   };
 };
 
-export const makeLowRumbleRemoval = (): EditModule =>
-  makeModule('wind', { name: 'Low Rumble Removal', params: { cutoff: 55.5, q: 0.38 } });
+export const makeLowRumbleRemoval = (): EditModule => {
+  const module = makeModule('wind', { name: 'Low Rumble Removal' });
+  return { ...module, params: { mode: 'Fixed low rumble', cutoff: 55.5, q: 0.38 } };
+};
 
 export const makeBringBackLowEnd = (): EditModule =>
   makeModule('eq', { name: 'Bring Back the Low End', params: { mode: 'low-shelf', frequency: 55, q: 0.4, gain: 3 } });
@@ -41,7 +44,7 @@ export const makeDefaultChain = (): EditModule[] => [
   makeModule('gain', { name: 'Gain', params: { db: 0 } }),
   makeLowRumbleRemoval(),
   makeModule('hum', { name: 'Hum Removal', params: { mode: 'Adaptive', frequency: 60, reduction: 12 } }),
-  makeModule('wind', { name: 'Wind / Rumble', params: { cutoff: 100, q: 0.7 } }),
+  makeModule('wind'),
   makeBringBackLowEnd(),
   makeModule('fade', { name: 'Fade In', params: { in: 7, out: 0 } }),
   makeModule('fade', { name: 'Fade Out', params: { in: 0, out: 7 } }),
@@ -56,8 +59,32 @@ export const AUTOMATIC_DC_REMOVAL: EditModule = {
   params: { mode: 'Auto', amount: 0 },
 };
 
+/** Older low-rumble edits have no type marker; retain the named item or its distinctive factory settings. */
+export const isFixedLowRumble = (module: EditModule) => module.type === 'wind' &&
+  (module.params.mode === 'Fixed low rumble' ||
+    (module.params.mode === undefined && (module.name === 'Low Rumble Removal' ||
+      (module.name !== 'Wind / Rumble' && Number(module.params.cutoff) === 55.5 && Number(module.params.q) === .38))));
+
+export const isLegacyWind = (module: EditModule) =>
+  module.type === 'wind' && !isFixedLowRumble(module) && module.params.mode !== 'Automatic';
+
+export const normalizeWindModule = (module: EditModule): EditModule => {
+  if (module.type !== 'wind') return module;
+  if (isFixedLowRumble(module)) return module.params.mode === 'Fixed low rumble' ? module :
+    { ...module, params: { ...module.params, mode: 'Fixed low rumble' } };
+  if (module.params.mode === 'Automatic' &&
+    module.params.cutoff === undefined && module.params.q === undefined &&
+    ['Low', 'Medium', 'High'].includes(String(module.params.detection)) &&
+    ['Low', 'Medium', 'High'].includes(String(module.params.removal))) return module;
+  return { ...module, params: {
+    mode: 'Automatic',
+    detection: windLevel(module.params.detection),
+    removal: windLevel(module.params.removal),
+  } };
+};
+
 export const withoutLegacyDcModules = (modules: EditModule[]): EditModule[] =>
-  modules.filter((module) => module.type !== 'dc');
+  modules.filter((module) => module.type !== 'dc').map(normalizeWindModule);
 
 export const makeProcessingChain = (modules: EditModule[]): EditModule[] => [
   AUTOMATIC_DC_REMOVAL,
@@ -96,6 +123,7 @@ export function makeRestorationReport(input: RestorationReportInput) {
     limitations: [
       'Automatic DC offset removal is always applied before editable modules.',
       'Adaptive hum detection is conservative: it can miss interference or affect wanted steady tones.',
+      'Automatic wind/rumble detection may miss interference or reduce wanted low sounds.',
       'Edits are conservative sample-domain approximations in this browser build.',
       'Original source remains immutable; export reflects automatic DC correction and enabled modules.',
     ],
@@ -161,6 +189,7 @@ export interface RenderContext {
   totalFrames?: number;
   initialHumFrequencies?: number[];
   onHumChange?: (frame: number, frequencies: number[]) => void;
+  onWindChange?: (frame: number, active: boolean) => void;
 }
 
 export function applyModule(input: ChannelData, module: EditModule, sampleRate: number, context: RenderContext = {}): ChannelData {
@@ -219,10 +248,13 @@ export function applyModule(input: ChannelData, module: EditModule, sampleRate: 
     new HumProcessor(p, sampleRate, output.length, context.initialHumFrequencies,
       context.onHumChange && ((frame, frequencies) => context.onHumChange!(frameOffset + frame, frequencies))).process(output);
   } else if (module.type === 'wind') {
-    const cutoff = Math.max(20, Number(p.cutoff) || 100);
-    const q = Math.max(0.1, Number(p.q) || 0.7);
-    const coefficients = highPass(sampleRate, cutoff, q);
-    output.forEach((channel) => processBiquad(channel, coefficients));
+    if (isFixedLowRumble(module)) {
+      const coefficients = highPass(sampleRate, Math.max(20, Number(p.cutoff) || 55.5), Math.max(.1, Number(p.q) || .38));
+      output.forEach((channel) => processBiquad(channel, coefficients));
+    } else {
+      new WindProcessor(sampleRate, output.length, windLevel(p.detection), windLevel(p.removal),
+        context.onWindChange && ((frame, active) => context.onWindChange!(frameOffset + frame, active))).process(output);
+    }
   } else if (module.type === 'region') {
     const start = Math.max(0, Math.floor(Math.max(0, Number(p.start)) * sampleRate) - frameOffset);
     const end = Math.min(length, Math.floor(Math.max(Number(p.end), Number(p.start)) * sampleRate) - frameOffset);
@@ -289,9 +321,11 @@ export function humOpeningReadout(module: EditModule, state: HumScanState, frequ
 }
 
 export function renderChain(original: ChannelData, modules: EditModule[], sampleRate: number, context: RenderContext = {}, initialSeeds?: number[][],
-  onHumChange?: (moduleId: string, frame: number, frequencies: number[]) => void) {
+  onHumChange?: (moduleId: string, frame: number, frequencies: number[]) => void,
+  onWindChange?: (moduleId: string, frame: number, active: boolean) => void) {
   const seeds = context.frameOffset ? [] : initialSeeds ?? analyzeInitialHum(original, modules, sampleRate, context.totalFrames ?? original[0]?.length ?? 0);
   return modules.reduce((audio, module, index) => applyModule(audio, module, sampleRate,
     { ...context, initialHumFrequencies: seeds[index],
-      onHumChange: onHumChange && ((frame, frequencies) => onHumChange(module.id, frame, frequencies)) }), cloneChannels(original));
+      onHumChange: onHumChange && ((frame, frequencies) => onHumChange(module.id, frame, frequencies)),
+      onWindChange: onWindChange && ((frame, active) => onWindChange(module.id, frame, active)) }), cloneChannels(original));
 }

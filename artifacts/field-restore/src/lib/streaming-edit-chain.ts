@@ -1,5 +1,6 @@
 import type { ChannelData } from './audio';
-import { AUTOMATIC_DC_BLOCKER_POLE, analyzeInitialHum, type EditModule } from './edit-chain';
+import { AUTOMATIC_DC_BLOCKER_POLE, analyzeInitialHum, isFixedLowRumble, type EditModule } from './edit-chain';
+import { WindProcessor, windLevel, type WindSnapshot } from './wind-reduction';
 import { HumProcessor, humPrefixFrames, type HumSnapshot } from './hum-removal';
 import { readFrames, type WavMetadata } from './large-wav';
 
@@ -18,11 +19,12 @@ interface ModuleState {
   phase: number;
   ambientBed: number[] | undefined;
   hum: HumProcessor | undefined;
+  wind: WindProcessor | undefined;
 }
 
 export interface StreamingEditChainSnapshot {
   nextFrame: number;
-  state: Array<Omit<ModuleState, 'hum'> & { hum: HumSnapshot | undefined }>;
+  state: Array<Omit<ModuleState, 'hum' | 'wind'> & { hum: HumSnapshot | undefined; wind: WindSnapshot | undefined }>;
 }
 
 interface Biquad {
@@ -86,6 +88,7 @@ export class StreamingEditChain {
     initialFrame = 0,
     initialHumFrequencies: number[][] = [],
     private readonly onHumChange?: (moduleId: string, frame: number, frequencies: number[]) => void,
+    private readonly onWindChange?: (moduleId: string, frame: number, active: boolean) => void,
   ) {
     this.modules = modules;
     this.sampleRate = sampleRate;
@@ -99,6 +102,7 @@ export class StreamingEditChain {
       phase: 0,
       ambientBed: undefined,
       hum: undefined,
+      wind: undefined,
     }));
     this.nextFrame = initialFrame;
   }
@@ -112,6 +116,7 @@ export class StreamingEditChain {
       state.phase = (2 * Math.PI * 60 * startFrame) / this.sampleRate;
       state.ambientBed = undefined;
       state.hum = undefined;
+      state.wind = undefined;
     });
     this.nextFrame = startFrame;
   }
@@ -135,6 +140,7 @@ export class StreamingEditChain {
         phase: state.phase,
         ambientBed: state.ambientBed ? [...state.ambientBed] : undefined,
         hum: state.hum?.snapshot(),
+        wind: state.wind?.snapshot(),
       })),
     };
   }
@@ -154,6 +160,12 @@ export class StreamingEditChain {
           (frame, frequencies) => this.onHumChange?.(this.modules[index].id, this.nextFrame + frame, frequencies))
         : undefined;
       if (saved.hum) target.hum?.restore(saved.hum);
+      target.wind = saved.wind
+        ? new WindProcessor(this.sampleRate, this.modules[index].type === 'wind' ? saved.wind.channels.length : 0,
+          windLevel(this.modules[index].params.detection), windLevel(this.modules[index].params.removal),
+          (frame, active) => this.onWindChange?.(this.modules[index].id, frame, active))
+        : undefined;
+      if (saved.wind) target.wind?.restore(saved.wind);
     });
     this.nextFrame = snapshot.nextFrame;
   }
@@ -226,14 +238,20 @@ export class StreamingEditChain {
           (frame, frequencies) => this.onHumChange?.(module.id, this.nextFrame + frame, frequencies));
         state.hum.process(output);
       } else if (module.type === 'wind') {
-        const coefficients = highPass(this.sampleRate, Math.max(20, Number(p.cutoff) || 100),
-          Math.max(0.1, Number(p.q) || 0.7));
-        output.forEach((channel, c) => channel.forEach((sample, i) => {
-          const f = state.filters[c];
-          const value = coefficients.b0 * sample + coefficients.b1 * f.x1 + coefficients.b2 * f.x2
-            - coefficients.a1 * f.y1 - coefficients.a2 * f.y2;
-          f.x2 = f.x1; f.x1 = sample; f.y2 = f.y1; f.y1 = value; channel[i] = finite(value);
-        }));
+        if (isFixedLowRumble(module)) {
+          const coefficients = highPass(this.sampleRate, Math.max(20, Number(p.cutoff) || 55.5),
+            Math.max(0.1, Number(p.q) || .38));
+          output.forEach((channel, c) => channel.forEach((sample, i) => {
+            const f = state.filters[c];
+            const value = coefficients.b0 * sample + coefficients.b1 * f.x1 + coefficients.b2 * f.x2
+              - coefficients.a1 * f.y1 - coefficients.a2 * f.y2;
+            f.x2 = f.x1; f.x1 = sample; f.y2 = f.y1; f.y1 = value; channel[i] = finite(value);
+          }));
+        } else {
+          state.wind ??= new WindProcessor(this.sampleRate, output.length, windLevel(p.detection), windLevel(p.removal),
+            (frame, active) => this.onWindChange?.(module.id, frame, active), startFrame);
+          state.wind.process(output);
+        }
       } else if (module.type === 'region') {
         const start = Math.max(0, Math.floor(Math.max(0, Number(p.start)) * this.sampleRate));
         const end = Math.floor(Math.max(Number(p.end), Number(p.start)) * this.sampleRate);
@@ -267,7 +285,8 @@ export class StreamingEditChain {
 export const createStreamingEditChain = (
   modules: EditModule[], sampleRate: number, totalFrames: number, initialFrame = 0, initialHumFrequencies: number[][] = [],
   onHumChange?: (moduleId: string, frame: number, frequencies: number[]) => void,
-) => new StreamingEditChain(modules, sampleRate, totalFrames, initialFrame, initialHumFrequencies, onHumChange);
+  onWindChange?: (moduleId: string, frame: number, active: boolean) => void,
+) => new StreamingEditChain(modules, sampleRate, totalFrames, initialFrame, initialHumFrequencies, onHumChange, onWindChange);
 
 /** Reads at most two detector windows from a file; never decodes the whole take. */
 export async function analyzeFileInitialHum(file: Blob, metadata: WavMetadata, modules: EditModule[], signal?: AbortSignal) {

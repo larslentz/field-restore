@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, ty
 import { Activity, ArrowDown, ArrowUp, Check, ChevronDown, CircleHelp, Download, FileAudio, FolderOpen, Gauge, GripVertical, Info, Keyboard, Layers3, LoaderCircle, Menu, PanelRightOpen, Pause, Play, Plus, Redo2, RotateCcw, Save, Settings, Square, Trash2, Undo2, Waves, X, ZoomIn, ZoomOut } from 'lucide-react';
 import { createDemoAudio, downloadBlob, encodeWav, parseWav, type AudioSource } from '@/lib/audio';
 import { decodeChannels, loadProject, projectFromSource, saveProject } from '@/lib/persistence';
-import { AUTOMATIC_DC_REMOVAL, analyzeInitialHum, humOpeningReadout, makeBringBackLowEnd, makeDefaultChain, makeLowRumbleRemoval, makeModule, makeProcessingChain, makeRestorationReport, MODULE_LABELS, renderChain, withoutLegacyDcModules, type EditModule, type HumScanState } from '@/lib/edit-chain';
+import { AUTOMATIC_DC_REMOVAL, analyzeInitialHum, humOpeningReadout, isFixedLowRumble, isLegacyWind, makeBringBackLowEnd, makeDefaultChain, makeLowRumbleRemoval, makeModule, makeProcessingChain, makeRestorationReport, MODULE_LABELS, renderChain, withoutLegacyDcModules, type EditModule, type HumScanState } from '@/lib/edit-chain';
 import { analyzeLoudness, type LoudnessStats } from '@/lib/loudness';
 import { createPlaybackRangePlan } from '@/lib/playback-range';
 import { calculateSpectrogram, type SpectrogramData } from '@/lib/spectrogram';
@@ -133,7 +133,7 @@ function moduleSummary(module: EditModule, humReadout?: ReturnType<typeof humOpe
   const p = module.params;
   return module.type === 'gain' ? `${p.db} dB`
     : module.type === 'hum' ? humReadout?.summary ?? `${p.mode} · ${p.frequency} Hz`
-      : module.type === 'wind' ? `HPF ${p.cutoff} Hz`
+      : module.type === 'wind' ? (isFixedLowRumble(module) ? `HPF ${p.cutoff} Hz` : `Auto · ${p.detection ?? 'Medium'} detection · ${p.removal ?? 'Medium'} removal`)
         : module.type === 'eq' && p.mode === 'low-shelf' ? `${p.gain} dB · ${p.frequency} Hz`
           : module.type === 'fade' ? (Number(p.in) > 0 ? `${p.in} s in` : `${p.out} s out`)
             : module.type;
@@ -154,6 +154,7 @@ function App() {
   const [playHead, setPlayHead] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [liveHum, setLiveHum] = useState<LiveHum | null>(null);
+  const [liveWind, setLiveWind] = useState<{ source: AudioSource; chain: EditModule[]; events: Array<{ moduleId: string; frame: number; active: boolean }> } | null>(null);
   const [humHistory, setHumHistory] = useState<{ source: AudioSource; chain: EditModule[]; segments: HumHistorySegment[] } | null>(null);
   const humHistoryRef = useRef<HumHistorySegment[]>([]);
   const humHistoryOwnerRef = useRef<{ source: AudioSource; chain: EditModule[] } | null>(null);
@@ -361,6 +362,7 @@ function App() {
     humHistoryOwnerRef.current = null;
     setHumHistory(null);
     setLiveHum(null);
+    setLiveWind(null);
   }, [source, processingModules]);
   const recordHeardHum = useCallback((moduleId: string, frame: number, frequencies: number[], sampleRate: number) => {
     const previous = humHistoryRef.current;
@@ -411,12 +413,22 @@ function App() {
     liveHum?.source === source && liveHum.chain === processingModules ? liveHum.frequencies : null;
   const memoryRender = useMemo(() => {
     const events: HumEvent[] = [];
+    const windEvents: Array<{ moduleId: string; frame: number; active: boolean }> = [];
     const channels = largeSource ? [] : renderChain(source.channels, processingModules, source.sampleRate, {},
-      memoryHumFrequencies, (moduleId, frame, frequencies) => events.push({ moduleId, frame, frequencies }));
+      memoryHumFrequencies, (moduleId, frame, frequencies) => events.push({ moduleId, frame, frequencies }),
+      (moduleId, frame, active) => windEvents.push({ moduleId, frame, active }));
     events.sort((a, b) => a.frame - b.frame);
-    return { channels, events };
+    windEvents.sort((a, b) => a.frame - b.frame);
+    return { channels, events, windEvents };
   }, [largeSource, source.channels, source.sampleRate, processingModules, memoryHumFrequencies]);
   const currentChannels = memoryRender.channels;
+  const windActivityFor = (moduleId: string) => {
+    if (!isPlaying || monitor !== 'current') return null;
+    const events = largeSource
+      ? (liveWind?.source === source && liveWind.chain === processingModules ? liveWind.events : [])
+      : memoryRender.windEvents;
+    return [...events].reverse().find((entry) => entry.moduleId === moduleId && entry.frame <= playHead * source.sampleRate)?.active ?? false;
+  };
   const currentSource = useMemo<AudioSource>(() => ({ ...source, channels: currentChannels }), [source, currentChannels]);
   const duration = source.duration;
   const trimStart = trim?.[0] ?? 0;
@@ -508,7 +520,7 @@ function App() {
     setPendingPermission(null);
     setPendingRelink(null);
     setSelection([0, Math.min(5, metadata.frameCount / metadata.sampleRate)]);
-    setSavedStatus(`Restored file-backed project · ${new Date(record.savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
+    setSavedStatus(`Restored file-backed project${record.modules.some(isLegacyWind) ? ' · Wind / Rumble converted to automatic' : ''} · ${new Date(record.savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
     return true;
   }, [restoreTrim]);
 
@@ -518,12 +530,12 @@ function App() {
       const channels = decodeChannels(saved.originalBase64, saved.originalLength);
       const next: AudioSource = { channels, sampleRate: saved.sampleRate, duration: channels[0].length / saved.sampleRate, name: saved.sourceName };
       setSource(next); setTitle(saved.title); setNotes(saved.notes); setModules(withoutLegacyDcModules(saved.modules)); setMarkers(saved.markers); setRegions(saved.regions); restoreTrim(saved.trim, next.duration);
-      setSavedStatus(`Restored ${new Date(saved.savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
+      setSavedStatus(`Restored${saved.modules.some(isLegacyWind) ? ' · Wind / Rumble converted to automatic' : ''} ${new Date(saved.savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
     } else if (saved?.original?.length) {
       const channels = saved.original.map((channel) => new Float32Array(channel));
       const next: AudioSource = { channels, sampleRate: saved.sampleRate, duration: channels[0].length / saved.sampleRate, name: saved.sourceName };
       setSource(next); setTitle(saved.title); setNotes(saved.notes); setModules(withoutLegacyDcModules(saved.modules)); setMarkers(saved.markers); setRegions(saved.regions); restoreTrim(saved.trim, next.duration);
-      setSavedStatus(`Restored ${new Date(saved.savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
+      setSavedStatus(`Restored${saved.modules.some(isLegacyWind) ? ' · Wind / Rumble converted to automatic' : ''} ${new Date(saved.savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
     }
     void listProjects().then(async (projects) => {
       const latest = projects[0];
@@ -942,8 +954,14 @@ function App() {
     }
     if (playbackSessionRef.current !== session) return;
     let chunkEvents: HumEvent[] | null = null;
+    const windEvents: Array<{ moduleId: string; frame: number; active: boolean }> = [];
     const processor = createStreamingEditChain(processingModules, metadata.sampleRate, metadata.frameCount, warmStart,
-      initialHumFrequencies, (moduleId, frame, frequencies) => chunkEvents?.push({ moduleId, frame, frequencies }));
+      initialHumFrequencies, (moduleId, frame, frequencies) => chunkEvents?.push({ moduleId, frame, frequencies }),
+      (moduleId, frame, active) => {
+        windEvents.push({ moduleId, frame, active });
+        if (windEvents.length > 512) windEvents.splice(0, windEvents.length - 512);
+        setLiveWind({ source, chain: processingModules, events: [...windEvents] });
+      });
     if (monitor === 'current' && warmStart < nextFrame) {
       try {
         await warmFileProcessor(file, metadata, processor, warmStart, nextFrame, undefined, () => playbackSessionRef.current !== session);
@@ -1120,12 +1138,12 @@ function App() {
     } else if (value.startsWith('saved:')) {
       const preset = chainPresets[Number(value.slice(6))];
       if (!preset) return;
-      commitModules(preset.modules.map((module) => ({
+      commitModules(withoutLegacyDcModules(preset.modules).map((module) => ({
         ...module,
         id: `${module.type}-${crypto.randomUUID()}`,
         params: { ...module.params },
       })));
-      setSavedStatus(`Preset “${preset.name}” loaded · project not saved`);
+      setSavedStatus(`Preset “${preset.name}” loaded${preset.modules.some(isLegacyWind) ? ' · Wind / Rumble converted to automatic' : ''} · project not saved`);
     }
   };
 
@@ -1208,7 +1226,7 @@ function App() {
         setProjectId(savedProject.id);
         setPendingPermission(null);
         setPendingRelink(null);
-        setSavedStatus('Source relinked · project restored');
+         setSavedStatus(`Source relinked · project restored${savedProject.modules.some(isLegacyWind) ? ' · Wind / Rumble converted to automatic' : ''}`);
       } else {
         setModules(makeDefaultChain()); setMarkers([]); setRegions([]); setTitle(file.name.replace(/\.wav$/i, '')); setProjectId(null);
          restoreTrim(null, metadata.frameCount / metadata.sampleRate);
@@ -2076,7 +2094,7 @@ function App() {
              <div className="relative"><button type="button" className="quiet-btn w-full" onClick={() => setModuleMenu(!moduleMenu)}><Plus size={13} /> Add module</button>{moduleMenu && <div className="drawer-module-menu">{MODULE_TYPES.map((type) => <button type="button" key={type} onClick={() => addModule(type)}>{moduleOptionLabel(type)}</button>)}</div>}</div>
           </div>
           <div className="chain-drawer-body">
-             {automaticDcSelected ? <AutomaticDcCard /> : selectedModule ? <ModuleCard module={selectedModule} humReadout={selectedModule.type === 'hum' ? humReadoutFor(selectedModule) : undefined} liveFrequencies={liveHumFrequencies?.[selectedModule.id]} sampleRate={source.sampleRate} index={modules.findIndex((module) => module.id === selectedModule.id)} total={modules.length} collapsed={false} updateModule={updateModule} updateParams={updateParams} deleteModule={deleteModule} duplicateModule={duplicateModule} moveModule={moveModule} /> : <div className="chain-drawer-full-list"><AutomaticDcCard />{modules.map((module, index) => <ModuleCard key={module.id} module={module} humReadout={module.type === 'hum' ? humReadoutFor(module) : undefined} liveFrequencies={liveHumFrequencies?.[module.id]} sampleRate={source.sampleRate} index={index} total={modules.length} collapsed={false} updateModule={updateModule} updateParams={updateParams} deleteModule={deleteModule} duplicateModule={duplicateModule} moveModule={moveModule} />)}{modules.length === 0 && <div className="empty-state">No additional edits yet.</div>}</div>}
+             {automaticDcSelected ? <AutomaticDcCard /> : selectedModule ? <ModuleCard module={selectedModule} humReadout={selectedModule.type === 'hum' ? humReadoutFor(selectedModule) : undefined} liveFrequencies={liveHumFrequencies?.[selectedModule.id]} windActive={windActivityFor(selectedModule.id)} sampleRate={source.sampleRate} index={modules.findIndex((module) => module.id === selectedModule.id)} total={modules.length} collapsed={false} updateModule={updateModule} updateParams={updateParams} deleteModule={deleteModule} duplicateModule={duplicateModule} moveModule={moveModule} /> : <div className="chain-drawer-full-list"><AutomaticDcCard />{modules.map((module, index) => <ModuleCard key={module.id} module={module} humReadout={module.type === 'hum' ? humReadoutFor(module) : undefined} liveFrequencies={liveHumFrequencies?.[module.id]} windActive={windActivityFor(module.id)} sampleRate={source.sampleRate} index={index} total={modules.length} collapsed={false} updateModule={updateModule} updateParams={updateParams} deleteModule={deleteModule} duplicateModule={duplicateModule} moveModule={moveModule} />)}{modules.length === 0 && <div className="empty-state">No additional edits yet.</div>}</div>}
           </div>
           <div className="chain-drawer-footer">processing is local · original stays untouched</div>
         </aside>
@@ -2163,7 +2181,7 @@ function HumHistoryView({ modules, segments, sampleRate, duration, onSeek }: {
   </section>;
 }
 
-function ModuleCard({ module, humReadout, liveFrequencies, sampleRate, index, total, collapsed, updateModule, updateParams, deleteModule, duplicateModule, moveModule }: { module: EditModule; humReadout?: ReturnType<typeof humOpeningReadout>; liveFrequencies?: number[]; sampleRate: number; index: number; total: number; collapsed: boolean; updateModule: (id: string, patch: Partial<EditModule>) => void; updateParams: (id: string, key: string, value: number | string) => void; deleteModule: (id: string) => void; duplicateModule: (module: EditModule) => void; moveModule: (index: number, direction: -1 | 1) => void }) {
+function ModuleCard({ module, humReadout, liveFrequencies, windActive, sampleRate, index, total, collapsed, updateModule, updateParams, deleteModule, duplicateModule, moveModule }: { module: EditModule; humReadout?: ReturnType<typeof humOpeningReadout>; liveFrequencies?: number[]; windActive?: boolean | null; sampleRate: number; index: number; total: number; collapsed: boolean; updateModule: (id: string, patch: Partial<EditModule>) => void; updateParams: (id: string, key: string, value: number | string) => void; deleteModule: (id: string) => void; duplicateModule: (module: EditModule) => void; moveModule: (index: number, direction: -1 | 1) => void }) {
   const p = module.params;
   const numberInput = (key: string, label: string, min: number, max: number, step: number, suffix = '', options?: { resetValue?: number; wheelStep?: number }) => <RangeControl label={label} value={Number(p[key])} min={min} max={max} step={step} suffix={suffix} resetValue={options?.resetValue} wheelStep={options?.wheelStep} onChange={(value) => updateParams(module.id, key, value)} testId={`range-${module.type}-${key}`} />;
   return <div className={`module-card ${module.enabled ? '' : 'bypassed'}`} data-testid={`card-module-${module.id}`}><div className="module-head"><span className="module-index">{String(index + 2).padStart(2, '0')}</span><span className="module-dot" /><button type="button" className="module-name text-left" onDoubleClick={() => { const name = window.prompt('Rename module', module.name); if (name?.trim()) updateModule(module.id, { name: name.trim() }); }} title="Double-click to rename" data-testid={`button-rename-${module.id}`}>{module.name}</button><span className="module-summary">{moduleSummary(module, humReadout)}</span><button type="button" className={`icon-btn !h-6 !min-w-6 ${module.enabled ? 'text-[hsl(var(--primary))]' : ''}`} onClick={() => updateModule(module.id, { enabled: !module.enabled })} aria-label={`${module.enabled ? 'Bypass' : 'Enable'} ${module.name}`} aria-pressed={module.enabled} data-testid={`button-bypass-${module.id}`}><Check size={13} /></button><button type="button" className="icon-btn !h-6 !min-w-6" onClick={() => moveModule(index, -1)} disabled={index === 0} aria-label="Move module up" data-testid={`button-up-${module.id}`}><ArrowUp size={12} /></button><button type="button" className="icon-btn !h-6 !min-w-6" onClick={() => moveModule(index, 1)} disabled={index === total - 1} aria-label="Move module down" data-testid={`button-down-${module.id}`}><ArrowDown size={12} /></button><button type="button" className="icon-btn !h-6 !min-w-6" onClick={() => duplicateModule(module)} aria-label={`Duplicate ${module.name}`} data-testid={`button-duplicate-${module.id}`}><Layers3 size={12} /></button><button type="button" className="icon-btn !h-6 !min-w-6" onClick={() => deleteModule(module.id)} aria-label={`Delete ${module.name}`} data-testid={`button-delete-${module.id}`}><Trash2 size={12} /></button></div>
@@ -2174,8 +2192,21 @@ function ModuleCard({ module, humReadout, liveFrequencies, sampleRate, index, to
       {module.type === 'eq' && p.mode !== 'low-shelf' && <div className="grid grid-cols-3 gap-2">{numberInput('low', 'Low', -12, 12, .5, ' dB')}{numberInput('mid', 'Mid', -12, 12, .5, ' dB')}{numberInput('high', 'High', -12, 12, .5, ' dB')}</div>}
       {module.type === 'dc' && <div className="grid grid-cols-2 gap-3"><label><span className="field-label">Detection</span><select className="select-field" value={String(p.mode)} onChange={(event) => updateParams(module.id, 'mode', event.target.value)}><option>Auto</option><option>Manual</option></select></label>{p.mode === 'Manual' && numberInput('amount', 'Offset estimate', -100, 100, 1, ' ×10⁻³')}</div>}
        {module.type === 'hum' && <div className="grid grid-cols-2 gap-3"><label><span className="field-label">Mode</span><select className="select-field" value={String(p.mode)} onChange={(event) => updateParams(module.id, 'mode', event.target.value)} data-testid={`select-hum-mode-${module.id}`}><option>Static</option><option>Dynamic</option><option>Adaptive</option></select></label>{p.mode !== 'Adaptive' && numberInput('frequency', 'Fundamental', 40, 120, 1, ' Hz')}{numberInput('reduction', 'Reduction', 0, 24, 1, ' dB')}<p className="col-span-2 text-[11px] leading-relaxed" data-testid={`hum-scan-${module.id}`} role="status">{humReadout?.detail}</p>{liveFrequencies && <p className="col-span-2 text-[11px] leading-relaxed" data-testid={`hum-live-${module.id}`}>Now playing · estimated filters: {liveFrequencies.length ? liveFrequencies.map((frequency) => `${frequency.toFixed(1)} Hz`).join(', ') : 'none currently confirmed'}. Current position only, not a whole-recording measurement.</p>}<p className="col-span-2 text-[10px] leading-relaxed text-muted-foreground">{p.mode === 'Adaptive' ? 'Scans 40–400 Hz for sustained 50/60 Hz hum or tones with a matching harmonic pattern. Confirmed harmonics are also filtered. A bounded opening scan starts confirmed filters at the first frame; short or changing hum may still take time to detect. Isolated non-mains hum may be missed to protect wanted tones; some wanted steady tones may still be affected. No frequency setting is used.' : p.mode === 'Dynamic' ? 'Tracks a sustained tone near the selected frequency (±12%) and its harmonics. A bounded opening scan starts confirmed filters at the first frame; changing hum may still take time to detect. Preview before exporting.' : 'Applies fixed narrow filters at the selected frequency and its first few harmonics. Preview before exporting.'}</p></div>}
-      {module.type === 'wind' && <div className="grid grid-cols-2 gap-3">{numberInput('cutoff', 'High-pass cutoff', 20, 240, .5, ' Hz')}{numberInput('q', 'Q', .1, 2, .01)}</div>}
-      {(module.type === 'wind' || module.type === 'eq') && <EqCurve module={module} sampleRate={sampleRate} />}
+       {module.type === 'wind' && (isFixedLowRumble(module)
+         ? <div className="grid grid-cols-2 gap-3">{numberInput('cutoff', 'High-pass cutoff', 20, 240, .5, ' Hz')}{numberInput('q', 'Q', .1, 2, .01)}</div>
+         : <div className="space-y-2">
+           <div className="grid grid-cols-2 gap-3">
+             {([['detection', 'Detection sensitivity'], ['removal', 'Removal strength']] as const).map(([key, label]) =>
+               <label key={key}><span className="field-label">{label}</span><select className="select-field" value={String(p[key] ?? 'Medium')} onChange={(event) => updateParams(module.id, key, event.target.value)} data-testid={`select-wind-${key}-${module.id}`}>
+                 <option>Low</option><option>Medium</option><option>High</option>
+               </select></label>)}
+           </div>
+           <p role="status" className="text-[11px] leading-relaxed" data-testid={`wind-activity-${module.id}`}>
+             {!module.enabled ? 'Bypassed · no wind reduction applied.' : windActive === null || windActive === undefined ? 'Automatic detection ready · play the edited recording to check when reduction is active.' : windActive ? 'Now playing · low-frequency interference detected; reduction active.' : 'Now playing · no interference confirmed here; reduction idle.'}
+           </p>
+           <p className="text-[10px] leading-relaxed text-muted-foreground">Automatic detection is approximate. Wanted bass or low calls may be reduced; some wind may remain. Older saved Wind / Rumble edits now use automatic settings and may sound different. Compare with bypass before exporting.</p>
+         </div>)}
+       {(module.type === 'eq' || isFixedLowRumble(module)) && <EqCurve module={module} sampleRate={sampleRate} />}
       {module.type === 'region' && <div className="grid grid-cols-3 gap-2">{numberInput('start', 'Start', 0, 60, .1, ' s')}{numberInput('end', 'End', 0, 60, .1, ' s')}{numberInput('amount', 'Attenuate', -24, 0, .5, ' dB')}</div>}
       {module.type === 'ambient' && <div className="grid grid-cols-3 gap-2">{numberInput('start', 'Start', 0, 60, .1, ' s')}{numberInput('length', 'Length', .1, 8, .1, ' s')}{<div className="text-[10px] leading-relaxed text-muted-foreground self-end">Blends nearby ambience conservatively.</div>}</div>}
       <div className="text-[10px] text-muted-foreground flex items-center gap-1"><Info size={11} /> Browser-safe approximation. Preview before archival export.</div>

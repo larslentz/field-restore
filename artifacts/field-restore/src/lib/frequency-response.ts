@@ -1,4 +1,4 @@
-import { highPass, lowShelf, type EditModule } from './edit-chain';
+import { highPass, isFixedLowRumble, lowShelf, type EditModule } from './edit-chain';
 
 function biquadResponseDb(coefficients: ReturnType<typeof highPass>, sampleRate: number, frequency: number): number {
   const angle = 2 * Math.PI * frequency / sampleRate;
@@ -18,12 +18,13 @@ function biquadResponseDb(coefficients: ReturnType<typeof highPass>, sampleRate:
 /** The linear, steady-state response of an individual edit (before output clipping). */
 export function moduleFrequencyResponseDb(module: EditModule, sampleRate: number, frequency: number): number {
   const p = module.params;
-  if (module.type === 'wind') {
+  if (isFixedLowRumble(module)) {
     return biquadResponseDb(
       highPass(sampleRate, Math.max(20, Number(p.cutoff) || 100), Math.max(0.1, Number(p.q) || 0.7)),
       sampleRate, frequency,
     );
   }
+  if (module.type === 'wind') return 0; // Adaptive response depends on the recording and time.
   if (module.type !== 'eq') return 0;
   if (p.mode === 'low-shelf') {
     return biquadResponseDb(

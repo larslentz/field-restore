@@ -1,17 +1,23 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { makeModule } from './edit-chain.ts';
+import { makeLowRumbleRemoval, makeModule } from './edit-chain.ts';
 import { moduleFrequencyResponseDb } from './frequency-response.ts';
 
 const response = (module, hz) => moduleFrequencyResponseDb(module, 48000, hz);
 
 test('high-pass curve follows cutoff and Q settings', () => {
-  const filter = makeModule('wind', { params: { cutoff: 100, q: 0.7 } });
+  const filter = makeLowRumbleRemoval();
+  filter.params.cutoff = 100;
+  filter.params.q = .7;
   assert.ok(response(filter, 25) < -20);
   assert.ok(Math.abs(response(filter, 100) + 3) < 0.5);
   assert.ok(Math.abs(response(filter, 10000)) < 0.1);
   filter.params.cutoff = 200;
   assert.ok(response(filter, 100) < -10);
+});
+
+test('automatic wind reduction does not claim a static frequency response', () => {
+  assert.equal(response(makeModule('wind'), 25), 0);
 });
 
 test('low shelf curve follows gain and frequency', () => {

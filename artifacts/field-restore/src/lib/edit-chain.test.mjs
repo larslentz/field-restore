@@ -22,7 +22,7 @@ test('new low rumble removal matches the default preset with an independent ID',
   const addedModule = makeLowRumbleRemoval();
   assert.ok(presetModule);
   assert.equal(addedModule.type, 'wind');
-  assert.deepEqual(addedModule.params, { cutoff: 55.5, q: 0.38 });
+  assert.deepEqual(addedModule.params, { mode: 'Fixed low rumble', cutoff: 55.5, q: 0.38 });
   assert.deepEqual(addedModule.params, presetModule.params);
   assert.notEqual(addedModule.id, presetModule.id);
 });
