@@ -1,21 +1,21 @@
 import type { EditModule } from './edit-chain';
-import type { WavMetadata } from './large-wav';
+import type { AudioMetadata } from './source-audio';
 import type { FileSpectrogramOptions } from './large-spectrogram';
 
 export type WorkerJobRequest =
   | {
       kind: 'loudness';
       file: File;
-      metadata: WavMetadata;
+      metadata: AudioMetadata;
       modules?: EditModule[];
       frameOffset?: number;
       sourceFrameCount?: number;
-      warmup?: { metadata: WavMetadata; startFrame: number; frameCount: number };
+      warmup?: { metadata: AudioMetadata; startFrame: number; frameCount: number };
     }
   | {
       kind: 'spectrogram';
       file: File;
-      metadata: WavMetadata;
+      metadata: AudioMetadata;
       modules: EditModule[];
       options: Omit<FileSpectrogramOptions, 'signal' | 'onProgress' | 'transform' | 'checkpoint'>;
     };

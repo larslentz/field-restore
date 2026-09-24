@@ -6,7 +6,9 @@ import { AUTOMATIC_DC_REMOVAL, analyzeInitialHum, humOpeningReadout, isFixedLowR
 import { analyzeLoudness, type LoudnessStats } from '@/lib/loudness';
 import { createPlaybackRangePlan } from '@/lib/playback-range';
 import { calculateSpectrogram, type SpectrogramData } from '@/lib/spectrogram';
-import { fingerprintWav, parseWavMetadata, readFrames, withLargeExportLeaveWarning, writeFloat32WavChunks, type WavMetadata } from '@/lib/large-wav';
+import { withLargeExportLeaveWarning, writeFloat32WavChunks } from '@/lib/large-wav';
+import { audioRange, fingerprintAudio, parseAudioMetadata, readAudioFrames, type AudioMetadata } from '@/lib/source-audio';
+import { decodeFlac } from '@/lib/flac';
 import { isVerifiedRelink, openVerifiedFileHandle } from '@/lib/file-access';
 import { listProjects, loadProject as loadProjectV2, queryFileHandlePermission, requestFileHandlePermission, saveProject as saveProjectV2, type ProjectRecord } from '@/lib/project-store';
 import { analyzeFileInitialHum, createStreamingEditChain } from '@/lib/streaming-edit-chain';
@@ -25,7 +27,7 @@ type ViewTab = 'edit' | 'analyze' | 'project';
 type MonitorMode = 'current' | 'original';
 type Marker = { id: string; time: number; label: string; color: string };
 type Region = { id: string; start: number; end: number; label: string };
-type LargeSource = { file: File; metadata: WavMetadata; fingerprint: string; fileHandle?: FileSystemFileHandle };
+type LargeSource = { file: File; metadata: AudioMetadata; fingerprint: string; fileHandle?: FileSystemFileHandle };
 type HumEvent = { moduleId: string; frame: number; frequencies: number[] };
 type LiveHum = { source: AudioSource; chain: EditModule[]; frequencies: Record<string, number[]> };
 type SpectrogramView = {
@@ -65,14 +67,14 @@ function validTrim(range: [number, number] | undefined | null, duration: number)
 }
 
 async function warmFileProcessor(
-  file: File, metadata: WavMetadata, processor: ReturnType<typeof createStreamingEditChain>,
+  file: File, metadata: AudioMetadata, processor: ReturnType<typeof createStreamingEditChain>,
   start: number, end: number, signal?: AbortSignal, cancelled?: () => boolean,
 ) {
   const chunkFrames = Math.max(4096, metadata.sampleRate * 2);
   for (let frame = start; frame < end; frame += chunkFrames) {
     if (signal?.aborted || cancelled?.()) throw new DOMException('Processing cancelled.', 'AbortError');
     const count = Math.min(chunkFrames, end - frame);
-    const channels = await readFrames(file, metadata, frame, count, { signal });
+    const channels = await readAudioFrames(file, metadata, frame, count, { signal });
     if (signal?.aborted || cancelled?.()) throw new DOMException('Processing cancelled.', 'AbortError');
     processor.process(channels, frame);
   }
@@ -473,7 +475,7 @@ function App() {
   const stageSavedProject = useCallback((record: ProjectRecord) => {
     setRestoredProject(true);
     setProjectId(null);
-    setTitle(record.source.name.replace(/\.wav$/i, ''));
+    setTitle(record.source.name.replace(/\.(wav|flac)$/i, ''));
     setNotes('');
     setModules([]);
     setMarkers([]);
@@ -526,7 +528,7 @@ function App() {
        stageSavedProject(record);
        if (!record.fileHandle) {
          setPendingRelink(record);
-         setSavedStatus('Saved project loaded · relink source WAV');
+         setSavedStatus('Saved project loaded · relink source audio');
          return;
        }
        let permission: PermissionState;
@@ -534,7 +536,7 @@ function App() {
          permission = await queryFileHandlePermission(record.fileHandle);
        } catch {
          setPendingRelink(record);
-         setSavedStatus('Saved project loaded · relink source WAV');
+         setSavedStatus('Saved project loaded · relink source audio');
          return;
        }
        if (permission === 'prompt') {
@@ -547,7 +549,7 @@ function App() {
          if (restoreVerifiedProject(record, verified)) return;
        }
        setPendingRelink(record);
-       setSavedStatus('Saved project loaded · relink source WAV');
+       setSavedStatus('Saved project loaded · relink source audio');
     }).catch(() => {
       // Legacy localStorage restoration remains available when IndexedDB is unavailable.
     });
@@ -651,13 +653,7 @@ function App() {
     const { file, metadata } = largeSource;
     const selectionStartFrame = Math.max(0, Math.floor(selectionStart * metadata.sampleRate));
     const selectionFrames = Math.max(1, Math.min(metadata.frameCount - selectionStartFrame, Math.ceil((selectionEnd - selectionStart) * metadata.sampleRate)));
-    const selectionMetadata: WavMetadata = {
-      ...metadata,
-      dataOffset: metadata.dataOffset + selectionStartFrame * metadata.frameSize,
-      frameCount: selectionFrames,
-      dataLength: selectionFrames * metadata.frameSize,
-      dataLengthBigInt: BigInt(selectionFrames * metadata.frameSize),
-    };
+    const selectionMetadata = audioRange(metadata, selectionStartFrame, selectionFrames);
     const editedSelectionStartFrame = Math.max(selectionStartFrame, Math.floor(committedTrimStart * metadata.sampleRate));
     const editedSelectionEndFrame = Math.min(selectionStartFrame + selectionFrames, Math.ceil(committedTrimEnd * metadata.sampleRate));
     setAnalysisStatus(hasSelection ? 'Analyzing selection' : 'Analyzing original recording');
@@ -686,13 +682,7 @@ function App() {
       setAnalysisStatus('Analyzing processed selection');
       if (editedSelectionEndFrame <= editedSelectionStartFrame) return EMPTY_STATS;
       const editedFrames = editedSelectionEndFrame - editedSelectionStartFrame;
-      const editedMetadata: WavMetadata = {
-        ...metadata,
-        dataOffset: metadata.dataOffset + editedSelectionStartFrame * metadata.frameSize,
-        frameCount: editedFrames,
-        dataLength: editedFrames * metadata.frameSize,
-        dataLengthBigInt: BigInt(editedFrames * metadata.frameSize),
-      };
+      const editedMetadata = audioRange(metadata, editedSelectionStartFrame, editedFrames);
       const warmStart = committedTrimStart > 0 ? 0 : Math.max(0, editedSelectionStartFrame - metadata.sampleRate * 2);
       return run({
         kind: 'loudness',
@@ -719,13 +709,7 @@ function App() {
       setAnalysisStatus('Analyzing processed recording');
        const startFrame = Math.floor(committedTrimStart * metadata.sampleRate);
        const endFrame = Math.min(metadata.frameCount, Math.ceil(committedTrimEnd * metadata.sampleRate));
-       const trimmedMetadata: WavMetadata = {
-         ...metadata,
-         dataOffset: metadata.dataOffset + startFrame * metadata.frameSize,
-         frameCount: endFrame - startFrame,
-         dataLength: (endFrame - startFrame) * metadata.frameSize,
-         dataLengthBigInt: BigInt((endFrame - startFrame) * metadata.frameSize),
-       };
+        const trimmedMetadata = audioRange(metadata, startFrame, endFrame - startFrame);
        return run({ kind: 'loudness', file, metadata: trimmedMetadata, modules: processingModules, frameOffset: startFrame, sourceFrameCount: metadata.frameCount,
          warmup: startFrame > 0 ? { metadata, startFrame: 0, frameCount: startFrame } : undefined,
        }, hasSelection ? 3 : 1);
@@ -962,7 +946,7 @@ function App() {
           }
           const count = Math.min(chunkFrames, rangeEnd - nextFrame);
           const readStart = nextFrame;
-          let channels = await readFrames(file, metadata, readStart, count, { signal: undefined });
+          let channels = await readAudioFrames(file, metadata, readStart, count, { signal: undefined });
           if (playbackSessionRef.current !== session) return;
           if (monitor === 'current') {
             chunkEvents = [];
@@ -1157,17 +1141,20 @@ function App() {
     setUndoStack((stack) => [...stack, modules]); setModules(next); setRedoStack((stack) => stack.slice(0, -1));
   };
 
-  const importWavFile = useCallback(async (file: File, fileHandle?: FileSystemFileHandle) => {
-    if (!file.name.toLowerCase().endsWith('.wav') && !['audio/wav', 'audio/x-wav', 'audio/wave'].includes(file.type)) {
-      setError('Drop an uncompressed WAV file to begin editing.');
+  const importAudioFile = useCallback(async (file: File, fileHandle?: FileSystemFileHandle) => {
+    if (!/\.(wav|flac)$/i.test(file.name) && !['audio/wav', 'audio/x-wav', 'audio/wave', 'audio/flac', 'audio/x-flac'].includes(file.type)) {
+      setError('Choose an uncompressed WAV or lossless FLAC recording to begin editing.');
       return;
     }
     try {
       setError('');
-      setOperationStatus('Reading WAV metadata');
-      const metadata = await parseWavMetadata(file, { name: file.name });
-      const fingerprint = await fingerprintWav(file, metadata);
-      const useFileBackedPath = file.size >= 64 * 1024 * 1024 || metadata.format === 'RF64';
+      setOperationStatus('Reading audio metadata');
+      const metadata = await parseAudioMetadata(file, { name: file.name });
+      const fingerprint = await fingerprintAudio(file, metadata);
+      // Embedded project saves serialize decoded samples; keep FLAC in memory only while that
+      // serialized project can still fit reliably in browser storage.
+      const useFileBackedPath = file.size >= 64 * 1024 * 1024 || metadata.format === 'RF64' ||
+        (metadata.format === 'FLAC' && metadata.frameCount * metadata.channels * 4 >= 512 * 1024);
       stopPlayback();
       if (useFileBackedPath) {
         const next: AudioSource = { channels: [], sampleRate: metadata.sampleRate, duration: metadata.frameCount / metadata.sampleRate, name: file.name };
@@ -1179,7 +1166,7 @@ function App() {
         setLargeSelectionCurrentStats(EMPTY_STATS);
         setSavedStatus(`File-backed ${metadata.format} · not saved`);
       } else {
-        const parsed = parseWav(await file.arrayBuffer(), file.name);
+        const parsed = metadata.format === 'FLAC' ? await decodeFlac(file, metadata) : parseWav(await file.arrayBuffer(), file.name);
         setLargeSource(null);
         setSource(parsed);
         setSavedStatus('Imported · not saved');
@@ -1201,28 +1188,28 @@ function App() {
          setSavedStatus(`Source relinked · project restored${savedProject.modules.some(isLegacyWind) ? ' · Wind Removal converted to automatic' : ''}`);
       } else {
          setRestoredProject(false);
-        setModules(makeDefaultChain()); setMarkers([]); setRegions([]); setTitle(file.name.replace(/\.wav$/i, '')); setProjectId(null);
+        setModules(makeDefaultChain()); setMarkers([]); setRegions([]); setTitle(file.name.replace(/\.(wav|flac)$/i, '')); setProjectId(null);
          restoreTrim(null, metadata.frameCount / metadata.sampleRate);
       }
       setSelection([0, Math.min(metadata.frameCount / metadata.sampleRate, 5)]); setOperationStatus('');
     } catch (caught) {
       setOperationStatus('');
-      setError(caught instanceof Error ? caught.message : 'Unable to read this WAV file.');
+      setError(caught instanceof Error ? caught.message : 'Unable to read this audio file.');
     }
   }, [pendingPermission, pendingRelink, restoreTrim, stopPlayback]);
 
-  const pickWavFile = useCallback(async () => {
+  const pickAudioFile = useCallback(async () => {
     const picker = (window as typeof window & {
       showOpenFilePicker?: (options?: unknown) => Promise<FileSystemFileHandle[]>;
     }).showOpenFilePicker;
     if (!picker) { fileRef.current?.click(); return; }
     try {
-      const [handle] = await picker({ multiple: false, types: [{ description: 'WAV audio', accept: { 'audio/wav': ['.wav'] } }] });
-      if (handle) void importWavFile(await handle.getFile(), handle);
+      const [handle] = await picker({ multiple: false, types: [{ description: 'WAV or FLAC audio', accept: { 'audio/wav': ['.wav'], 'audio/flac': ['.flac'] } }] });
+      if (handle) void importAudioFile(await handle.getFile(), handle);
     } catch (caught) {
-      if ((caught as Error).name !== 'AbortError') setError(caught instanceof Error ? caught.message : 'Unable to open this WAV file.');
+      if ((caught as Error).name !== 'AbortError') setError(caught instanceof Error ? caught.message : 'Unable to open this audio file.');
     }
-  }, [importWavFile]);
+  }, [importAudioFile]);
 
   const renewSavedFilePermission = useCallback(async () => {
     const record = pendingPermission;
@@ -1234,18 +1221,18 @@ function App() {
       if (permission !== 'granted') {
         setPendingPermission(null);
         setPendingRelink(record);
-        setSavedStatus('File access denied · relink source WAV');
+        setSavedStatus('File access denied · relink source audio');
         return;
       }
       const verified = await openVerifiedFileHandle(record.fileHandle, record.source.fingerprint ?? '');
       if (!restoreVerifiedProject(record, verified)) {
         setPendingPermission(null);
         setPendingRelink(record);
-        setSavedStatus('Saved source changed · relink source WAV');
-        setError('The saved file no longer matches this project. Relink the original WAV to restore its edits.');
+        setSavedStatus('Saved source changed · relink source audio');
+        setError('The saved file no longer matches this project. Relink the original WAV or FLAC recording to restore its edits.');
       }
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Unable to renew access to the saved WAV file.');
+      setError(caught instanceof Error ? caught.message : 'Unable to renew access to the saved audio file.');
     } finally {
       setIsRenewingPermission(false);
     }
@@ -1253,7 +1240,7 @@ function App() {
 
   const importFile = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-    if (file) void importWavFile(file);
+    if (file) void importAudioFile(file);
     event.target.value = '';
   };
 
@@ -1287,7 +1274,7 @@ function App() {
       setError('No file was found in that drop.');
       return;
     }
-    void importWavFile(file);
+    void importAudioFile(file);
   };
 
   const save = async () => {
@@ -1362,7 +1349,7 @@ function App() {
             sampleRate: metadata.sampleRate,
             frameCount: lastFrame - firstFrame,
             signal: controller.signal,
-            readFrames: (start, count, signal) => readFrames(file, metadata, firstFrame + start, count, { signal }),
+            readFrames: (start, count, signal) => readAudioFrames(file, metadata, firstFrame + start, count, { signal }),
             processFrames: (channels, start) => processor.process(channels, firstFrame + start),
             onProgress: (completed, total) => setOperationProgress(completed / total),
           });
@@ -1782,7 +1769,7 @@ function App() {
           <div className="wav-drop-card">
             <FileAudio size={34} strokeWidth={1.5} />
             <div>
-              <div className="wav-drop-title">Drop WAV to open</div>
+              <div className="wav-drop-title">Drop WAV or FLAC to open</div>
               <div className="wav-drop-copy">Your recording stays on this device. The original will remain unchanged.</div>
             </div>
           </div>
@@ -1866,7 +1853,8 @@ function App() {
         </section>
         <div className="px-3 mt-5 sidebar-title eyebrow text-[#91a69d]">Session</div>
         <div className="px-3 mt-2 space-y-1">
-          <button type="button" className="nav-item" onClick={() => void pickWavFile()} data-testid="nav-import"><FileAudio size={15} /><span className="nav-label">Import WAV</span></button>
+          <button type="button" className="nav-item" onClick={() => void pickAudioFile()} data-testid="nav-import" aria-describedby="import-format-note"><FileAudio size={15} /><span className="nav-label">Import WAV or FLAC</span></button>
+          <p id="import-format-note" className="px-3 pb-2 text-[10px] leading-relaxed text-[#abbdb4]">32-bit float WAV recommended for maximum editing headroom. Lossless FLAC is also supported; lossy formats are not.</p>
           <button type="button" className="nav-item" onClick={() => { stopPlayback(); setRestoredProject(false); setLargeSource(null); setSource(createDemoAudio()); restoreTrim(null, 18); setModules(makeDefaultChain()); setSelection([4.1, 7.8]); setMarkers([]); setRegions([]); setTitle('Coastal dawn / north bluff'); setSavedStatus('Demo source loaded'); }} data-testid="nav-demo"><Waves size={15} /><span className="nav-label">Load demo source</span></button>
           <button type="button" className="nav-item" onClick={save} data-testid="nav-save"><Save size={15} /><span className="nav-label">Save locally</span></button>
           <button type="button" className="nav-item" onClick={(event) => openModal(event, 'export')} data-testid="nav-export"><Download size={15} /><span className="nav-label">Export</span></button>
@@ -1891,7 +1879,7 @@ function App() {
             const visibleStatus = backgroundStatus || operationStatus;
             const visibleProgress = analysisStatus ? analysisProgress : spectrogramStatus ? spectrogramProgress : operationProgress;
             const measuredProgress = Boolean(backgroundStatus || operationStatus.startsWith('Exporting'));
-            const title = analysisStatus ? 'Analyzing recording' : spectrogramStatus ? 'Building spectrogram' : operationStatus === 'Reading WAV metadata' ? 'Opening recording' : operationStatus;
+            const title = analysisStatus ? 'Analyzing recording' : spectrogramStatus ? 'Building spectrogram' : operationStatus === 'Reading audio metadata' ? 'Opening recording' : operationStatus;
             return <div className="work-banner" role="status" data-testid="status-background-work" data-progress={visibleProgress}>
               <LoaderCircle size={18} className={`work-banner-spinner ${operationPaused && backgroundStatus ? 'paused' : ''}`} aria-hidden="true" />
               <div className="work-banner-copy"><strong>{title}{operationPaused && backgroundStatus ? ' · paused' : ''}</strong><span>{visibleStatus} · Your recording is still being processed.</span></div>
@@ -2050,7 +2038,7 @@ function App() {
           </div>
         </main>
       </section>
-      <input ref={fileRef} type="file" accept=".wav,audio/wav" onChange={importFile} className="hidden" inert={!!modal || presetDialogOpen} aria-hidden={modal || presetDialogOpen ? true : undefined} data-testid="input-import-wav" />
+      <input ref={fileRef} type="file" accept=".wav,.flac,audio/wav,audio/flac" onChange={importFile} className="hidden" inert={!!modal || presetDialogOpen} aria-hidden={modal || presetDialogOpen ? true : undefined} data-testid="input-import-wav" />
       {modal === 'export' && <ExportModal onClose={() => setModal(null)} onExport={exportAudio} title={title} />}
       {modal === 'help' && <HelpModal onClose={() => setModal(null)} />}
       {modal === 'settings' && <SettingsModal onClose={() => setModal(null)} spectrogramPalette={spectrogramPalette} onSpectrogramPaletteChange={(palette) => { setSpectrogramPalette(palette); localStorage.setItem('field-restore-spectrogram-palette', palette); }} />}

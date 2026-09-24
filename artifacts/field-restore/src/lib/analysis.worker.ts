@@ -2,7 +2,7 @@
 
 import { analyzeLargeLoudness } from './large-analysis';
 import { calculateFileSpectrogram } from './large-spectrogram';
-import { readFrames } from './large-wav';
+import { readAudioFrames } from './source-audio';
 import { analyzeFileInitialHum, createStreamingEditChain } from './streaming-edit-chain';
 import type { WorkerInboundMessage, WorkerJobRequest, WorkerOutboundMessage } from './analysis-worker-protocol';
 
@@ -62,7 +62,7 @@ async function run(request: WorkerJobRequest) {
     const chunkFrames = Math.max(4096, metadata.sampleRate * 2);
     for (let frame = startFrame; frame < startFrame + frameCount; frame += chunkFrames) {
       await checkpoint();
-      const channels = await readFrames(request.file, metadata, frame, Math.min(chunkFrames, startFrame + frameCount - frame));
+      const channels = await readAudioFrames(request.file, metadata, frame, Math.min(chunkFrames, startFrame + frameCount - frame));
       await checkpoint();
       processor.process(channels, frame);
     }

@@ -1,9 +1,9 @@
-import { fingerprintWav, parseWavMetadata, type WavMetadata } from './large-wav';
+import { fingerprintAudio, parseAudioMetadata, type AudioMetadata } from './source-audio';
 import { queryFileHandlePermission } from './project-store';
 
 export interface VerifiedFileHandle {
   file: File;
-  metadata: WavMetadata;
+  metadata: AudioMetadata;
   fingerprint: string;
 }
 
@@ -14,8 +14,8 @@ export async function openVerifiedFileHandle(
   if (await queryFileHandlePermission(handle) !== 'granted') return null;
   if (typeof expectedFingerprint !== 'string' || !expectedFingerprint) return null;
   const file = await handle.getFile();
-  const metadata = await parseWavMetadata(file, { name: file.name });
-  const fingerprint = await fingerprintWav(file, metadata);
+  const metadata = await parseAudioMetadata(file, { name: file.name });
+  const fingerprint = await fingerprintAudio(file, metadata);
   return fingerprint === expectedFingerprint ? { file, metadata, fingerprint } : null;
 }
 

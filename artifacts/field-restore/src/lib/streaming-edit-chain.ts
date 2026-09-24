@@ -2,7 +2,7 @@ import type { ChannelData } from './audio';
 import { automaticDcBlockerPole, analyzeInitialHum, fadeGainAtFrame, isFixedLowRumble, type EditModule } from './edit-chain';
 import { WindProcessor, windLevel, type WindSnapshot } from './wind-reduction';
 import { HumProcessor, humPrefixFrames, type HumSnapshot } from './hum-removal';
-import { readFrames, type WavMetadata } from './large-wav';
+import { readAudioFrames, type AudioMetadata } from './source-audio';
 
 interface FilterState {
   x1: number;
@@ -283,10 +283,10 @@ export const createStreamingEditChain = (
 ) => new StreamingEditChain(modules, sampleRate, totalFrames, initialFrame, initialHumFrequencies, onHumChange, onWindChange);
 
 /** Reads at most two detector windows from a file; never decodes the whole take. */
-export async function analyzeFileInitialHum(file: Blob, metadata: WavMetadata, modules: EditModule[], signal?: AbortSignal) {
+export async function analyzeFileInitialHum(file: Blob, metadata: AudioMetadata, modules: EditModule[], signal?: AbortSignal) {
   if (!modules.some((module) => module.enabled && module.type === 'hum' && module.params.mode !== 'Static')) return [];
   const frames = humPrefixFrames(metadata.sampleRate, metadata.frameCount);
   if (!frames) return [];
-  const prefix = await readFrames(file, metadata, 0, frames, { signal });
+  const prefix = await readAudioFrames(file, metadata, 0, frames, { signal });
   return analyzeInitialHum(prefix, modules, metadata.sampleRate, metadata.frameCount);
 }

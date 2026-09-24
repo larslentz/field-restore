@@ -1,4 +1,4 @@
-import { readFrames, type WavMetadata } from './large-wav';
+import { readAudioFrames, type AudioMetadata } from './source-audio';
 import type { LoudnessStats } from './loudness';
 
 export interface LargeAnalysisProgress {
@@ -78,7 +78,7 @@ function histogramPercentile(bins: Uint32Array, minimumDb: number, percentile: n
  * amount of memory regardless of file length.
  */
 export async function analyzeLargeLoudness(
-  file: Blob, metadata: WavMetadata, options: LargeAnalysisOptions = {},
+  file: Blob, metadata: AudioMetadata, options: LargeAnalysisOptions = {},
 ): Promise<LargeAnalysisResult> {
   const total = metadata.frameCount;
   const chunkSize = Math.max(256, Math.floor(options.chunkFrames ?? 16384));
@@ -118,7 +118,7 @@ export async function analyzeLargeLoudness(
     await options.checkpoint?.();
     abort(options.signal);
     const start = frame;
-    let channels = await readFrames(file, metadata, start, Math.min(chunkSize, total - start), { signal: options.signal });
+    let channels = await readAudioFrames(file, metadata, start, Math.min(chunkSize, total - start), { signal: options.signal });
     if (options.transform) channels = await options.transform(channels, start);
     const count = Math.min(channels[0]?.length ?? 0, total - start);
     for (let i = 0; i < count; i += 1) {

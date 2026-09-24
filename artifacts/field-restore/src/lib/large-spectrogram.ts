@@ -1,4 +1,4 @@
-import { readFrames, type WavMetadata } from './large-wav';
+import { readAudioFrames, type AudioMetadata } from './source-audio';
 import type { SpectrogramData } from './spectrogram';
 import { SPECTROGRAM_FFT_SIZE, validateSpectrogramFftSize } from './spectrogram-resolution';
 
@@ -68,7 +68,7 @@ function fft(real: Float64Array, imaginary: Float64Array): void {
  */
 export async function calculateFileSpectrogram(
   file: Blob,
-  metadata: WavMetadata,
+  metadata: AudioMetadata,
   options: FileSpectrogramOptions = {},
 ): Promise<SpectrogramData> {
   const width = options.width ?? 480;
@@ -93,7 +93,7 @@ export async function calculateFileSpectrogram(
   }
   const channel = options.channelIndex ?? 0;
   if (!Number.isSafeInteger(channel) || channel < 0 || channel >= metadata.channels) {
-    throw new RangeError('Spectrogram channel is outside the WAV channel range.');
+    throw new RangeError('Spectrogram channel is outside the recording channel range.');
   }
 
   const fftSize = validateSpectrogramFftSize(options.fftSize ?? SPECTROGRAM_FFT_SIZE);
@@ -121,7 +121,7 @@ export async function calculateFileSpectrogram(
     const processingStart = Math.max(0, targetReadStart - Math.max(0, Math.floor(options.warmupFrames ?? 0)));
     const prefix = targetReadStart - processingStart;
     let channels = framesToRead > 0
-      ? await readFrames(file, metadata, processingStart, prefix + framesToRead, { signal: options.signal })
+      ? await readAudioFrames(file, metadata, processingStart, prefix + framesToRead, { signal: options.signal })
       : [];
     if (channels.length && options.transform) channels = await options.transform(channels, processingStart);
     real.fill(0);
