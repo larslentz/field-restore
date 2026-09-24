@@ -291,7 +291,7 @@
 .spectrogram-source-toggle { display: flex; padding: 2px; border: 1px solid hsl(var(--border)); border-radius: 6px; background: hsl(var(--muted)); }
 .spectrogram-source-toggle button { padding: 5px 8px; border-radius: 4px; color: hsl(var(--muted-foreground)); font-size: 10px; font-weight: 700; }
 .spectrogram-source-toggle button.active { color: hsl(var(--foreground)); background: hsl(var(--card)); box-shadow: var(--shadow-subtle); }
-.waveform-wrap { position: relative; width: min(100%, max(518px, calc((100dvh - 384px) * 1.617977528))); margin-inline: auto; overflow: hidden; border: 1px solid hsl(var(--border)); border-radius: 6px; background: #17242c; }
+.waveform-wrap { position: relative; width: 100%; overflow: hidden; border: 1px solid hsl(var(--border)); border-radius: 6px; background: #17242c; }
 .hum-spectrogram-overlay { position: absolute; top: 0; bottom: 28px; left: 48px; right: 72px; z-index: 2; pointer-events: none; overflow: hidden; }
 .hum-spectrogram-visit { position: absolute; left: 0; right: 0; height: 15px; }
 .hum-spectrogram-span { position: absolute; top: 6px; height: 3px; background: var(--hum-marker-color); box-shadow: 0 0 0 1px #17242c; }
@@ -316,7 +316,7 @@
 .trim-summary strong { color: hsl(var(--foreground)); }
 .spectrogram-source-label { position: absolute; top: 10px; left: 58px; z-index: 2; padding: 5px 8px; border: 1px solid rgba(242,244,232,.24); border-radius: 999px; color: #f2f4e8; background: rgba(23,36,44,.82); box-shadow: 0 4px 12px rgba(0,0,0,.18); font-size: 9px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; pointer-events: none; }
 .spectrogram-source-label.current { border-color: rgba(216,237,85,.48); color: #e5f49d; }
-.waveform-canvas { display: block; width: 100%; height: auto; aspect-ratio: 144 / 89; cursor: crosshair; }
+.waveform-canvas { display: block; width: 100%; height: max(210px, calc(100dvh - 384px)); cursor: crosshair; }
 .timeline-canvas { display: block; width: 100%; height: 26px; background: hsl(var(--card)); }
 .transport { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: hsl(var(--secondary)); color: hsl(var(--secondary-foreground)); border-radius: 6px; }
 .transport .icon-btn { color: hsl(var(--secondary-foreground)); }
@@ -406,7 +406,7 @@
   .spectrogram-panel-header { flex-direction: column; }
   .spectrogram-header-actions { width: 100%; flex-direction: row; align-items: center; justify-content: space-between; }
   .spectrogram-source-caption { display: none; }
-  .waveform-wrap { width: 100%; }
+  .waveform-canvas { height: clamp(260px, 45vw, 410px); }
   .signal-stats-groups { grid-template-columns: 1fr; }
   .signal-stats-group { border-right: 0; border-bottom: 1px solid hsl(var(--border)); }
   .signal-stats-group:last-child { border-bottom: 0; }
