@@ -260,8 +260,34 @@ export function analyzeInitialHum(original: ChannelData, modules: EditModule[], 
   return seeds;
 }
 
-export function renderChain(original: ChannelData, modules: EditModule[], sampleRate: number, context: RenderContext = {}) {
-  const seeds = context.frameOffset ? [] : analyzeInitialHum(original, modules, sampleRate, context.totalFrames ?? original[0]?.length ?? 0);
+export type HumScanState = 'loading' | 'complete' | 'too-short' | 'unavailable' | 'error';
+
+/** Report only the opening decision, not frequencies that may be tracked later in the recording. */
+export function humOpeningReadout(module: EditModule, state: HumScanState, frequencies: number[] = []) {
+  if (!module.enabled) return { summary: 'Bypassed', detail: 'Hum cleanup is bypassed; no filters are applied.' };
+  if (Number(module.params.reduction) <= 0) return { summary: 'Disabled · 0 dB', detail: 'Hum cleanup is disabled at 0 dB reduction; no filters are applied.' };
+  if (module.params.mode === 'Static') return {
+    summary: `Static · ${module.params.frequency} Hz`,
+    detail: 'Manual frequency; no automatic opening scan is used.',
+  };
+  const mode = String(module.params.mode);
+  if (state === 'loading') return { summary: `${mode} · scanning`, detail: 'Checking the opening of this recording for sustained hum…' };
+  if (state === 'unavailable') return { summary: `${mode} · source unavailable`, detail: 'Relink the original recording to check for hum.' };
+  if (state === 'error') return { summary: `${mode} · scan failed`, detail: 'Opening scan failed; no frequency estimate is available. Playback may still detect hum later.' };
+  if (state === 'too-short') return { summary: `${mode} · scan unavailable`, detail: 'Recording is too short for the two-window opening scan. Playback may still detect hum later.' };
+  if (!frequencies.length) return {
+    summary: `${mode} · none confirmed`,
+    detail: 'Opening scan: no confirmed interference. Hum later in the recording may still be detected.',
+  };
+  const formatted = frequencies.map((frequency) => `${frequency.toFixed(1)} Hz`);
+  return {
+    summary: `${mode} · ~${Math.round(frequencies[0])} Hz${frequencies.length > 1 ? ` +${frequencies.length - 1}` : ''}`,
+    detail: `Opening scan confirmed hum. Estimated filter frequencies: ${formatted.join(', ')}. These may change during playback.`,
+  };
+}
+
+export function renderChain(original: ChannelData, modules: EditModule[], sampleRate: number, context: RenderContext = {}, initialSeeds?: number[][]) {
+  const seeds = context.frameOffset ? [] : initialSeeds ?? analyzeInitialHum(original, modules, sampleRate, context.totalFrames ?? original[0]?.length ?? 0);
   return modules.reduce((audio, module, index) => applyModule(audio, module, sampleRate,
     { ...context, initialHumFrequencies: seeds[index] }), cloneChannels(original));
 }

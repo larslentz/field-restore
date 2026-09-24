@@ -20,19 +20,22 @@ test('the edit drawer keeps module controls, summaries, bypass, reorder, and com
   await expect(card.getByTestId('range-hum-reduction')).toHaveValue('12');
   await expect(card).toContainText('Browser-safe approximation');
 
-  await expect(card.locator('.module-summary')).toHaveText('Adaptive · auto scan');
-  await expect(humRow.locator('.sidebar-chain-copy small')).toHaveText('Adaptive · auto scan');
+  await expect(card.locator('.module-summary')).toHaveText(/^Adaptive · (none confirmed|~\d+ Hz(?: \+\d+)?)$/);
+  await expect(humRow.locator('.sidebar-chain-copy small')).toHaveText(await card.locator('.module-summary').innerText());
+  await expect(card.getByTestId(`hum-scan-${humId}`)).toContainText('Opening scan');
   await card.getByTestId(`select-hum-mode-${humId}`).selectOption('Dynamic');
   await expect(card.getByTestId('range-hum-frequency')).toHaveValue('60');
   await card.getByTestId('range-hum-frequency').fill('72');
-  await expect(card.locator('.module-summary')).toHaveText('Dynamic · 72 Hz');
-  await expect(humRow.locator('.sidebar-chain-copy small')).toHaveText('Dynamic · 72 Hz');
+  await expect(card.locator('.module-summary')).toHaveText(/^Dynamic · (none confirmed|~\d+ Hz(?: \+\d+)?)$/);
+  await expect(humRow.locator('.sidebar-chain-copy small')).toHaveText(await card.locator('.module-summary').innerText());
 
   const bypassButton = card.getByTestId(`button-bypass-${humId}`);
   await bypassButton.click();
   await expect(bypassButton).toHaveAttribute('aria-pressed', 'false');
   await expect(card).toHaveClass(/bypassed/);
   await expect(humRow).toHaveClass(/bypassed/);
+  await expect(card.locator('.module-summary')).toHaveText('Bypassed');
+  await expect(card.getByTestId(`hum-scan-${humId}`)).toContainText('bypassed');
   await expect(page.getByTestId('button-open-full-chain')).toContainText('7/8 editable enabled');
 
   const moduleNames = () => sidebarRows.locator('.sidebar-chain-copy strong').allTextContents();
@@ -59,7 +62,7 @@ test('the edit drawer keeps module controls, summaries, bypass, reorder, and com
   await expect(compactChainButton).toBeVisible();
   await compactChainButton.click();
   await expect(page.getByRole('dialog', { name: 'Edit chain' })).toBeVisible();
-  await expect(page.getByTestId(`card-module-${humId}`)).toContainText('Dynamic · 72 Hz');
+  await expect(page.getByTestId(`card-module-${humId}`)).toContainText('Bypassed');
 });
 
 for (const layout of ['desktop', 'compact'] as const) {

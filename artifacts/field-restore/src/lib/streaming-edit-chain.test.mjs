@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { analyzeInitialHum, makeProcessingChain, renderChain } from './edit-chain.ts';
+import { analyzeInitialHum, humOpeningReadout, makeProcessingChain, renderChain } from './edit-chain.ts';
 import { analyzeFileInitialHum, createStreamingEditChain } from './streaming-edit-chain.ts';
 import { humAnalysisWindowSize } from './hum-removal.ts';
 import { generateFloat32WavHeader, parseWavMetadata } from './large-wav.ts';
@@ -157,6 +157,29 @@ test('file-backed opening scan reads only the prefix and matches in-memory detec
   const output = createStreamingEditChain([hum], sampleRate, count, 0, seeds).process(input, 0)[0];
   assert.deepEqual(output, renderChain(input, [hum], sampleRate)[0]);
   assert.ok(toneLevel(output.slice(0, sampleRate / 4), 50) < toneLevel(input[0].slice(0, sampleRate / 4), 50) * .75);
+});
+
+test('opening scan readout distinguishes estimates, absence, unavailable scans and bypass', async () => {
+  const count = sampleRate * 3;
+  const input = [Float32Array.from({ length: count }, (_, i) =>
+    .12 * Math.sin(2 * Math.PI * 73 * i / sampleRate) +
+    .06 * Math.sin(2 * Math.PI * 146 * i / sampleRate))];
+  const hum = { id: 'hum', type: 'hum', name: 'Hum', enabled: true, params: { mode: 'Adaptive', reduction: 18 } };
+  const memory = analyzeInitialHum(input, [hum], sampleRate, count);
+  const file = new Blob([generateFloat32WavHeader({ channels: 1, sampleRate, frameCount: count }), input[0]]);
+  const metadata = await parseWavMetadata(file);
+  const backed = await analyzeFileInitialHum(file, metadata, [hum]);
+  assert.deepEqual(backed, memory);
+  const confirmed = humOpeningReadout(hum, 'complete', backed[0]);
+  assert.match(confirmed.detail, /Opening scan confirmed hum/);
+  assert.match(confirmed.detail, /73\.\d Hz, 146\.\d Hz/);
+  assert.match(confirmed.summary, /~73 Hz \+1/);
+  assert.match(humOpeningReadout(hum, 'complete', []).detail, /no confirmed interference/);
+  assert.match(humOpeningReadout(hum, 'too-short').detail, /too short/);
+  assert.match(humOpeningReadout(hum, 'unavailable').detail, /Relink/);
+  assert.match(humOpeningReadout({ ...hum, enabled: false }, 'complete', backed[0]).detail, /bypassed/);
+  assert.match(humOpeningReadout({ ...hum, params: { ...hum.params, reduction: 0 } }, 'complete', backed[0]).detail, /disabled/);
+  assert.match(humOpeningReadout({ ...hum, params: { ...hum.params, mode: 'Static', frequency: 60 } }, 'complete', backed[0]).detail, /Manual frequency/);
 });
 
 test('adaptive mode detects non-mains hum and harmonics without attenuating an unrelated tone', () => {
