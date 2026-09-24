@@ -12,7 +12,7 @@ export interface EditModule {
 }
 
 export const MODULE_LABELS: Record<ModuleType, string> = {
-  gain: 'Gain', fade: 'Fade', eq: 'EQ', dc: 'DC Offset', hum: 'Hum Removal', wind: 'Wind / Rumble',
+  gain: 'Gain', fade: 'Fade', eq: 'EQ', dc: 'DC Offset', hum: 'Hum Removal', wind: 'Wind / Rumble Removal',
   region: 'Region Attenuation', ambient: 'Ambient Patch',
 };
 
@@ -63,7 +63,8 @@ export const AUTOMATIC_DC_REMOVAL: EditModule = {
 export const isFixedLowRumble = (module: EditModule) => module.type === 'wind' &&
   (module.params.mode === 'Fixed low rumble' ||
     (module.params.mode === undefined && (module.name === 'Low Rumble Removal' ||
-      (module.name !== 'Wind / Rumble' && Number(module.params.cutoff) === 55.5 && Number(module.params.q) === .38))));
+      (module.name !== 'Wind / Rumble' && module.name !== MODULE_LABELS.wind &&
+        Number(module.params.cutoff) === 55.5 && Number(module.params.q) === .38))));
 
 export const isLegacyWind = (module: EditModule) =>
   module.type === 'wind' && !isFixedLowRumble(module) && module.params.mode !== 'Automatic';
@@ -72,11 +73,12 @@ export const normalizeWindModule = (module: EditModule): EditModule => {
   if (module.type !== 'wind') return module;
   if (isFixedLowRumble(module)) return module.params.mode === 'Fixed low rumble' ? module :
     { ...module, params: { ...module.params, mode: 'Fixed low rumble' } };
+  const name = module.name === 'Wind / Rumble' ? MODULE_LABELS.wind : module.name;
   if (module.params.mode === 'Automatic' &&
     module.params.cutoff === undefined && module.params.q === undefined &&
     ['Low', 'Medium', 'High'].includes(String(module.params.detection)) &&
-    ['Low', 'Medium', 'High'].includes(String(module.params.removal))) return module;
-  return { ...module, params: {
+    ['Low', 'Medium', 'High'].includes(String(module.params.removal))) return name === module.name ? module : { ...module, name };
+  return { ...module, name, params: {
     mode: 'Automatic',
     detection: windLevel(module.params.detection),
     removal: windLevel(module.params.removal),

@@ -124,6 +124,12 @@ test('legacy projects and presets convert Wind / Rumble but retain fixed Low Rum
   assert.ok(isLegacyWind(oldWind));
   assert.deepEqual(normalized.slice(0, 2).map((module) => module.params),
     Array(2).fill({ mode: 'Automatic', detection: 'Medium', removal: 'Medium' }));
+  assert.equal(makeModule('wind').name, 'Wind / Rumble Removal');
+  assert.equal(normalized[0].name, 'Wind / Rumble Removal');
+  assert.equal(normalized[1].name, 'Gust cleanup');
+  assert.equal(withoutLegacyDcModules([{ ...oldWind, params: { mode: 'Automatic', detection: 'Low', removal: 'High' } }])[0].name,
+    'Wind / Rumble Removal');
+  assert.equal(isFixedLowRumble({ ...oldWind, name: 'Wind / Rumble Removal', params: { cutoff: 55.5, q: .38 } }), false);
   assert.ok(normalized.slice(2).every(isFixedLowRumble));
   assert.ok(makeDefaultChain().some((module) => module.type === 'wind' && module.params.mode === 'Automatic'));
   assert.ok(isFixedLowRumble(makeLowRumbleRemoval()));

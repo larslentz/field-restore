@@ -525,7 +525,7 @@ function App() {
     setPendingPermission(null);
     setPendingRelink(null);
     setSelection([0, Math.min(5, metadata.frameCount / metadata.sampleRate)]);
-    setSavedStatus(`Restored file-backed project${record.modules.some(isLegacyWind) ? ' · Wind / Rumble converted to automatic' : ''} · ${new Date(record.savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
+    setSavedStatus(`Restored file-backed project${record.modules.some(isLegacyWind) ? ' · Wind / Rumble Removal converted to automatic' : ''} · ${new Date(record.savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
     return true;
   }, [restoreTrim]);
 
@@ -535,12 +535,12 @@ function App() {
       const channels = decodeChannels(saved.originalBase64, saved.originalLength);
       const next: AudioSource = { channels, sampleRate: saved.sampleRate, duration: channels[0].length / saved.sampleRate, name: saved.sourceName };
       setSource(next); setTitle(saved.title); setNotes(saved.notes); setModules(withoutLegacyDcModules(saved.modules)); setMarkers(saved.markers); setRegions(saved.regions); restoreTrim(saved.trim, next.duration);
-      setSavedStatus(`Restored${saved.modules.some(isLegacyWind) ? ' · Wind / Rumble converted to automatic' : ''} ${new Date(saved.savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
+      setSavedStatus(`Restored${saved.modules.some(isLegacyWind) ? ' · Wind / Rumble Removal converted to automatic' : ''} ${new Date(saved.savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
     } else if (saved?.original?.length) {
       const channels = saved.original.map((channel) => new Float32Array(channel));
       const next: AudioSource = { channels, sampleRate: saved.sampleRate, duration: channels[0].length / saved.sampleRate, name: saved.sourceName };
       setSource(next); setTitle(saved.title); setNotes(saved.notes); setModules(withoutLegacyDcModules(saved.modules)); setMarkers(saved.markers); setRegions(saved.regions); restoreTrim(saved.trim, next.duration);
-      setSavedStatus(`Restored${saved.modules.some(isLegacyWind) ? ' · Wind / Rumble converted to automatic' : ''} ${new Date(saved.savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
+      setSavedStatus(`Restored${saved.modules.some(isLegacyWind) ? ' · Wind / Rumble Removal converted to automatic' : ''} ${new Date(saved.savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
     }
     void listProjects().then(async (projects) => {
       const latest = projects[0];
@@ -1135,7 +1135,7 @@ function App() {
         id: `${module.type}-${crypto.randomUUID()}`,
         params: { ...module.params },
       })));
-      setSavedStatus(`Preset “${preset.name}” loaded${preset.modules.some(isLegacyWind) ? ' · Wind / Rumble converted to automatic' : ''} · project not saved`);
+      setSavedStatus(`Preset “${preset.name}” loaded${preset.modules.some(isLegacyWind) ? ' · Wind / Rumble Removal converted to automatic' : ''} · project not saved`);
     }
   };
 
@@ -1218,7 +1218,7 @@ function App() {
         setProjectId(savedProject.id);
         setPendingPermission(null);
         setPendingRelink(null);
-         setSavedStatus(`Source relinked · project restored${savedProject.modules.some(isLegacyWind) ? ' · Wind / Rumble converted to automatic' : ''}`);
+         setSavedStatus(`Source relinked · project restored${savedProject.modules.some(isLegacyWind) ? ' · Wind / Rumble Removal converted to automatic' : ''}`);
       } else {
         setModules(makeDefaultChain()); setMarkers([]); setRegions([]); setTitle(file.name.replace(/\.wav$/i, '')); setProjectId(null);
          restoreTrim(null, metadata.frameCount / metadata.sampleRate);
@@ -2233,7 +2233,7 @@ function ModuleCard({ module, humReadout, liveFrequencies, windActive, sampleRat
            <p role="status" className="text-[11px] leading-relaxed" data-testid={`wind-activity-${module.id}`}>
              {!module.enabled ? 'Bypassed · no wind reduction applied.' : windActive === null || windActive === undefined ? 'Automatic detection ready · play the edited recording to check when reduction is active.' : windActive ? 'Now playing · low-frequency interference detected; reduction active.' : 'Now playing · no interference confirmed here; reduction idle.'}
            </p>
-           <p className="text-[10px] leading-relaxed text-muted-foreground">Automatic detection is approximate. Wanted bass or low calls may be reduced; some wind may remain. Older saved Wind / Rumble edits now use automatic settings and may sound different. Compare with bypass before exporting.</p>
+           <p className="text-[10px] leading-relaxed text-muted-foreground">Automatic detection is approximate. Wanted bass or low calls may be reduced; some wind may remain. Older saved Wind / Rumble Removal edits now use automatic settings and may sound different. Compare with bypass before exporting.</p>
          </div>)}
        {(module.type === 'eq' || isFixedLowRumble(module)) && <EqCurve module={module} sampleRate={sampleRate} />}
       {module.type === 'region' && <div className="grid grid-cols-3 gap-2">{numberInput('start', 'Start', 0, 60, .1, ' s')}{numberInput('end', 'End', 0, 60, .1, ' s')}{numberInput('amount', 'Attenuate', -24, 0, .5, ' dB')}</div>}
