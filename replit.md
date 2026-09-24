@@ -7,6 +7,7 @@ Field Restore is a local-first browser editor for conservative, non-destructive 
 - `pnpm --filter @workspace/api-server run dev` — run the API server (port 5000)
 - `pnpm --filter @workspace/field-restore run dev` — run the Field Restore web app through its managed workflow
 - `pnpm run typecheck` — full typecheck across all packages
+- `pnpm run validate:release` — required release validation: typecheck, Field Restore unit tests, and the full Chromium browser suite. Failed browser traces remain in `artifacts/field-restore/test-results/`.
 - `pnpm run build` — typecheck + build all packages
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
 - `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)

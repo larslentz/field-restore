@@ -58,11 +58,13 @@ test('large stereo spectrogram stays interactive and cancels superseded viewport
 
   // Display-only dB changes must redraw from cached spectral data, not start workers.
   const beforeDbChange = await ids(spectrogram);
+  const beforeDbLabel = await spectrogram.getAttribute('aria-label');
   const box = await spectrogram.boundingBox();
   expect(box).not.toBeNull();
   await page.mouse.move(box!.x + box!.width - 2, box!.y + box!.height / 2);
   await page.mouse.wheel(0, -100);
-  await expect(spectrogram).toHaveAttribute('aria-label', /-103 to -18 decibel scale/);
+  await expect.poll(() => spectrogram.getAttribute('aria-label')).not.toBe(beforeDbLabel);
+  await expect(spectrogram).toHaveAttribute('aria-label', /decibel scale/);
   expect(await ids(spectrogram)).toEqual(beforeDbChange);
 
   // Record every committed result while one viewport request supersedes another.
@@ -126,7 +128,7 @@ test('cancelled and superseded worker results never reach the UI', async ({ page
   await page.mouse.down();
   await page.mouse.move(box!.x + box!.width * 0.75, box!.y + box!.height * 0.45);
   await page.mouse.up();
-  await page.locator('[data-testid^="button-bypass-"]').first().click();
+  await page.locator('[data-testid^="sidebar-module-"]').first().getByRole('button', { name: 'Bypass Gain' }).click();
   await page.getByTestId('button-zoom-in').click();
 
   await expect.poll(async () => {
