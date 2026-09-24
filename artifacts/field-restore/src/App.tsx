@@ -393,11 +393,11 @@ function App() {
       setSpectrogramProgress(0);
       setOperationPaused(false);
       const originalLeftJob = startWorkerJob<SpectrogramData>(
-        { kind: 'spectrogram', file, metadata, options: { ...options, channelIndex: 0 } },
+        { kind: 'spectrogram', file, metadata, modules: [], options: { ...options, channelIndex: 0 } },
         (fraction) => { if (generation === spectrogramGenerationRef.current) setSpectrogramProgress(fraction / 2); },
       );
       const originalRightJob = startWorkerJob<SpectrogramData>(
-        { kind: 'spectrogram', file, metadata, options: { ...options, channelIndex: Math.min(1, metadata.channels - 1) } },
+        { kind: 'spectrogram', file, metadata, modules: [], options: { ...options, channelIndex: Math.min(1, metadata.channels - 1) } },
         (fraction) => { if (generation === spectrogramGenerationRef.current) setSpectrogramProgress(0.5 + fraction / 2); },
       );
       jobs = [originalLeftJob, originalRightJob];
@@ -1492,6 +1492,13 @@ function App() {
                     <div className="panel-header spectrogram-panel-header">
                       <div className="flex items-center gap-3"><Waves size={17} color="hsl(var(--primary))" /><div><div className="section-title">Spectrogram / selection</div><div className="text-[10px] text-muted-foreground mt-0.5">Drag to select · scroll/drag the bottom time axis · scroll/drag the left frequency axis · scroll/drag the right dB axis</div></div></div>
                       <div className="spectrogram-header-actions">
+                        <div className="spectrogram-source-control" aria-label="Spectrogram source">
+                          <span className="spectrogram-source-caption">Viewing</span>
+                          <div className="spectrogram-source-toggle">
+                            <button type="button" className={spectrogramSource === 'original' ? 'active' : ''} onClick={() => setSpectrogramSource('original')} aria-pressed={spectrogramSource === 'original'} data-testid="button-spectrogram-original">Original</button>
+                            <button type="button" className={spectrogramSource === 'current' ? 'active' : ''} onClick={() => setSpectrogramSource('current')} aria-pressed={spectrogramSource === 'current'} data-testid="button-spectrogram-edited">Edited</button>
+                          </div>
+                        </div>
                         <div className="spectrogram-tabs flex bg-[hsl(var(--muted))] rounded-md p-0.5" role="tablist" aria-label="Workspace view">
                           {(['edit', 'analyze', 'project'] as ViewTab[]).map((tab) => <button key={tab} type="button" className={`tab rounded ${activeTab === tab ? 'active bg-[hsl(var(--card))]' : ''}`} onClick={() => setActiveTab(tab)} role="tab" aria-selected={activeTab === tab} data-testid={`tab-${tab}`}>{tab[0].toUpperCase() + tab.slice(1)}</button>)}
                         </div>
@@ -1500,7 +1507,8 @@ function App() {
                     </div>
                     <div className="panel-body !pt-3">
                       <div className="waveform-wrap">
-                        <canvas ref={canvasRef} className="waveform-canvas" onPointerDown={onCanvasPointerDown} onPointerMove={onCanvasPointerMove} onPointerUp={onCanvasPointerUp} onPointerCancel={onCanvasPointerUp} aria-label={`Interactive spectrogram from ${spectrogramMinFrequency / 1000} to ${spectrogramMaxFrequency / 1000} kilohertz with ${spectrogramFloorDb} to ${spectrogramCeilingDb} decibel scale`} data-testid="canvas-spectrogram" data-request-id={spectrogramRequestId} data-result-id={spectrogramResultId} />
+                        <canvas ref={canvasRef} className="waveform-canvas" onPointerDown={onCanvasPointerDown} onPointerMove={onCanvasPointerMove} onPointerUp={onCanvasPointerUp} onPointerCancel={onCanvasPointerUp} aria-label={`${spectrogramSource === 'original' ? 'Original recording' : 'Edited signal'} interactive spectrogram from ${spectrogramMinFrequency / 1000} to ${spectrogramMaxFrequency / 1000} kilohertz with ${spectrogramFloorDb} to ${spectrogramCeilingDb} decibel scale`} data-testid="canvas-spectrogram" data-request-id={spectrogramRequestId} data-result-id={spectrogramResultId} />
+                        <div className={`spectrogram-source-label ${spectrogramSource}`} data-testid="label-spectrogram-source">{spectrogramSource === 'original' ? 'Original recording' : 'Edited signal · chain applied'}</div>
                       </div>
                       <div className="flex flex-wrap items-center justify-between gap-3 mt-3">
                         <div className="flex items-center gap-2 text-[11px] text-muted-foreground"><span className="inline-block w-3 h-3 rounded-sm" style={{ background: spectrogramColorCss(0.08, spectrogramPalette) }} /> low energy <span className="inline-block w-3 h-3 rounded-sm ml-2" style={{ background: spectrogramColorCss(0.92, spectrogramPalette) }} /> high energy <span className="inline-block w-3 h-3 rounded-sm bg-[#ff8a4c] ml-2" /> playhead</div>
