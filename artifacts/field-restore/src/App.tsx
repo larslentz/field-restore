@@ -1710,7 +1710,7 @@ function App() {
     for (const top of [0, paneHeight]) {
       for (const { frequency, y } of frequencyTicks) {
         const label = frequency === 0 ? '0' : `${Number((frequency / 1000).toFixed(1))}k`;
-        context.fillText(label, graphLeft - 6, Math.max(top + 10, Math.min(top + paneHeight - 3, y + 3)));
+        context.fillText(label, graphLeft - 6, Math.max(top + 10, Math.min(top + paneHeight - 3, top + y + 3)));
       }
     }
     context.textAlign = 'left';

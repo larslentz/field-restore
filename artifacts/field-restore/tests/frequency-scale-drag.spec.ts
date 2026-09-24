@@ -32,6 +32,10 @@ test('both channel rulers pan the frequency range and move the drawn labels', as
   );
 
   await expect.poll(async () => (await drawnLabelPositions()).length).toBe(2);
+  await expect.poll(async () => {
+    const [leftChannel, rightChannel] = await drawnLabelPositions();
+    return rightChannel - leftChannel;
+  }).toBeCloseTo(paneHeight, 0);
   const initial = await range();
   const originalTicks = await drawnLabelPositions();
   await page.mouse.move(x, topY);
@@ -41,6 +45,10 @@ test('both channel rulers pan the frequency range and move the drawn labels', as
   await expect.poll(async () => (await drawnLabelPositions())[0]).toBeGreaterThan(originalTicks[0] + 10);
   const moved = await range();
   expect(moved.maximum - moved.minimum).toBeCloseTo(initial.maximum - initial.minimum, 5);
+  await expect.poll(async () => {
+    const [leftChannel, rightChannel] = await drawnLabelPositions();
+    return rightChannel - leftChannel;
+  }).toBeCloseTo(paneHeight, 0);
   await page.mouse.up();
 
   await page.mouse.move(x, bottomY);

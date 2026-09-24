@@ -7,4 +7,4 @@ Keep a synchronized frequency ruler for each of the two stacked channel panes, b
 
 **Why:** Each channel pane independently displays the same low-to-high frequency interval. A single continuous frequency ruler across both would assign incorrect frequencies to one channel, unlike the shared color-level range. Stationary labels made both drags feel unresponsive even when the displayed range changed.
 
-**How to apply:** For new spectrogram gestures, anchor frequency input to the pane under the pointer while updating both panes together. Anchor level input to the whole graph. Preserve the interval during pan, and reposition label ticks to follow the content.
+**How to apply:** For new spectrogram gestures, anchor frequency input to the pane under the pointer while updating both panes together. Anchor level input to the whole graph. Preserve the interval during pan, and reposition label ticks to follow the content. Check the rendered ruler in both panes: a test of one moving label alone can pass even when the other pane's labels overlap at its boundary.
