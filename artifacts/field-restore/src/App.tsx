@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent as ReactDragEvent, type FormEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react';
+import { createPortal } from 'react-dom';
 import { Activity, ArrowDown, ArrowUp, Check, ChevronDown, CircleHelp, Download, ExternalLink, FileAudio, FolderOpen, Gauge, GripVertical, Info, Keyboard, Layers3, LoaderCircle, Menu, PanelRightOpen, Pause, Play, Plus, Redo2, RotateCcw, Save, Settings, Square, Trash2, Undo2, Waves, X, ZoomIn, ZoomOut } from 'lucide-react';
 import { createDemoAudio, downloadBlob, encodeWav, parseWav, type AudioSource } from '@/lib/audio';
 import { decodeChannels, loadProject, projectFromSource, saveProject } from '@/lib/persistence';
@@ -131,6 +132,8 @@ function App() {
   const [monitor, setMonitor] = useState<MonitorMode>('current');
   const [spectrogramSource, setSpectrogramSource] = useState<MonitorMode>('current');
   const [moduleMenu, setModuleMenu] = useState(false);
+  const sidebarAddRef = useRef<HTMLButtonElement>(null);
+  const [sidebarMenuPosition, setSidebarMenuPosition] = useState<{ top: number; left: number; width: number; maxHeight: number } | null>(null);
   const [chainPresets, setChainPresets] = useState<ChainPreset[]>([]);
   const [presetDialogOpen, setPresetDialogOpen] = useState(false);
   const [presetName, setPresetName] = useState('');
@@ -234,8 +237,42 @@ function App() {
   const openChainDrawer = (event: ReactMouseEvent<HTMLButtonElement>, moduleId: string | null = null) => {
     chainDrawerOpenerRef.current = event.currentTarget;
     setSelectedModuleId(moduleId);
+    setModuleMenu(false);
     setChainDrawerOpen(true);
   };
+
+  useEffect(() => {
+    if (!moduleMenu || chainDrawerOpen) return;
+    const updatePosition = () => {
+      const button = sidebarAddRef.current;
+      if (!button) return;
+      const rect = button.getBoundingClientRect();
+      if (rect.bottom < 0 || rect.top > window.innerHeight) {
+        setModuleMenu(false);
+        return;
+      }
+      const margin = 8;
+      const gap = 5;
+      const width = Math.min(190, window.innerWidth - margin * 2);
+      const below = Math.max(0, window.innerHeight - rect.bottom - gap - margin);
+      const above = Math.max(0, rect.top - gap - margin);
+      const placeBelow = below >= above;
+      const maxHeight = Math.min(420, placeBelow ? below : above);
+      setSidebarMenuPosition({
+        top: placeBelow ? rect.bottom + gap : rect.top - gap - maxHeight,
+        left: Math.max(margin, Math.min(rect.right - width, window.innerWidth - width - margin)),
+        width,
+        maxHeight,
+      });
+    };
+    updatePosition();
+    window.addEventListener('resize', updatePosition);
+    window.addEventListener('scroll', updatePosition, true);
+    return () => {
+      window.removeEventListener('resize', updatePosition);
+      window.removeEventListener('scroll', updatePosition, true);
+    };
+  }, [moduleMenu, chainDrawerOpen]);
 
   useEffect(() => {
     if (!chainDrawerOpen) return;
@@ -1884,8 +1921,11 @@ function App() {
               <EditChainToggle modules={modules} onToggle={toggleAllModules} testId="toggle-all-modules-sidebar" />
               <button type="button" className="sidebar-open-button" onClick={(event) => openChainDrawer(event)} aria-label="Open full edit chain" title="Open full edit chain"><PanelRightOpen size={13} /></button>
               <div className="relative">
-                <button type="button" className="sidebar-add-button" onClick={() => setModuleMenu(!moduleMenu)} aria-label="Add module" aria-expanded={moduleMenu} data-testid="button-add-module"><Plus size={13} /></button>
-                {moduleMenu && <div className="sidebar-module-menu">{MODULE_TYPES.map((type) => <button type="button" key={type} onClick={() => addModule(type)} data-testid={`menu-module-${type}`}>{moduleOptionLabel(type)}</button>)}</div>}
+                <button ref={sidebarAddRef} type="button" className="sidebar-add-button" onClick={() => setModuleMenu(!moduleMenu)} aria-label="Add module" aria-expanded={moduleMenu && !chainDrawerOpen} aria-controls="sidebar-add-module-menu" data-testid="button-add-module"><Plus size={13} /></button>
+                {moduleMenu && !chainDrawerOpen && sidebarMenuPosition && createPortal(
+                  <div id="sidebar-add-module-menu" className="sidebar-module-menu" style={sidebarMenuPosition} data-testid="sidebar-module-menu">
+                    {MODULE_TYPES.map((type) => <button type="button" key={type} onClick={() => addModule(type)} data-testid={`menu-module-${type}`}>{moduleOptionLabel(type)}</button>)}
+                  </div>, document.body)}
               </div>
             </div>
           </div>

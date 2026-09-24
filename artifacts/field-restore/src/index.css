@@ -245,7 +245,7 @@
 .sidebar-open-button { color: #b7c8bb; }
 .sidebar-add-button:hover, .sidebar-open-button:hover { background: hsl(var(--sidebar-accent)); color: #d8ed55; }
 .sidebar-module-menu, .drawer-module-menu { position: absolute; z-index: 50; display: grid; width: 190px; padding: 5px; background: hsl(var(--card)); border: 1px solid hsl(var(--border)); border-radius: 6px; box-shadow: 0 14px 36px rgba(0,0,0,.24); color: hsl(var(--foreground)); }
-.sidebar-module-menu { top: 31px; left: 0; }
+.sidebar-module-menu { position: fixed; align-content: start; overflow-y: auto; overscroll-behavior: contain; box-sizing: border-box; }
 .sidebar-module-menu button, .drawer-module-menu button { padding: 7px 9px; border-radius: 4px; text-align: left; font-size: 11px; }
 .sidebar-module-menu button:hover, .drawer-module-menu button:hover { background: hsl(var(--muted)); }
 .sidebar-chain-list { min-height: 0; overflow-y: auto; display: grid; align-content: start; gap: 4px; padding-right: 2px; }
