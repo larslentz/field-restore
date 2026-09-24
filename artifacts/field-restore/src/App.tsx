@@ -316,6 +316,13 @@ function App() {
   const analysisJobRef = useRef<WorkerJob<LargeAnalysisResult> | null>(null);
   const spectrogramJobRef = useRef<Array<WorkerJob<SpectrogramData>>>([]);
   const analysisGenerationRef = useRef(0);
+  const analysisCacheRef = useRef<{
+    source: LargeSource | null;
+    original?: LargeAnalysisResult;
+    current?: { modules: EditModule[]; start: number; end: number; stats: LargeAnalysisResult };
+    selectionOriginal?: { start: number; end: number; stats: LargeAnalysisResult };
+    selectionCurrent?: { modules: EditModule[]; start: number; end: number; selectionStart: number; selectionEnd: number; stats: LoudnessStats };
+  }>({ source: null });
   const spectrogramGenerationRef = useRef(0);
   const backgroundPausedRef = useRef(false);
   const exportJobRef = useRef<AbortController | null>(null);
@@ -651,12 +658,17 @@ function App() {
     analysisJobRef.current?.cancel();
     const generation = ++analysisGenerationRef.current;
     setAnalysisRequestId(generation);
+    if (analysisCacheRef.current.source !== largeSource) analysisCacheRef.current = { source: largeSource };
+    const cache = analysisCacheRef.current;
     const { file, metadata } = largeSource;
     const selectionStartFrame = Math.max(0, Math.floor(selectionStart * metadata.sampleRate));
     const selectionFrames = Math.max(1, Math.min(metadata.frameCount - selectionStartFrame, Math.ceil((selectionEnd - selectionStart) * metadata.sampleRate)));
+    const selectionEndFrame = selectionStartFrame + selectionFrames;
     const selectionMetadata = audioRange(metadata, selectionStartFrame, selectionFrames);
     const editedSelectionStartFrame = Math.max(selectionStartFrame, Math.floor(committedTrimStart * metadata.sampleRate));
     const editedSelectionEndFrame = Math.min(selectionStartFrame + selectionFrames, Math.ceil(committedTrimEnd * metadata.sampleRate));
+    const startFrame = Math.floor(committedTrimStart * metadata.sampleRate);
+    const endFrame = Math.min(metadata.frameCount, Math.ceil(committedTrimEnd * metadata.sampleRate));
     setAnalysisStatus(hasSelection ? 'Analyzing selection' : 'Analyzing original recording');
     setAnalysisProgress(0);
     setOperationPaused(false);
@@ -677,11 +689,22 @@ function App() {
       setLargeSelectionOriginalStats(EMPTY_STATS);
       setLargeSelectionCurrentStats(EMPTY_STATS);
     }
-    const selectionAnalysis = hasSelection ? run({ kind: 'loudness', file, metadata: selectionMetadata, frameOffset: selectionStartFrame }, 0).then((stats) => {
+    const cachedSelectionOriginal = cache.selectionOriginal?.start === selectionStartFrame && cache.selectionOriginal.end === selectionEndFrame
+      ? cache.selectionOriginal.stats : null;
+    const selectionAnalysis = hasSelection ? (cachedSelectionOriginal
+      ? Promise.resolve(cachedSelectionOriginal)
+      : run({ kind: 'loudness', file, metadata: selectionMetadata, frameOffset: selectionStartFrame }, 0)
+    ).then((stats) => {
       if (generation !== analysisGenerationRef.current) throw new DOMException('Stale analysis.', 'AbortError');
+      cache.selectionOriginal = { start: selectionStartFrame, end: selectionEndFrame, stats };
       setLargeSelectionOriginalStats(stats);
+      setAnalysisProgress(1 / 4);
       setAnalysisStatus('Analyzing processed selection');
       if (editedSelectionEndFrame <= editedSelectionStartFrame) return EMPTY_STATS;
+      const cachedSelectionCurrent = cache.selectionCurrent;
+      if (cachedSelectionCurrent?.modules === processingModules && cachedSelectionCurrent.start === startFrame &&
+        cachedSelectionCurrent.end === endFrame && cachedSelectionCurrent.selectionStart === selectionStartFrame &&
+        cachedSelectionCurrent.selectionEnd === selectionEndFrame) return cachedSelectionCurrent.stats;
       const editedFrames = editedSelectionEndFrame - editedSelectionStartFrame;
       const editedMetadata = audioRange(metadata, editedSelectionStartFrame, editedFrames);
       const warmStart = committedTrimStart > 0 ? 0 : Math.max(0, editedSelectionStartFrame - metadata.sampleRate * 2);
@@ -698,24 +721,29 @@ function App() {
       }, 1);
     }).then((stats) => {
       if (generation !== analysisGenerationRef.current) throw new DOMException('Stale analysis.', 'AbortError');
-       setLargeSelectionCurrentStats(stats);
+      cache.selectionCurrent = { modules: processingModules, start: startFrame, end: endFrame, selectionStart: selectionStartFrame, selectionEnd: selectionEndFrame, stats };
+      setLargeSelectionCurrentStats(stats);
+      setAnalysisProgress(2 / 4);
     }) : Promise.resolve();
     void selectionAnalysis.then(() => {
       if (generation !== analysisGenerationRef.current) throw new DOMException('Stale analysis.', 'AbortError');
       setAnalysisStatus('Analyzing original recording');
-      return run({ kind: 'loudness', file, metadata }, hasSelection ? 2 : 0);
+      return cache.original ?? run({ kind: 'loudness', file, metadata }, hasSelection ? 2 : 0);
     }).then((stats) => {
       if (generation !== analysisGenerationRef.current) throw new DOMException('Stale analysis.', 'AbortError');
+      cache.original = stats;
       setLargeOriginalStats(stats);
+      setAnalysisProgress(hasSelection ? 3 / 4 : 1 / 2);
       setAnalysisStatus('Analyzing processed recording');
-       const startFrame = Math.floor(committedTrimStart * metadata.sampleRate);
-       const endFrame = Math.min(metadata.frameCount, Math.ceil(committedTrimEnd * metadata.sampleRate));
-        const trimmedMetadata = audioRange(metadata, startFrame, endFrame - startFrame);
-       return run({ kind: 'loudness', file, metadata: trimmedMetadata, modules: processingModules, frameOffset: startFrame, sourceFrameCount: metadata.frameCount,
+      const cachedCurrent = cache.current;
+      if (cachedCurrent?.modules === processingModules && cachedCurrent.start === startFrame && cachedCurrent.end === endFrame) return cachedCurrent.stats;
+      const trimmedMetadata = audioRange(metadata, startFrame, endFrame - startFrame);
+      return run({ kind: 'loudness', file, metadata: trimmedMetadata, modules: processingModules, frameOffset: startFrame, sourceFrameCount: metadata.frameCount,
          warmup: startFrame > 0 ? { metadata, startFrame: 0, frameCount: startFrame } : undefined,
        }, hasSelection ? 3 : 1);
     }).then((stats) => {
       if (generation === analysisGenerationRef.current) {
+        cache.current = { modules: processingModules, start: startFrame, end: endFrame, stats };
         setLargeCurrentStats(stats);
         setAnalysisResultId(generation);
         setAnalysisStatus('');
@@ -727,6 +755,7 @@ function App() {
         setAnalysisStatus('');
         setError(caught instanceof Error ? caught.message : 'Unable to analyze this recording.');
       }
+      if (generation === analysisGenerationRef.current) analysisJobRef.current = null;
     });
     return () => {
       if (generation === analysisGenerationRef.current) analysisGenerationRef.current += 1;

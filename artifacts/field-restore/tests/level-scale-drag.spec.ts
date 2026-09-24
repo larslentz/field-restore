@@ -35,7 +35,7 @@ test('the shared level scale follows pointer drags in both channel halves', asyn
   expect(await range()).toEqual(released);
 
   await page.mouse.move(x, bottomY);
-  const ratio = (bottomY - bounds.y) / (bounds.height - 28);
+  const ratio = (bottomY - bounds.y) / (bounds.height - 42);
   const grabbed = released.ceiling - ratio * (released.ceiling - released.floor);
   await page.mouse.wheel(0, -120);
   await expect.poll(async () => (await range()).ceiling - (await range()).floor).toBeLessThan(released.ceiling - released.floor);

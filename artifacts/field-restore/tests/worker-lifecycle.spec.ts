@@ -8,8 +8,10 @@ const wavPath = path.join(fixtureDir, 'large-worker-lifecycle.wav');
 async function createLargeWav() {
   const sampleRate = 8_000;
   const channels = 2;
-  const bytesPerSample = 1;
-  const dataSize = 64 * 1024 * 1024 + sampleRate * channels;
+  // Stay above the file-backed threshold without making every loudness pass
+  // process 64 million 8-bit samples. The test targets lifecycle, not throughput.
+  const bytesPerSample = 4;
+  const dataSize = 64 * 1024 * 1024 + sampleRate * channels * bytesPerSample;
   const header = Buffer.alloc(44);
   header.write('RIFF', 0);
   header.writeUInt32LE(dataSize + 36, 4);
@@ -133,6 +135,18 @@ test('cancelled and superseded worker results never reach the UI', async ({ page
   await page.waitForTimeout(1_000);
   expect((await ids(statistics)).result).toBe(beforeCancel.analysis.result);
   expect((await ids(spectrogram)).result).toBe(beforeCancel.spectrogram.result);
+  await expect(statistics).toContainText('Statistics unavailable');
+
+  await statistics.evaluate((element) => {
+    const commits: Array<{ request: number; result: number }> = [];
+    new MutationObserver(() => {
+      commits.push({
+        request: Number(element.getAttribute('data-request-id')),
+        result: Number(element.getAttribute('data-result-id')),
+      });
+    }).observe(element, { attributes: true, attributeFilter: ['data-result-id'] });
+    (window as typeof window & { __analysisCommits?: typeof commits }).__analysisCommits = commits;
+  });
 
   // Start overlapping generations by changing zoom, selection, and the edit chain.
   await page.getByTestId('button-zoom-in').click();
@@ -150,12 +164,18 @@ test('cancelled and superseded worker results never reach the UI', async ({ page
   await expect.poll(async () => {
     const value = await ids(spectrogram);
     return value.result === value.request && value.request > beforeCancel.spectrogram.request;
-  }, { timeout: 120_000 }).toBe(true);
+  }, { timeout: 60_000 }).toBe(true);
   await expect.poll(async () => {
     const value = await ids(statistics);
     return value.result === value.request && value.request > beforeCancel.analysis.request;
-  }, { timeout: 120_000 }).toBe(true);
+  }, { timeout: 60_000 }).toBe(true);
 
+  const commits = await page.evaluate(() =>
+    (window as typeof window & { __analysisCommits?: Array<{ request: number; result: number }> }).__analysisCommits ?? []);
+  expect(commits.length).toBeGreaterThan(0);
+  expect(commits.every(({ request, result }) => request === result)).toBe(true);
+  await expect(statistics).not.toContainText('Statistics unavailable');
+  await expect(statistics).not.toContainText('Calculating statistics');
   await expect(status).toBeHidden();
   await expect(page.getByTestId('text-selection-time')).not.toContainText('5.000 s selected');
 });

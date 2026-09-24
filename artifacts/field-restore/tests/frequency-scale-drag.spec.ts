@@ -15,7 +15,7 @@ test('both channel rulers pan the frequency range and move the drawn labels', as
   const canvas = page.getByTestId('canvas-spectrogram');
   await expect(canvas).toBeVisible();
   const bounds = (await canvas.boundingBox())!;
-  const paneHeight = (bounds.height - 28) / 2;
+  const paneHeight = (bounds.height - 42) / 2;
   const x = bounds.x + 30;
   const topY = bounds.y + paneHeight / 2;
   const bottomY = topY + paneHeight;
