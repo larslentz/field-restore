@@ -49,6 +49,7 @@ test('the edit drawer keeps module controls, summaries, bypass, reorder, and com
 
   await page.keyboard.press('Escape');
   await expect(drawer).toBeHidden();
+  await expect(page.getByTestId(`button-open-module-${humId}`)).toBeFocused();
 
   await page.setViewportSize({ width: 800, height: 900 });
   const compactChainButton = page.getByTestId('button-open-chain');
@@ -57,3 +58,40 @@ test('the edit drawer keeps module controls, summaries, bypass, reorder, and com
   await expect(page.getByRole('dialog', { name: 'Edit chain' })).toBeVisible();
   await expect(page.getByTestId(`card-module-${humId}`)).toContainText('Adaptive · 72 Hz');
 });
+
+for (const layout of ['desktop', 'compact'] as const) {
+  test(`${layout} edit drawer traps Tab and restores focus after every close action`, async ({ page }) => {
+    await page.setViewportSize(layout === 'compact' ? { width: 800, height: 900 } : { width: 1440, height: 900 });
+    await page.goto('/');
+
+    const opener = layout === 'compact'
+      ? page.getByTestId('button-open-chain')
+      : page.getByTestId('button-open-full-chain');
+    const drawer = page.getByRole('dialog', { name: 'Edit chain' });
+    const closeButton = drawer.getByTestId('button-close-chain');
+
+    for (const close of ['Escape', 'button', 'backdrop'] as const) {
+      await opener.focus();
+      await page.keyboard.press('Enter');
+      await expect(drawer).toBeFocused();
+
+      // Starting on the dialog itself, reverse tabbing must wrap to the last control.
+      await page.keyboard.press('Shift+Tab');
+      await expect(drawer.locator(':focus')).toHaveCount(1);
+      await expect(closeButton).not.toBeFocused();
+      await page.keyboard.press('Tab');
+      await expect(closeButton).toBeFocused();
+      await page.keyboard.press('Shift+Tab');
+      await expect(drawer.locator(':focus')).toHaveCount(1);
+      await page.keyboard.press('Tab');
+      await expect(closeButton).toBeFocused();
+
+      if (close === 'Escape') await page.keyboard.press('Escape');
+      if (close === 'button') await closeButton.click();
+      if (close === 'backdrop') await page.locator('.chain-drawer-backdrop').click({ position: { x: 5, y: 450 } });
+
+      await expect(drawer).toBeHidden();
+      await expect(opener).toBeFocused();
+    }
+  });
+}

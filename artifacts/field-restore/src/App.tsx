@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent as ReactDragEvent, type PointerEvent as ReactPointerEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent as ReactDragEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import { Activity, ArrowDown, ArrowUp, Check, ChevronDown, CircleHelp, Download, FileAudio, FolderOpen, Gauge, GripVertical, Info, Keyboard, Layers3, Menu, PanelRightOpen, Pause, Play, Plus, Redo2, RotateCcw, Save, Settings, Square, Trash2, Undo2, Waves, X, ZoomIn, ZoomOut } from 'lucide-react';
 import { createDemoAudio, downloadBlob, encodeWav, parseWav, type AudioSource } from '@/lib/audio';
 import { decodeChannels, loadProject, projectFromSource, saveProject } from '@/lib/persistence';
@@ -138,6 +138,7 @@ function App() {
   const [error, setError] = useState('');
   const [isDraggingWav, setIsDraggingWav] = useState(false);
   const chainDrawerRef = useRef<HTMLElement>(null);
+  const chainDrawerOpenerRef = useRef<HTMLButtonElement>(null);
   const [spectrogramMinFrequency, setSpectrogramMinFrequency] = useState(0);
   const [spectrogramMaxFrequency, setSpectrogramMaxFrequency] = useState(20000);
   const [spectrogramCeilingDb, setSpectrogramCeilingDb] = useState(-20);
@@ -166,18 +167,44 @@ function App() {
   const [largeSelectionCurrentStats, setLargeSelectionCurrentStats] = useState<LoudnessStats>(EMPTY_STATS);
   const selectedModule = modules.find((module) => module.id === selectedModuleId) ?? null;
 
+  const openChainDrawer = (event: ReactMouseEvent<HTMLButtonElement>, moduleId: string | null = null) => {
+    chainDrawerOpenerRef.current = event.currentTarget;
+    setSelectedModuleId(moduleId);
+    setChainDrawerOpen(true);
+  };
+
   useEffect(() => {
     if (!chainDrawerOpen) return;
     const drawer = chainDrawerRef.current;
     drawer?.focus();
-    const closeOnEscape = (event: KeyboardEvent) => {
+    const handleDrawerKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         setChainDrawerOpen(false);
         setModuleMenu(false);
+      } else if (event.key === 'Tab' && drawer) {
+        const focusable = Array.from(drawer.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        )).filter((element) => element.getClientRects().length > 0 && getComputedStyle(element).visibility !== 'hidden');
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (!first) {
+          event.preventDefault();
+          drawer.focus();
+        } else if (event.shiftKey && (!drawer.contains(document.activeElement) || document.activeElement === first || document.activeElement === drawer)) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && (!drawer.contains(document.activeElement) || document.activeElement === last)) {
+          event.preventDefault();
+          first.focus();
+        }
       }
     };
-    window.addEventListener('keydown', closeOnEscape);
-    return () => window.removeEventListener('keydown', closeOnEscape);
+    window.addEventListener('keydown', handleDrawerKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleDrawerKeyDown);
+      if (chainDrawerOpenerRef.current?.isConnected) chainDrawerOpenerRef.current.focus();
+      chainDrawerOpenerRef.current = null;
+    };
   }, [chainDrawerOpen]);
 
   useEffect(() => {
@@ -1370,13 +1397,13 @@ function App() {
         <div className="px-3 mt-5 sidebar-title eyebrow text-[#91a69d]">Workspace</div>
         <nav className="px-3 mt-2 space-y-1" aria-label="Workspace navigation">
           {([['edit', Activity, 'Edit chain'], ['analyze', Gauge, 'Analyze'], ['project', FolderOpen, 'Project']] as const).map(([tab, Icon, label]) => <button key={tab} type="button" className={`nav-item ${activeTab === tab ? 'active' : ''}`} onClick={() => setActiveTab(tab)} data-testid={`nav-${tab}`}><Icon size={15} /><span className="nav-label">{label}</span></button>)}
-          <button type="button" className="nav-item compact-chain-trigger" onClick={() => { setSelectedModuleId(null); setChainDrawerOpen(true); }} aria-label="Open edit chain" data-testid="button-open-chain"><Layers3 size={15} /><span className="nav-label">Modules</span></button>
+          <button type="button" className="nav-item compact-chain-trigger" onClick={(event) => openChainDrawer(event)} aria-label="Open edit chain" data-testid="button-open-chain"><Layers3 size={15} /><span className="nav-label">Modules</span></button>
         </nav>
         <section className="sidebar-chain" aria-label="Non-destructive edit chain">
           <div className="sidebar-chain-heading">
-            <button type="button" className="sidebar-chain-title" onClick={() => { setSelectedModuleId(null); setChainDrawerOpen(true); }} data-testid="button-open-full-chain"><div className="eyebrow text-[#91a69d]">Edit chain</div><div className="sidebar-chain-count">{modules.filter((module) => module.enabled).length}/{modules.length} enabled</div></button>
+            <button type="button" className="sidebar-chain-title" onClick={(event) => openChainDrawer(event)} data-testid="button-open-full-chain"><div className="eyebrow text-[#91a69d]">Edit chain</div><div className="sidebar-chain-count">{modules.filter((module) => module.enabled).length}/{modules.length} enabled</div></button>
             <div className="sidebar-chain-actions">
-              <button type="button" className="sidebar-open-button" onClick={() => { setSelectedModuleId(null); setChainDrawerOpen(true); }} aria-label="Open full edit chain" title="Open full edit chain"><PanelRightOpen size={13} /></button>
+              <button type="button" className="sidebar-open-button" onClick={(event) => openChainDrawer(event)} aria-label="Open full edit chain" title="Open full edit chain"><PanelRightOpen size={13} /></button>
               <div className="relative">
                 <button type="button" className="sidebar-add-button" onClick={() => setModuleMenu(!moduleMenu)} aria-label="Add module" aria-expanded={moduleMenu} data-testid="button-add-module"><Plus size={13} /></button>
                 {moduleMenu && <div className="sidebar-module-menu">{MODULE_TYPES.map((type) => <button type="button" key={type} onClick={() => { addModule(type); setModuleMenu(false); }} data-testid={`menu-module-${type}`}>{MODULE_LABELS[type]}</button>)}</div>}
@@ -1420,7 +1447,7 @@ function App() {
                 >
                   <GripVertical size={12} />
                 </span>
-                <button type="button" className="sidebar-chain-select" onClick={() => { setSelectedModuleId(module.id); setChainDrawerOpen(true); }} data-testid={`button-open-module-${module.id}`}>
+                <button type="button" className="sidebar-chain-select" onClick={(event) => openChainDrawer(event, module.id)} data-testid={`button-open-module-${module.id}`}>
                   <span className="module-index">{String(index + 1).padStart(2, '0')}</span><span className="module-dot" />
                   <span className="sidebar-chain-copy"><strong>{module.name}</strong><small>{moduleSummary(module)}</small></span>
                 </button>
@@ -1551,7 +1578,7 @@ function App() {
       {modal === 'export' && <ExportModal onClose={() => setModal(null)} onExport={exportAudio} title={title} />}
       {modal === 'help' && <HelpModal onClose={() => setModal(null)} />}
       {modal === 'settings' && <SettingsModal onClose={() => setModal(null)} spectrogramPalette={spectrogramPalette} onSpectrogramPaletteChange={(palette) => { setSpectrogramPalette(palette); localStorage.setItem('field-restore-spectrogram-palette', palette); }} />}
-      {chainDrawerOpen && <div className="chain-drawer-backdrop" onPointerDown={(event) => { if (event.target === event.currentTarget) setChainDrawerOpen(false); }}>
+      {chainDrawerOpen && <div className="chain-drawer-backdrop" onPointerDown={(event) => { if (event.target === event.currentTarget) { event.preventDefault(); setChainDrawerOpen(false); } }}>
         <aside ref={chainDrawerRef} className="chain-drawer" role="dialog" aria-modal="true" aria-label={selectedModule ? `Edit ${selectedModule.name}` : 'Edit chain'} tabIndex={-1}>
           <div className="chain-drawer-header">
             <div><div className="eyebrow">Non-destructive edit chain</div><div className="section-title mt-1">{selectedModule ? selectedModule.name : 'Modules'}</div></div>
