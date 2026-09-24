@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  makeBringBackLowEnd,
   makeDefaultChain,
+  makeLowRumbleRemoval,
   makeProcessingChain,
   makeRestorationReport,
   renderChain,
@@ -13,6 +15,29 @@ const gain = { id: 'gain', type: 'gain', name: 'Gain', enabled: true, params: { 
 
 test('editable presets never expose DC removal', () => {
   assert.equal(makeDefaultChain().some((module) => module.type === 'dc'), false);
+});
+
+test('new low rumble removal matches the default preset with an independent ID', () => {
+  const presetModule = makeDefaultChain().find((module) => module.name === 'Low Rumble Removal');
+  const addedModule = makeLowRumbleRemoval();
+  assert.ok(presetModule);
+  assert.equal(addedModule.type, 'wind');
+  assert.deepEqual(addedModule.params, { cutoff: 55.5, q: 0.38 });
+  assert.deepEqual(addedModule.params, presetModule.params);
+  assert.notEqual(addedModule.id, presetModule.id);
+});
+
+test('new bring back the low end matches the default low-shelf preset with an independent ID', () => {
+  const presetModule = makeDefaultChain().find((module) => module.name === 'Bring Back the Low End');
+  const addedModule = makeBringBackLowEnd();
+  assert.ok(presetModule);
+  assert.equal(addedModule.type, 'eq');
+  assert.equal(addedModule.params.mode, 'low-shelf');
+  assert.equal(addedModule.params.frequency, 55);
+  assert.equal(addedModule.params.q, 0.4);
+  assert.equal(addedModule.params.gain, 3);
+  assert.deepEqual(addedModule.params, presetModule.params);
+  assert.notEqual(addedModule.id, presetModule.id);
 });
 
 test('legacy DC modules are absorbed into exactly one automatic baseline stage', () => {

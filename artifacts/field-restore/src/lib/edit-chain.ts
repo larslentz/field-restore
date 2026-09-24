@@ -30,12 +30,18 @@ export const makeModule = (type: ModuleType, options?: { name?: string; params?:
   };
 };
 
+export const makeLowRumbleRemoval = (): EditModule =>
+  makeModule('wind', { name: 'Low Rumble Removal', params: { cutoff: 55.5, q: 0.38 } });
+
+export const makeBringBackLowEnd = (): EditModule =>
+  makeModule('eq', { name: 'Bring Back the Low End', params: { mode: 'low-shelf', frequency: 55, q: 0.4, gain: 3 } });
+
 export const makeDefaultChain = (): EditModule[] => [
   makeModule('gain', { name: 'Gain', params: { db: 0 } }),
-  makeModule('wind', { name: 'Low Rumble Removal', params: { cutoff: 55.5, q: 0.38 } }),
+  makeLowRumbleRemoval(),
   makeModule('hum', { name: 'Hum Removal', params: { mode: 'Adaptive', frequency: 60, reduction: 12 } }),
   makeModule('wind', { name: 'Wind / Rumble', params: { cutoff: 100, q: 0.7 } }),
-  makeModule('eq', { name: 'Bring Back the Low End', params: { mode: 'low-shelf', frequency: 55, q: 0.4, gain: 3 } }),
+  makeBringBackLowEnd(),
   makeModule('fade', { name: 'Fade In', params: { in: 7, out: 0 } }),
   makeModule('fade', { name: 'Fade Out', params: { in: 0, out: 7 } }),
   makeModule('gain', { name: 'Gain', params: { db: 0 } }),
