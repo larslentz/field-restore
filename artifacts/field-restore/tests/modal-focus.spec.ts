@@ -93,6 +93,64 @@ test('alternate export and project settings openers also regain focus', async ({
   await expect(settingsOpener).toBeFocused();
 });
 
+test('Save edit chain contains focus, hides the background, and restores the preset menu on dismissal', async ({ page }) => {
+  await page.goto('/');
+  const opener = page.getByTestId('select-local-preset');
+  const dialog = page.getByRole('dialog', { name: 'Save edit chain' });
+  const input = dialog.getByTestId('input-preset-name');
+  const close = dialog.getByTestId('button-close-save-preset');
+  const save = dialog.getByTestId('button-confirm-save-preset');
+  const sidebar = page.locator('.sidebar-shell');
+  const main = page.locator('.main-shell');
+
+  for (const dismissal of ['Escape', 'close', 'Cancel'] as const) {
+    await opener.selectOption('save');
+    await expect(dialog).toBeVisible();
+    await expect(input).toBeFocused();
+    for (const background of [sidebar, main]) {
+      await expect(background).toHaveAttribute('inert', '');
+      await expect(background).toHaveAttribute('aria-hidden', 'true');
+    }
+    await expect(page.getByRole('navigation', { name: 'Workspace navigation' })).toHaveCount(0);
+    await expect(page.getByRole('main')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Play playback' })).toHaveCount(0);
+    await expect(page.getByText('Coastal dawn / north bluff')).toHaveCount(0);
+
+    await page.keyboard.press('Shift+Tab');
+    await expect(close).toBeFocused();
+    await page.keyboard.press('Shift+Tab');
+    await expect(save).toBeFocused();
+    await page.keyboard.press('Tab');
+    await expect(close).toBeFocused();
+    await page.keyboard.press('Tab');
+    await expect(input).toBeFocused();
+
+    if (dismissal === 'Escape') await page.keyboard.press('Escape');
+    if (dismissal === 'close') await close.click();
+    if (dismissal === 'Cancel') await dialog.getByRole('button', { name: 'Cancel' }).click();
+    await expect(dialog).toBeHidden();
+    for (const background of [sidebar, main]) {
+      await expect(background).not.toHaveAttribute('inert');
+      await expect(background).not.toHaveAttribute('aria-hidden');
+    }
+    await expect(opener).toBeFocused();
+    await expect(page.getByRole('main')).toBeVisible();
+  }
+});
+
+test('saving an edit chain returns focus to the preset menu', async ({ page }) => {
+  await page.goto('/');
+  const opener = page.getByTestId('select-local-preset');
+  await opener.selectOption('save');
+  const dialog = page.getByRole('dialog', { name: 'Save edit chain' });
+  await dialog.getByTestId('input-preset-name').fill('Accessible field chain');
+  await dialog.getByTestId('button-confirm-save-preset').click();
+  await expect(dialog).toBeHidden();
+  await expect(opener).toBeFocused();
+  await expect(opener.locator('option', { hasText: 'Accessible field chain' })).toHaveCount(1);
+  await expect(page.locator('.main-shell')).not.toHaveAttribute('aria-hidden');
+});
+
 test('the edit drawer retains its existing background and focus behavior', async ({ page }) => {
   await page.goto('/');
   const opener = page.getByTestId('button-open-full-chain');

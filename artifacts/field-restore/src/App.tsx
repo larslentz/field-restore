@@ -161,20 +161,21 @@ function App() {
   const [moduleDropTarget, setModuleDropTarget] = useState<{ id: string; edge: 'before' | 'after' } | null>(null);
   const [chainDrawerOpen, setChainDrawerOpen] = useState(false);
   const [modal, setModal] = useState<'export' | 'help' | 'settings' | null>(null);
-  const modalOpenerRef = useRef<HTMLButtonElement | null>(null);
+  const modalOpenerRef = useRef<HTMLElement | null>(null);
   const openModal = (event: ReactMouseEvent<HTMLButtonElement>, name: 'export' | 'help' | 'settings') => {
     modalOpenerRef.current = event.currentTarget;
     setModal(name);
   };
   useEffect(() => {
-    if (!modal) return;
+    if (!modal && !presetDialogOpen) return;
     const dialog = document.querySelector<HTMLElement>('.modal-backdrop .modal-card[role="dialog"]');
     const opener = modalOpenerRef.current;
-    dialog?.querySelector<HTMLElement>('button:not([disabled])')?.focus();
+    dialog?.querySelector<HTMLElement>(presetDialogOpen ? '#preset-name' : 'button:not([disabled])')?.focus();
     const handleModalKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault();
-        setModal(null);
+        if (presetDialogOpen) setPresetDialogOpen(false);
+        else setModal(null);
       } else if (event.key === 'Tab' && dialog) {
         const focusable = Array.from(dialog.querySelectorAll<HTMLElement>(
           'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
@@ -198,7 +199,7 @@ function App() {
       window.removeEventListener('keydown', handleModalKeyDown);
       if (opener?.isConnected) opener.focus();
     };
-  }, [modal]);
+  }, [modal, presetDialogOpen]);
   const [title, setTitle] = useState('Coastal dawn / north bluff');
   const [notes, setNotes] = useState('Low-tide ambience. Keep the distant tern call at 07:48 intact.');
   const [savedStatus, setSavedStatus] = useState('Local session');
@@ -953,8 +954,9 @@ function App() {
       setPresetError(caught instanceof Error ? caught.message : 'Unable to save preset on this device.');
     }
   };
-  const loadChainPreset = (value: string) => {
+  const loadChainPreset = (value: string, opener: HTMLSelectElement) => {
     if (value === 'save') {
+      modalOpenerRef.current = opener;
       setPresetName('');
       setPresetError('');
       setPresetDialogOpen(true);
@@ -1603,14 +1605,14 @@ function App() {
 
   useEffect(() => {
     const keyHandler = (event: KeyboardEvent) => {
-      if (modal) return;
+      if (modal || presetDialogOpen) return;
       if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || (event.target instanceof HTMLElement && event.target.closest('[data-trim-handle]'))) return;
       if (event.code === 'Space') { event.preventDefault(); play(); }
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); event.shiftKey ? redo() : undo(); }
       if (event.key === 'Escape') setModuleMenu(false);
     };
     window.addEventListener('keydown', keyHandler); return () => window.removeEventListener('keydown', keyHandler);
-  }, [modal, play, redo, undo]);
+  }, [modal, presetDialogOpen, play, redo, undo]);
 
   return (
     <div
@@ -1622,7 +1624,7 @@ function App() {
       data-testid="app-field-restore"
     >
       {isDraggingWav && (
-        <div className="wav-drop-overlay" role="status" aria-live="polite" inert={!!modal} aria-hidden={modal ? true : undefined} data-testid="wav-drop-overlay">
+        <div className="wav-drop-overlay" role="status" aria-live="polite" inert={!!modal || presetDialogOpen} aria-hidden={modal || presetDialogOpen ? true : undefined} data-testid="wav-drop-overlay">
           <div className="wav-drop-card">
             <FileAudio size={34} strokeWidth={1.5} />
             <div>
@@ -1632,7 +1634,7 @@ function App() {
           </div>
         </div>
       )}
-      <aside className="sidebar-shell" inert={!!modal} aria-hidden={modal ? true : undefined}>
+      <aside className="sidebar-shell" inert={!!modal || presetDialogOpen} aria-hidden={modal || presetDialogOpen ? true : undefined}>
         <div className="px-4 py-5 flex items-center gap-3">
           <div className="brand-mark" aria-hidden="true" />
           <div className="brand-copy"><div className="font-bold tracking-tight text-[14px]">FIELD RESTORE</div><div className="text-[10px] opacity-55 tracking-[.12em] uppercase mt-0.5">local instrument</div></div>
@@ -1721,7 +1723,7 @@ function App() {
           </div>
         </div>
       </aside>
-      <section className="main-shell" inert={!!modal} aria-hidden={modal ? true : undefined}>
+      <section className="main-shell" inert={!!modal || presetDialogOpen} aria-hidden={modal || presetDialogOpen ? true : undefined}>
         <header className={`topbar ${analysisStatus || spectrogramStatus || operationStatus ? 'topbar-processing' : ''}`}>
           <div className="topbar-recording flex items-center gap-3 min-w-0">
             <button type="button" className="icon-btn md:hidden" aria-label="Open navigation" data-testid="button-menu"><Menu size={16} /></button>
@@ -1856,7 +1858,7 @@ function App() {
                     <button type="button" className={`icon-btn !text-[11px] !font-bold ${loop ? '!bg-white/10 !text-[#d8ed55]' : ''}`} onClick={() => setLoop(!loop)} aria-pressed={loop} data-testid="button-loop">LOOP</button>
                     <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
                       <span className="text-[10px] opacity-60">PRESET</span>
-                      <select className="transport-select border border-white/15 rounded px-2 py-1 text-[11px] max-w-[210px]" value="" onChange={(event) => loadChainPreset(event.target.value)} aria-label="Load or save local preset" data-testid="select-local-preset">
+                      <select className="transport-select border border-white/15 rounded px-2 py-1 text-[11px] max-w-[210px]" value="" onChange={(event) => loadChainPreset(event.target.value, event.currentTarget)} aria-label="Load or save local preset" data-testid="select-local-preset">
                         <option value="" disabled>Load or save preset…</option>
                         <option value="save">Save current chain as preset…</option>
                         <option value="common-field">Common Field Recording Adjustments</option>
@@ -1874,23 +1876,23 @@ function App() {
           </div>
         </main>
       </section>
-      <input ref={fileRef} type="file" accept=".wav,audio/wav" onChange={importFile} className="hidden" inert={!!modal} aria-hidden={modal ? true : undefined} data-testid="input-import-wav" />
+      <input ref={fileRef} type="file" accept=".wav,audio/wav" onChange={importFile} className="hidden" inert={!!modal || presetDialogOpen} aria-hidden={modal || presetDialogOpen ? true : undefined} data-testid="input-import-wav" />
       {modal === 'export' && <ExportModal onClose={() => setModal(null)} onExport={exportAudio} title={title} />}
       {modal === 'help' && <HelpModal onClose={() => setModal(null)} />}
       {modal === 'settings' && <SettingsModal onClose={() => setModal(null)} spectrogramPalette={spectrogramPalette} onSpectrogramPaletteChange={(palette) => { setSpectrogramPalette(palette); localStorage.setItem('field-restore-spectrogram-palette', palette); }} />}
-      {presetDialogOpen && <div className="modal-backdrop" inert={!!modal} aria-hidden={modal ? true : undefined} onKeyDown={(event) => { if (event.key === 'Escape') setPresetDialogOpen(false); }}>
+      {presetDialogOpen && <div className="modal-backdrop" inert={!!modal} aria-hidden={modal ? true : undefined}>
         <form className="modal-card" role="dialog" aria-modal="true" aria-labelledby="preset-dialog-title" onSubmit={saveCurrentChainPreset}>
-          <div className="modal-header"><div><div className="eyebrow">Local preset</div><h2 id="preset-dialog-title" className="text-[17px] font-bold mt-1">Save edit chain</h2></div><button type="button" className="icon-btn" onClick={() => setPresetDialogOpen(false)} aria-label="Close save preset"><X size={16} /></button></div>
+          <div className="modal-header"><div><div className="eyebrow">Local preset</div><h2 id="preset-dialog-title" className="text-[17px] font-bold mt-1">Save edit chain</h2></div><button type="button" className="icon-btn" onClick={() => setPresetDialogOpen(false)} aria-label="Close save preset" data-testid="button-close-save-preset"><X size={16} /></button></div>
           <div className="modal-body">
             <label htmlFor="preset-name" className="field-label">Preset name</label>
-            <input id="preset-name" className="input-field" value={presetName} onChange={(event) => { setPresetName(event.target.value); setPresetError(''); }} maxLength={60} required autoFocus placeholder="e.g. Quiet morning ambience" data-testid="input-preset-name" />
+            <input id="preset-name" className="input-field" value={presetName} onChange={(event) => { setPresetName(event.target.value); setPresetError(''); }} maxLength={60} required placeholder="e.g. Quiet morning ambience" data-testid="input-preset-name" />
             <p className="text-[11px] text-muted-foreground mt-2">Saves all {modules.length} editable modules, in order, on this device. The original recording is unchanged.</p>
             {presetError && <p role="alert" className="text-[11px] text-[#a34935] mt-2">{presetError}</p>}
           </div>
           <div className="modal-footer"><button type="button" className="quiet-btn" onClick={() => setPresetDialogOpen(false)}>Cancel</button><button type="submit" className="primary-btn" data-testid="button-confirm-save-preset"><Save size={14} /> Save preset</button></div>
         </form>
       </div>}
-      {chainDrawerOpen && <div className="chain-drawer-backdrop" inert={!!modal} aria-hidden={modal ? true : undefined} onPointerDown={(event) => { if (event.target === event.currentTarget) { event.preventDefault(); setChainDrawerOpen(false); } }}>
+      {chainDrawerOpen && <div className="chain-drawer-backdrop" inert={!!modal || presetDialogOpen} aria-hidden={modal || presetDialogOpen ? true : undefined} onPointerDown={(event) => { if (event.target === event.currentTarget) { event.preventDefault(); setChainDrawerOpen(false); } }}>
         <aside ref={chainDrawerRef} className="chain-drawer" role="dialog" aria-modal="true" aria-label={automaticDcSelected ? AUTOMATIC_DC_REMOVAL.name : selectedModule ? `Edit ${selectedModule.name}` : 'Edit chain'} tabIndex={-1}>
           <div className="chain-drawer-header">
             <div><div className="eyebrow">Non-destructive edit chain</div><div className="section-title mt-1">{automaticDcSelected ? AUTOMATIC_DC_REMOVAL.name : selectedModule ? selectedModule.name : 'Modules'}</div></div>
