@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { anchoredLevelScaleCeiling, anchoredTimeViewStart, levelScaleTicks } from './spectrogram-scale.ts';
+import { anchoredFrequencyViewMin, anchoredLevelScaleCeiling, anchoredTimeViewStart, frequencyScaleTicks, levelScaleTicks } from './spectrogram-scale.ts';
 
 test('keeps the grabbed level under the pointer while preserving the span', () => {
   const span = 80;
@@ -24,6 +24,30 @@ test('fixed dB labels move with the shared full-height level scale', () => {
   assert.ok(moved.y > original.y);
   assert.equal(moved.y - original.y, 5 / 85 * 452);
   assert.ok(after.every((tick) => tick.y >= 0 && tick.y <= 452));
+});
+
+test('frequency dragging keeps the grabbed value under the pointer and preserves the span', () => {
+  const span = 4000;
+  const minimum = anchoredFrequencyViewMin(3000, 85, 200, span, 24000);
+  assert.equal(minimum, 700);
+  assert.equal(minimum + (1 - 85 / 200) * span, 3000);
+  assert.equal(minimum + span, 4700);
+});
+
+test('frequency panning stops at zero and Nyquist, including a full-band view', () => {
+  assert.equal(anchoredFrequencyViewMin(3000, -200, 200, 4000, 8000), 0);
+  assert.equal(anchoredFrequencyViewMin(3000, 400, 200, 4000, 8000), 4000);
+  assert.equal(anchoredFrequencyViewMin(3000, 400, 200, 8000, 8000), 0);
+});
+
+test('fixed frequency labels travel with the spectrogram in both channel panes', () => {
+  const before = frequencyScaleTicks(1000, 5000, 200);
+  const after = frequencyScaleTicks(1500, 5500, 200);
+  const original = before.find((tick) => tick.frequency === 3000);
+  const moved = after.find((tick) => tick.frequency === 3000);
+  assert.ok(original && moved);
+  assert.equal(moved.y - original.y, 25);
+  assert.ok(after.every((tick) => tick.y >= 0 && tick.y <= 200));
 });
 
 test('keeps the grabbed time under the pointer while preserving the visible span', () => {

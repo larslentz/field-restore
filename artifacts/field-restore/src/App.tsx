@@ -14,7 +14,7 @@ import { humAnalysisWindowSize, humPrefixFrames } from '@/lib/hum-removal';
 import { recordHumHistory, visibleHumHistory, type HumHistorySegment, type VisibleHumSegment } from '@/lib/hum-history';
 import { readChainPresets, saveChainPreset, type ChainPreset } from '@/lib/chain-presets';
 import { EqCurve } from '@/components/EqCurve';
-import { anchoredLevelScaleCeiling, anchoredTimeViewStart, levelScaleTicks } from '@/lib/spectrogram-scale';
+import { anchoredFrequencyViewMin, anchoredLevelScaleCeiling, anchoredTimeViewStart, frequencyScaleTicks, levelScaleTicks } from '@/lib/spectrogram-scale';
 import { SPECTROGRAM_DATA_HEIGHT, SPECTROGRAM_FFT_SIZE } from '@/lib/spectrogram-resolution';
 import { DEFAULT_SPECTROGRAM_PALETTE, SPECTROGRAM_PALETTES, spectrogramColor, spectrogramColorCss, spectrogramLegendStops, type SpectrogramPaletteId } from '@/lib/spectrogram-palette';
 import { startWorkerJob, type WorkerJob } from '@/lib/worker-analysis';
@@ -41,7 +41,6 @@ const moduleOptionLabel = (type: AddModuleType) => type === 'low-rumble' ? 'Low 
 const SPECTROGRAM_LEFT = 48;
 const SPECTROGRAM_RIGHT = 72;
 const SPECTROGRAM_BOTTOM = 28;
-const SPECTROGRAM_SCALE_DIVISIONS = 5;
 const SPECTROGRAM_MAX_CEILING_DB = 24;
 const SPECTROGRAM_DATA_FLOOR_DB = -180;
 const SPECTROGRAM_DATA_CEILING_DB = 0;
@@ -184,6 +183,12 @@ function App() {
   const chainDrawerOpenerRef = useRef<HTMLButtonElement>(null);
   const [spectrogramMinFrequency, setSpectrogramMinFrequency] = useState(0);
   const [spectrogramMaxFrequency, setSpectrogramMaxFrequency] = useState(20000);
+  useEffect(() => {
+    const nyquist = Math.floor(source.sampleRate / 2);
+    const minimumSpan = Math.min(500, nyquist);
+    setSpectrogramMinFrequency((minimum) => Math.max(0, Math.min(minimum, nyquist - minimumSpan)));
+    setSpectrogramMaxFrequency((maximum) => Math.min(nyquist, Math.max(minimumSpan, maximum)));
+  }, [source.sampleRate]);
   const [spectrogramCeilingDb, setSpectrogramCeilingDb] = useState(-20);
   const [spectrogramLevelSpanDb, setSpectrogramLevelSpanDb] = useState(85);
   const [spectrogramPalette, setSpectrogramPalette] = useState<SpectrogramPaletteId>(() => {
@@ -281,7 +286,7 @@ function App() {
   const selectionRef = useRef<[number, number]>([4.1, 7.8]);
   const trimRef = useRef<[number, number] | null>(null);
   const pointerDragRef = useRef<{ start: number; current: number; startClientX: number; moved: boolean } | null>(null);
-  const frequencyDragRef = useRef<{ startY: number; startMaximum: number } | null>(null);
+  const frequencyDragRef = useRef<{ grabbedFrequency: number; paneTop: number; paneHeight: number; span: number } | null>(null);
   const levelDragRef = useRef<{
     grabbedLevel: number;
     graphHeight: number;
@@ -1433,8 +1438,18 @@ function App() {
       return;
     }
     if (localX <= SPECTROGRAM_LEFT) {
-      frequencyDragRef.current = { startY: event.clientY, startMaximum: spectrogramMaxFrequency };
-      event.currentTarget.setPointerCapture(event.pointerId);
+      if (localY >= 0 && localY < graphBottom) {
+        const paneHeight = graphBottom / 2;
+        const paneTop = localY >= paneHeight ? paneHeight : 0;
+        const span = spectrogramMaxFrequency - spectrogramMinFrequency;
+        frequencyDragRef.current = {
+          grabbedFrequency: spectrogramMaxFrequency - ((localY - paneTop) / paneHeight) * span,
+          paneTop,
+          paneHeight,
+          span,
+        };
+        event.currentTarget.setPointerCapture(event.pointerId);
+      }
       return;
     }
     if (localX >= bounds.width - SPECTROGRAM_RIGHT) {
@@ -1473,9 +1488,18 @@ function App() {
     }
     if (frequencyDragRef.current) {
       const nyquist = Math.floor(source.sampleRate / 2);
-      const deltaFrequency = (event.clientY - frequencyDragRef.current.startY) * 75;
-      const nextFrequency = Math.round((frequencyDragRef.current.startMaximum + deltaFrequency) / 100) * 100;
-      setSpectrogramMaxFrequency(Math.max(spectrogramMinFrequency + 500, Math.min(nyquist, nextFrequency)));
+      const bounds = event.currentTarget.getBoundingClientRect();
+      const pointerY = event.clientY - bounds.top - frequencyDragRef.current.paneTop;
+      const span = Math.min(frequencyDragRef.current.span, nyquist);
+      const nextMin = anchoredFrequencyViewMin(
+        frequencyDragRef.current.grabbedFrequency,
+        pointerY,
+        frequencyDragRef.current.paneHeight,
+        span,
+        nyquist,
+      );
+      setSpectrogramMinFrequency(nextMin);
+      setSpectrogramMaxFrequency(nextMin + span);
       return;
     }
     if (levelDragRef.current) {
@@ -1601,6 +1625,7 @@ function App() {
     const graphRight = width - SPECTROGRAM_RIGHT;
     const graphWidth = Math.max(1, graphRight - graphLeft);
     const paneHeight = graphBottom / 2;
+    const frequencyTicks = frequencyScaleTicks(spectrogramMinFrequency, spectrogramMaxFrequency, paneHeight);
     context.fillStyle = '#17242c'; context.fillRect(0, 0, width, height);
 
     const drawSpectrogramPane = (spectrogram: typeof spectrograms.left, top: number) => {
@@ -1657,10 +1682,8 @@ function App() {
       context.beginPath(); context.moveTo(x, 0); context.lineTo(x, graphBottom); context.stroke();
     }
     for (const top of [0, paneHeight]) {
-      for (let tick = 0; tick <= SPECTROGRAM_SCALE_DIVISIONS; tick += 1) {
-        const frequency = spectrogramMinFrequency + (tick / SPECTROGRAM_SCALE_DIVISIONS) * (spectrogramMaxFrequency - spectrogramMinFrequency);
-        const y = top + paneHeight - ((frequency - spectrogramMinFrequency) / (spectrogramMaxFrequency - spectrogramMinFrequency)) * paneHeight;
-        context.beginPath(); context.moveTo(graphLeft, y); context.lineTo(graphRight, y); context.stroke();
+      for (const { y } of frequencyTicks) {
+        context.beginPath(); context.moveTo(graphLeft, top + y); context.lineTo(graphRight, top + y); context.stroke();
       }
     }
     context.strokeStyle = 'rgba(242, 244, 232, .55)'; context.lineWidth = 1;
@@ -1685,9 +1708,7 @@ function App() {
     for (let tick = 0; tick <= 6; tick += 1) { const time = viewStart + (tick / 6) * viewDuration; context.fillText(formatTime(time), graphLeft + (tick / 6) * graphWidth + 4, height - 8); }
     context.textAlign = 'right';
     for (const top of [0, paneHeight]) {
-      for (let tick = 0; tick <= SPECTROGRAM_SCALE_DIVISIONS; tick += 1) {
-        const frequency = spectrogramMinFrequency + (tick / SPECTROGRAM_SCALE_DIVISIONS) * (spectrogramMaxFrequency - spectrogramMinFrequency);
-        const y = top + paneHeight - ((frequency - spectrogramMinFrequency) / (spectrogramMaxFrequency - spectrogramMinFrequency)) * paneHeight;
+      for (const { frequency, y } of frequencyTicks) {
         const label = frequency === 0 ? '0' : `${Number((frequency / 1000).toFixed(1))}k`;
         context.fillText(label, graphLeft - 6, Math.max(top + 10, Math.min(top + paneHeight - 3, y + 3)));
       }

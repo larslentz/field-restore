@@ -20,6 +20,29 @@ export function levelScaleTicks(ceiling: number, span: number, height: number) {
   return ticks;
 }
 
+export function anchoredFrequencyViewMin(
+  grabbedFrequency: number,
+  pointerY: number,
+  paneHeight: number,
+  span: number,
+  nyquist: number,
+) {
+  const boundedSpan = Math.min(span, nyquist);
+  const unclamped = grabbedFrequency - (1 - pointerY / Math.max(1, paneHeight)) * boundedSpan;
+  return Math.max(0, Math.min(nyquist - boundedSpan, unclamped));
+}
+
+export function frequencyScaleTicks(minimum: number, maximum: number, height: number) {
+  const span = maximum - minimum;
+  const targetStep = span / Math.max(1, height / 38);
+  const step = [100, 200, 500, 1000, 2000, 5000, 10000, 20000].find((candidate) => candidate >= targetStep) ?? 20000;
+  const ticks: { frequency: number; y: number }[] = [];
+  for (let frequency = Math.ceil(minimum / step) * step; frequency <= maximum; frequency += step) {
+    ticks.push({ frequency, y: ((maximum - frequency) / span) * height });
+  }
+  return ticks;
+}
+
 export function anchoredTimeViewStart(
   grabbedTime: number,
   pointerX: number,

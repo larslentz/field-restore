@@ -3,3 +3,4 @@
 - [TypeScript validation shim](typescript-validation-shim.md) — if the workspace typecheck script fails with a permission error, run the TypeScript compiler through Node.
 - [Legacy edit modules](legacy-edit-modules.md) — removing a processor from the add menu must not invalidate existing projects or saved presets.
 - [Wind edit migration](wind-edit-migration.md) — older Wind / Rumble edits intentionally convert to automatic, while the separate Low Rumble Removal item stays fixed.
+- [Spectrogram axis semantics](spectrogram-axis-semantics.md) — frequency repeats per channel while level is shared across both; drag labels by moving fixed-value ticks.
