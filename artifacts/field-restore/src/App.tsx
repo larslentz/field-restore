@@ -2198,6 +2198,7 @@ function ModuleCard({ module, humReadout, liveFrequencies, windActive, sampleRat
            <p role="status" className="text-[11px] leading-relaxed" data-testid={`wind-activity-${module.id}`}>
              {!module.enabled ? 'Bypassed · no wind reduction applied.' : windActive === null || windActive === undefined ? 'Automatic detection ready · play the edited recording to check when reduction is active.' : windActive ? 'Now playing · low-frequency interference detected; reduction active.' : 'Now playing · no interference confirmed here; reduction idle.'}
            </p>
+            <p className="text-[11px] leading-relaxed text-muted-foreground" data-testid="wind-rumble-usage-note">This item is far from perfect and you can end up removing sounds you want to keep, so be careful using it. Some wind noise overloads the microphones so much that it simply cannot be removed with a filter of this type or by any means. Remember that some wind noise is not so bad because it can simulate what your ears hear when out in the wind, which is realistic and generally accepted and sometimes desired.</p>
            <p className="text-[10px] leading-relaxed text-muted-foreground">Automatic detection is approximate. Wanted bass or low calls may be reduced; some wind may remain. Older saved Wind / Rumble Removal edits now use automatic settings and may sound different. Compare with bypass before exporting.</p>
          </div>)}
        {(module.type === 'eq' || isFixedLowRumble(module)) && <EqCurve module={module} sampleRate={sampleRate} />}
