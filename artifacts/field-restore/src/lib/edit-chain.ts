@@ -160,6 +160,7 @@ export interface RenderContext {
   frameOffset?: number;
   totalFrames?: number;
   initialHumFrequencies?: number[];
+  onHumChange?: (frame: number, frequencies: number[]) => void;
 }
 
 export function applyModule(input: ChannelData, module: EditModule, sampleRate: number, context: RenderContext = {}): ChannelData {
@@ -215,7 +216,8 @@ export function applyModule(input: ChannelData, module: EditModule, sampleRate: 
       });
     }
   } else if (module.type === 'hum') {
-    new HumProcessor(p, sampleRate, output.length, context.initialHumFrequencies).process(output);
+    new HumProcessor(p, sampleRate, output.length, context.initialHumFrequencies,
+      context.onHumChange && ((frame, frequencies) => context.onHumChange!(frameOffset + frame, frequencies))).process(output);
   } else if (module.type === 'wind') {
     const cutoff = Math.max(20, Number(p.cutoff) || 100);
     const q = Math.max(0.1, Number(p.q) || 0.7);
@@ -286,8 +288,10 @@ export function humOpeningReadout(module: EditModule, state: HumScanState, frequ
   };
 }
 
-export function renderChain(original: ChannelData, modules: EditModule[], sampleRate: number, context: RenderContext = {}, initialSeeds?: number[][]) {
+export function renderChain(original: ChannelData, modules: EditModule[], sampleRate: number, context: RenderContext = {}, initialSeeds?: number[][],
+  onHumChange?: (moduleId: string, frame: number, frequencies: number[]) => void) {
   const seeds = context.frameOffset ? [] : initialSeeds ?? analyzeInitialHum(original, modules, sampleRate, context.totalFrames ?? original[0]?.length ?? 0);
   return modules.reduce((audio, module, index) => applyModule(audio, module, sampleRate,
-    { ...context, initialHumFrequencies: seeds[index] }), cloneChannels(original));
+    { ...context, initialHumFrequencies: seeds[index],
+      onHumChange: onHumChange && ((frame, frequencies) => onHumChange(module.id, frame, frequencies)) }), cloneChannels(original));
 }

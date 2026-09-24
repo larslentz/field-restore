@@ -145,7 +145,10 @@ export class HumProcessor {
   private readonly mix: number;
   private state: HumSnapshot;
 
-  constructor(params: Record<string, number | string>, sampleRate: number, channels: number, initialFrequencies: number[] = []) {
+  constructor(
+    params: Record<string, number | string>, sampleRate: number, channels: number,
+    initialFrequencies: number[] = [], private readonly onChange?: (frame: number, frequencies: number[]) => void,
+  ) {
     this.sampleRate = sampleRate;
     this.mode = params.mode === 'Adaptive' || params.mode === 'Dynamic' ? String(params.mode) : 'Static';
     this.target = Math.max(40, Math.min(1200, Number(params.frequency) || 60));
@@ -235,6 +238,7 @@ export class HumProcessor {
         next.some((filter, index) => Math.abs(filter.frequency - this.state.notches[index].frequency) > 1)) {
         this.state.transition = { notches: this.state.notches, remaining: Math.max(64, Math.floor(this.sampleRate * .012)) };
         this.state.notches = next;
+        this.onChange?.(frame + 1, this.confirmedFrequencies());
       }
       this.state.pending = detected;
       this.state.collected = 0;

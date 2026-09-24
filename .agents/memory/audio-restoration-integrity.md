@@ -38,3 +38,9 @@ For automatic hum removal, a bounded opening scan may seed *confirmed frequencie
 **Why:** Reusing warmed histories at frame zero introduces a discontinuity, while letting playback, export, and preview make separate initial decisions leaves the opening inconsistent.
 
 **How to apply:** Run the opening scan through preceding edits, then start fresh filter histories for actual rendering and carry the same frequency decision through seek, loop, analysis, and export routes.
+
+Live hum readouts must follow the audible playhead, not the detector's render progress. File-backed playback buffers ahead, so a newly rendered decision is not yet what the listener hears.
+
+**Why:** Showing a future filter choice while older audio is playing misrepresents the current restoration; an opening scan is also not a whole-recording measurement.
+
+**How to apply:** Timestamp detector decisions in source frames and map them onto scheduled playback time, including loop restores and seeks. Keep the opening scan readout separate and clear live estimates when the source or edit chain changes.

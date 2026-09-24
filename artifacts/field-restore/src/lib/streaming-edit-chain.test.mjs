@@ -182,6 +182,41 @@ test('opening scan readout distinguishes estimates, absence, unavailable scans a
   assert.match(humOpeningReadout({ ...hum, params: { ...hum.params, mode: 'Static', frequency: 60 } }, 'complete', backed[0]).detail, /Manual frequency/);
 });
 
+test('live hum decisions follow playback frames equally in memory and bounded file chunks', async () => {
+  const count = sampleRate * 5;
+  const changeFrame = sampleRate * 2;
+  const input = [Float32Array.from({ length: count }, (_, i) => {
+    const frequency = i < changeFrame ? 73 : 83;
+    return .12 * Math.sin(2 * Math.PI * frequency * i / sampleRate) +
+      .06 * Math.sin(2 * Math.PI * frequency * 2 * i / sampleRate);
+  })];
+  const hum = { id: 'hum', type: 'hum', name: 'Hum', enabled: true, params: { mode: 'Adaptive', reduction: 18 } };
+  const seeds = analyzeInitialHum(input, [hum], sampleRate, count);
+  assert.ok(seeds[0].some((frequency) => Math.abs(frequency - 73) < 2));
+  const memoryEvents = [];
+  const memory = renderChain(input, [hum], sampleRate, {}, seeds,
+    (moduleId, frame, frequencies) => memoryEvents.push({ moduleId, frame, frequencies }));
+  const file = new Blob([generateFloat32WavHeader({ channels: 1, sampleRate, frameCount: count }), input[0]]);
+  const metadata = await parseWavMetadata(file);
+  assert.deepEqual(await analyzeFileInitialHum(file, metadata, [hum]), seeds);
+  const fileEvents = [];
+  const processor = createStreamingEditChain([hum], sampleRate, count, 0, seeds,
+    (moduleId, frame, frequencies) => fileEvents.push({ moduleId, frame, frequencies }));
+  const streamed = new Float32Array(count);
+  for (let frame = 0; frame < count; frame += 4093) {
+    const chunk = await file.slice(metadata.dataOffset + frame * 4,
+      metadata.dataOffset + Math.min(count, frame + 4093) * 4).arrayBuffer();
+    streamed.set(processor.process([new Float32Array(chunk)], frame)[0], frame);
+  }
+  assert.deepEqual(streamed, memory[0]);
+  assert.deepEqual(fileEvents, memoryEvents);
+  assert.ok(fileEvents.some((event) => event.frame > changeFrame &&
+    event.frequencies.some((frequency) => Math.abs(frequency - 83) < 2)));
+  assert.ok(processor.trackedHumFrequencies().hum.some((frequency) => Math.abs(frequency - 83) < 2));
+  processor.reset();
+  assert.deepEqual(processor.trackedHumFrequencies().hum, seeds[0]);
+});
+
 test('adaptive mode detects non-mains hum and harmonics without attenuating an unrelated tone', () => {
   const count = sampleRate * 2;
   const input = [0, 1].map((channel) => Float32Array.from({ length: count }, (_, i) =>

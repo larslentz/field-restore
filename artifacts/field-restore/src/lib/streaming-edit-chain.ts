@@ -85,6 +85,7 @@ export class StreamingEditChain {
     totalFrames: number,
     initialFrame = 0,
     initialHumFrequencies: number[][] = [],
+    private readonly onHumChange?: (moduleId: string, frame: number, frequencies: number[]) => void,
   ) {
     this.modules = modules;
     this.sampleRate = sampleRate;
@@ -115,6 +116,14 @@ export class StreamingEditChain {
     this.nextFrame = startFrame;
   }
 
+  /** Current applied filters, not a measurement of the full recording. */
+  trackedHumFrequencies(): Record<string, number[]> {
+    return Object.fromEntries(this.modules.flatMap((module, index) =>
+      module.enabled && module.type === 'hum' && module.params.mode !== 'Static' && Number(module.params.reduction) > 0
+        ? [[module.id, this.state[index].hum?.confirmedFrequencies() ?? this.initialHumFrequencies[index] ?? []]]
+        : []));
+  }
+
   snapshot(): StreamingEditChainSnapshot {
     return {
       nextFrame: this.nextFrame,
@@ -141,7 +150,8 @@ export class StreamingEditChain {
       target.phase = saved.phase;
       target.ambientBed = saved.ambientBed ? [...saved.ambientBed] : undefined;
       target.hum = saved.hum
-        ? new HumProcessor(this.modules[index].params, this.sampleRate, saved.hum.capture.length)
+        ? new HumProcessor(this.modules[index].params, this.sampleRate, saved.hum.capture.length, [],
+          (frame, frequencies) => this.onHumChange?.(this.modules[index].id, this.nextFrame + frame, frequencies))
         : undefined;
       if (saved.hum) target.hum?.restore(saved.hum);
     });
@@ -212,7 +222,8 @@ export class StreamingEditChain {
           }));
         }
       } else if (module.type === 'hum') {
-        state.hum ??= new HumProcessor(p, this.sampleRate, output.length, this.initialHumFrequencies[moduleIndex]);
+        state.hum ??= new HumProcessor(p, this.sampleRate, output.length, this.initialHumFrequencies[moduleIndex],
+          (frame, frequencies) => this.onHumChange?.(module.id, this.nextFrame + frame, frequencies));
         state.hum.process(output);
       } else if (module.type === 'wind') {
         const coefficients = highPass(this.sampleRate, Math.max(20, Number(p.cutoff) || 100),
@@ -255,7 +266,8 @@ export class StreamingEditChain {
 
 export const createStreamingEditChain = (
   modules: EditModule[], sampleRate: number, totalFrames: number, initialFrame = 0, initialHumFrequencies: number[][] = [],
-) => new StreamingEditChain(modules, sampleRate, totalFrames, initialFrame, initialHumFrequencies);
+  onHumChange?: (moduleId: string, frame: number, frequencies: number[]) => void,
+) => new StreamingEditChain(modules, sampleRate, totalFrames, initialFrame, initialHumFrequencies, onHumChange);
 
 /** Reads at most two detector windows from a file; never decodes the whole take. */
 export async function analyzeFileInitialHum(file: Blob, metadata: WavMetadata, modules: EditModule[], signal?: AbortSignal) {
