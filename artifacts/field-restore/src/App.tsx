@@ -11,6 +11,7 @@ import { isVerifiedRelink, openVerifiedFileHandle } from '@/lib/file-access';
 import { listProjects, loadProject as loadProjectV2, queryFileHandlePermission, requestFileHandlePermission, saveProject as saveProjectV2, type ProjectRecord } from '@/lib/project-store';
 import { analyzeFileInitialHum, createStreamingEditChain } from '@/lib/streaming-edit-chain';
 import { humAnalysisWindowSize, humPrefixFrames } from '@/lib/hum-removal';
+import { recordHumHistory, type HumHistorySegment } from '@/lib/hum-history';
 import { readChainPresets, saveChainPreset, type ChainPreset } from '@/lib/chain-presets';
 import { EqCurve } from '@/components/EqCurve';
 import { anchoredLevelScaleCeiling, anchoredTimeViewStart } from '@/lib/spectrogram-scale';
@@ -153,6 +154,10 @@ function App() {
   const [playHead, setPlayHead] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [liveHum, setLiveHum] = useState<LiveHum | null>(null);
+  const [humHistory, setHumHistory] = useState<{ source: AudioSource; chain: EditModule[]; segments: HumHistorySegment[] } | null>(null);
+  const humHistoryRef = useRef<HumHistorySegment[]>([]);
+  const humHistoryOwnerRef = useRef<{ source: AudioSource; chain: EditModule[] } | null>(null);
+  const lastHistoryPublishRef = useRef(0);
   const [loop, setLoop] = useState(false);
   const [rate, setRate] = useState(1);
   const [monitor, setMonitor] = useState<MonitorMode>('current');
@@ -351,7 +356,28 @@ function App() {
   }, []);
 
   const processingModules = useMemo(() => makeProcessingChain(modules), [modules]);
-  useEffect(() => { setLiveHum(null); }, [source, processingModules]);
+  useEffect(() => {
+    humHistoryRef.current = [];
+    humHistoryOwnerRef.current = null;
+    setHumHistory(null);
+    setLiveHum(null);
+  }, [source, processingModules]);
+  const recordHeardHum = useCallback((moduleId: string, frame: number, frequencies: number[], sampleRate: number) => {
+    const previous = humHistoryRef.current;
+    const next = recordHumHistory(previous, moduleId, frame, frequencies, sampleRate);
+    if (next === previous) return;
+    humHistoryRef.current = next;
+    humHistoryOwnerRef.current = { source, chain: processingModules };
+    const now = performance.now();
+    if (next.length !== previous.length || now - lastHistoryPublishRef.current > 250) {
+      setHumHistory({ source, chain: processingModules, segments: next });
+      lastHistoryPublishRef.current = now;
+    }
+  }, [source, processingModules]);
+  const flushHumHistory = useCallback(() => {
+    if (humHistoryOwnerRef.current) setHumHistory({ ...humHistoryOwnerRef.current, segments: humHistoryRef.current });
+  }, []);
+  const historySegments = humHistory?.source === source && humHistory.chain === processingModules ? humHistory.segments : [];
   const [fileHumScan, setFileHumScan] = useState<{
     source: LargeSource; chain: EditModule[]; frequencies: number[][]; error: boolean;
   } | null>(null);
@@ -762,6 +788,7 @@ function App() {
   const stopPlayback = useCallback(() => {
     playbackSessionRef.current += 1;
     setLiveHum(null);
+    flushHumHistory();
     scheduledNodesRef.current.forEach((node) => {
       node.onended = null;
       try { node.stop(); } catch { /* already stopped */ }
@@ -777,7 +804,7 @@ function App() {
     if (animationRef.current) cancelAnimationFrame(animationRef.current);
     animationRef.current = null;
     setIsPlaying(false);
-  }, []);
+  }, [flushHumHistory]);
   const clearSelection = () => {
     stopPlayback();
     if (zoom > 1) setTimeViewCenter(viewStart + viewDuration / 2);
@@ -823,12 +850,26 @@ function App() {
         setPlayHead(plan.timelineEnd);
         setIsPlaying(false);
         setLiveHum(null);
+        flushHumHistory();
         audioSourceRef.current = null;
       }
     };
     node.start(0, plan.bufferStartOffset);
     audioSourceRef.current = node; setIsPlaying(true);
     setLiveHum(null);
+    if (monitor === 'current') {
+      const startFrame = plan.timelineStartFrame;
+      processingModules.forEach((module, index) => {
+        if (module.enabled && module.type === 'hum' && module.params.mode !== 'Static' && Number(module.params.reduction) > 0) {
+          let frequencies = memoryHumFrequencies[index] ?? [];
+          for (const event of memoryRender.events) {
+            if (event.frame > startFrame) break;
+            if (event.moduleId === module.id) frequencies = event.frequencies;
+          }
+          recordHeardHum(module.id, startFrame, frequencies, source.sampleRate);
+        }
+      });
+    }
     const tick = () => {
       if (audioSourceRef.current !== node) return;
       const elapsed = (context.currentTime - startedAt) * rate;
@@ -847,6 +888,8 @@ function App() {
           if (event.frame > frame) break;
           frequencies[event.moduleId] = event.frequencies;
         }
+        Object.entries(frequencies).forEach(([moduleId, values]) =>
+          recordHeardHum(moduleId, frame, values, source.sampleRate));
         setLiveHum((previous) => previous?.source === source && previous.chain === processingModules &&
           Object.keys(frequencies).every((id) => previous.frequencies[id] === frequencies[id])
           ? previous : { source, chain: processingModules, frequencies });
@@ -854,7 +897,7 @@ function App() {
       animationRef.current = requestAnimationFrame(tick);
     };
     animationRef.current = requestAnimationFrame(tick);
-  }, [duration, loop, memoryHumFrequencies, memoryRender.events, monitor, processingModules, rate, source]);
+  }, [duration, flushHumHistory, loop, memoryHumFrequencies, memoryRender.events, monitor, processingModules, rate, recordHeardHum, source]);
 
   const startLargePlayback = useCallback(async (startPosition: number) => {
     if (!largeSource) return;
@@ -914,7 +957,7 @@ function App() {
     }
     if (playbackSessionRef.current !== session) return;
     const loopState = processor.snapshot();
-    const pending: Array<{ at: number; moduleId: string; frequencies: number[] }> = [];
+    const pending: Array<{ at: number; frame: number; moduleId: string; frequencies: number[] }> = [];
     let audible = processor.trackedHumFrequencies();
     setLiveHum({ source, chain: processingModules, frequencies: audible });
     setIsPlaying(true);
@@ -929,7 +972,7 @@ function App() {
             nextFrame = loopStartFrame;
             processor.restore(loopState);
             pending.push(...Object.entries(processor.trackedHumFrequencies()).map(([moduleId, frequencies]) =>
-              ({ at: scheduledAt, moduleId, frequencies })));
+              ({ at: scheduledAt, frame: loopStartFrame, moduleId, frequencies })));
           }
           const count = Math.min(chunkFrames, rangeEnd - nextFrame);
           const readStart = nextFrame;
@@ -940,7 +983,7 @@ function App() {
             channels = processor.process(channels, readStart);
             pending.push(...chunkEvents.map((event) => ({
               at: scheduledAt + (event.frame - readStart) / metadata.sampleRate / rate,
-              moduleId: event.moduleId, frequencies: event.frequencies,
+              frame: event.frame, moduleId: event.moduleId, frequencies: event.frequencies,
             })).sort((a, b) => a.at - b.at));
             chunkEvents = null;
           }
@@ -967,6 +1010,7 @@ function App() {
               setPlayHead(plan.timelineEnd);
               setIsPlaying(false);
               setLiveHum(null);
+              flushHumHistory();
               setOperationStatus('');
               scheduledNodesRef.current = [];
             };
@@ -992,19 +1036,22 @@ function App() {
         : Math.min(plan.timelineEnd, playbackStart + elapsed);
       playHeadRef.current = position;
       setPlayHead(position);
-      if (monitor === 'current') {
+      if (monitor === 'current' && context.currentTime >= startedAt) {
         let changed = false;
         while (pending.length && pending[0].at <= context.currentTime) {
           const event = pending.shift()!;
           audible = { ...audible, [event.moduleId]: event.frequencies };
+          recordHeardHum(event.moduleId, event.frame, event.frequencies, metadata.sampleRate);
           changed = true;
         }
         if (changed) setLiveHum({ source, chain: processingModules, frequencies: audible });
+        Object.entries(audible).forEach(([moduleId, frequencies]) =>
+          recordHeardHum(moduleId, Math.floor(position * metadata.sampleRate), frequencies, metadata.sampleRate));
       }
       animationRef.current = requestAnimationFrame(tick);
     };
     animationRef.current = requestAnimationFrame(tick);
-  }, [duration, largeSource, loop, monitor, processingModules, rate, source, stopPlayback]);
+  }, [duration, flushHumHistory, largeSource, loop, monitor, processingModules, rate, recordHeardHum, source, stopPlayback]);
 
   useEffect(() => {
     playHeadRef.current = playHead;
@@ -1992,6 +2039,9 @@ function App() {
                            ? liveHumFrequencies[module.id].length ? liveHumFrequencies[module.id].map((frequency) => `${frequency.toFixed(1)} Hz`).join(', ') : 'none currently confirmed'
                            : 'buffering…'}`).join(' · ')}. Current position only; not a whole-recording measurement.
                      </div>}
+                   {historySegments.length > 0 && <HumHistoryView
+                     modules={processingModules} segments={historySegments} sampleRate={source.sampleRate}
+                     duration={duration} onSeek={seekTo} />}
                 </>
               )}
             </div>
@@ -2069,6 +2119,48 @@ function AutomaticDcCard() {
     </div>
     <div className="module-controls text-[11px] text-muted-foreground">Automatically applied before all editable modules. There are no settings to change, and this step cannot be bypassed or moved.</div>
   </div>;
+}
+
+function HumHistoryView({ modules, segments, sampleRate, duration, onSeek }: {
+  modules: EditModule[]; segments: HumHistorySegment[]; sampleRate: number; duration: number; onSeek: (seconds: number) => void;
+}) {
+  const tracked = modules.filter((module) =>
+    module.enabled && module.type === 'hum' && module.params.mode !== 'Static' && Number(module.params.reduction) > 0);
+  if (!tracked.length) return null;
+  return <section className="px-3 py-2 border-t border-white/10 text-[11px]" aria-label="Hum filter playback history" data-testid="hum-playback-history">
+    <div className="font-semibold">Hum filter history · heard positions only</div>
+    <p className="text-muted-foreground mt-0.5">Recent processed playback in this tab, not a whole-recording scan. Unmarked positions have no retained confirmation; “no filter confirmed” means that position was heard but no filter was active. Select a position to listen again.</p>
+    {tracked.map((module) => {
+      const visits = segments.filter((segment) => segment.moduleId === module.id);
+      if (!visits.length) return null;
+      const recent = visits.slice(-6);
+      return <div key={module.id} className="mt-2" data-testid={`hum-history-${module.id}`}>
+        <div className="font-medium">{module.name}</div>
+        <div className="relative h-2 rounded bg-white/10 mt-1 overflow-hidden" aria-hidden="true" title="Unmarked positions have not been confirmed by playback">
+          {visits.map((segment, index) => <div key={index} className="absolute top-0 h-full"
+            style={{
+              left: `${Math.min(100, segment.startFrame / sampleRate / Math.max(duration, .001) * 100)}%`,
+              width: `${Math.max(.2, (segment.endFrame - segment.startFrame) / sampleRate / Math.max(duration, .001) * 100)}%`,
+              background: segment.frequencies.length ? '#d8ed55' : '#8291a1',
+            }} />)}
+        </div>
+        <div className="flex flex-wrap gap-1 mt-1.5">
+          {recent.map((segment, index) => <span key={index} className="inline-flex items-center gap-1">
+            {index > 0 && segment.startFrame > recent[index - 1].endFrame + sampleRate * .5 &&
+              <span className="text-muted-foreground">· gap unconfirmed here ·</span>}
+            <button type="button" className="rounded border border-white/15 px-1.5 py-0.5 hover:border-white/40 text-left"
+              onClick={() => onSeek(segment.startFrame / sampleRate)}
+              aria-label={`Seek to ${formatTime(segment.startFrame / sampleRate, true)}, ${segment.frequencies.length ? segment.frequencies.map((frequency) => `${frequency.toFixed(1)} hertz`).join(', ') : 'no filter confirmed'}`}>
+              {formatTime(segment.startFrame / sampleRate, true)}–{formatTime(segment.endFrame / sampleRate, true)}: {segment.frequencies.length
+                ? segment.frequencies.map((frequency) => `${frequency.toFixed(1)} Hz`).join(', ')
+                : 'no filter confirmed'}
+            </button>
+          </span>)}
+          {visits.length > recent.length && <span className="text-muted-foreground self-center">Showing latest {recent.length} changes</span>}
+        </div>
+      </div>;
+    })}
+  </section>;
 }
 
 function ModuleCard({ module, humReadout, liveFrequencies, sampleRate, index, total, collapsed, updateModule, updateParams, deleteModule, duplicateModule, moveModule }: { module: EditModule; humReadout?: ReturnType<typeof humOpeningReadout>; liveFrequencies?: number[]; sampleRate: number; index: number; total: number; collapsed: boolean; updateModule: (id: string, patch: Partial<EditModule>) => void; updateParams: (id: string, key: string, value: number | string) => void; deleteModule: (id: string) => void; duplicateModule: (module: EditModule) => void; moveModule: (index: number, direction: -1 | 1) => void }) {

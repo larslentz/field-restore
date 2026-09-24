@@ -44,3 +44,9 @@ Live hum readouts must follow the audible playhead, not the detector's render pr
 **Why:** Showing a future filter choice while older audio is playing misrepresents the current restoration; an opening scan is also not a whole-recording measurement.
 
 **How to apply:** Timestamp detector decisions in source frames and map them onto scheduled playback time, including loop restores and seeks. Keep the opening scan readout separate and clear live estimates when the source or edit chain changes.
+
+Time-positioned hum history is an observation of audible processed playback, not a scan. Unobserved or evicted positions have no retained confirmation; an observed position with no active filter is a different result.
+
+**Why:** Streaming buffers can make future decisions available before they are heard, and bounded history cannot establish what happened outside its retained positions.
+
+**How to apply:** Retain only audible-playhead decisions in local bounded history, preserve gaps across seeks and loops, and reset the history whenever its source or edit chain changes.
