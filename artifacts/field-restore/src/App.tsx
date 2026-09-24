@@ -1665,7 +1665,7 @@ function App() {
       <aside className="sidebar-shell" inert={!!modal || presetDialogOpen} aria-hidden={modal || presetDialogOpen ? true : undefined}>
         <div className="px-4 py-5 flex items-center gap-3">
           <div className="brand-mark" aria-hidden="true" />
-          <div className="brand-copy"><div className="font-bold tracking-tight text-[14px]">FIELD RESTORE</div><div className="text-[10px] opacity-55 tracking-[.12em] uppercase mt-0.5">local instrument</div></div>
+          <div className="brand-copy"><div className="font-bold tracking-tight text-[14px]">FIELD RESTORE</div><div className="text-[10px] opacity-55 tracking-[.12em] mt-0.5">by Lars Lentz</div></div>
         </div>
         <div className="px-3 mt-5 sidebar-title eyebrow text-[#91a69d]">Workspace</div>
         <nav className="px-3 mt-2 space-y-1" aria-label="Workspace navigation">
