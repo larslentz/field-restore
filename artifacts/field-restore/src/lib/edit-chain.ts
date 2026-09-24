@@ -110,7 +110,7 @@ function processBiquad(channel: Float32Array, coefficients: Biquad) {
   });
 }
 
-function highPass(sampleRate: number, frequency: number, q: number): Biquad {
+export function highPass(sampleRate: number, frequency: number, q: number): Biquad {
   const omega = 2 * Math.PI * frequency / sampleRate;
   const cosine = Math.cos(omega);
   const alpha = Math.sin(omega) / (2 * q);
@@ -124,7 +124,7 @@ function highPass(sampleRate: number, frequency: number, q: number): Biquad {
   };
 }
 
-function lowShelf(sampleRate: number, frequency: number, q: number, gainDb: number): Biquad {
+export function lowShelf(sampleRate: number, frequency: number, q: number, gainDb: number): Biquad {
   const amplitude = 10 ** (gainDb / 40);
   const omega = 2 * Math.PI * frequency / sampleRate;
   const cosine = Math.cos(omega);

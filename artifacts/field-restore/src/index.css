@@ -277,6 +277,17 @@
 .module-name { font-size: 12px; font-weight: 700; flex: 1; }
 .module-summary { color: hsl(var(--muted-foreground)); font-family: var(--app-font-mono); font-size: 10px; }
 .module-controls { border-top: 1px solid hsl(var(--border)); padding: 11px; display: grid; gap: 10px; }
+.eq-curve { min-width: 0; margin: 0; padding: 10px 10px 5px; border: 1px solid hsl(var(--border)); border-radius: 6px; background: hsl(var(--card)); }
+.eq-curve-heading { display: flex; justify-content: space-between; gap: 8px; color: hsl(var(--muted-foreground)); font-size: 9px; font-weight: 700; letter-spacing: .04em; }
+.eq-curve-heading span:last-child { color: hsl(var(--foreground)); font-weight: 600; }
+.eq-curve.bypassed .eq-curve-heading span:last-child { color: hsl(var(--muted-foreground)); }
+.eq-curve-plot { display: block; width: 100%; height: auto; max-height: 174px; margin-top: 7px; overflow: visible; }
+.eq-curve-grid { stroke: hsl(var(--border)); stroke-width: 1; }
+.eq-curve-zero { stroke: hsl(var(--muted-foreground)); stroke-width: 1; stroke-dasharray: 3 3; opacity: .75; }
+.eq-curve-axis { fill: hsl(var(--muted-foreground)); font-size: 9px; font-family: var(--app-font-mono); }
+.eq-curve-line { fill: none; stroke: hsl(var(--primary)); stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round; }
+.eq-curve.bypassed .eq-curve-line { stroke: hsl(var(--muted-foreground)); stroke-dasharray: 5 4; }
+.eq-curve-note { margin: 0 0 4px; color: hsl(var(--muted-foreground)); font-size: 9px; line-height: 1.4; }
 .chain-drawer-backdrop { position: fixed; inset: 0; z-index: 60; background: rgba(22,31,37,.36); display: flex; justify-content: flex-end; }
 .chain-drawer { width: min(480px, calc(100vw - 60px)); height: 100%; outline: none; color: hsl(var(--foreground)); background: hsl(var(--card)); border-left: 1px solid hsl(var(--border)); box-shadow: -18px 0 60px rgba(22,31,37,.24); display: flex; flex-direction: column; }
 .chain-drawer-header { padding: 16px 18px; border-bottom: 1px solid hsl(var(--border)); display: flex; align-items: center; justify-content: space-between; gap: 12px; }
