@@ -2522,7 +2522,7 @@ function App() {
                             : <div className="stat-grid"><div className="stat-cell text-[11px] text-muted-foreground">No selection · full track playback</div></div>}
                        </div>
                      </div>
-                     <div className="signal-stats-note"><Info size={12} />Local BS.1770-style estimates with 4× true-peak interpolation; LBPR is a DR14-style estimate using sample peaks and includes the final partial block. Not certified meter readings.</div>
+                      <div className="signal-stats-note"><Info size={12} />Local BS.1770-style estimates with 4× true-peak interpolation. Not certified meter readings.</div>
                    </section>
                   <section className="transport" aria-label="Audio transport">
                     <button type="button" className="icon-btn !bg-[#d8ed55] !text-[#18231f] !rounded-full" onClick={play} aria-label={isPlaying ? 'Pause playback' : 'Play playback'} data-testid="button-play">{isPlaying ? <Pause size={16} fill="currentColor" /> : <Play size={16} fill="currentColor" />}</button>

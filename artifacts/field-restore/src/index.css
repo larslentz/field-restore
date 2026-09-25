@@ -386,7 +386,10 @@
 .stat-cell { background: hsl(var(--card)); padding: 10px; }
 .stat-value { font-family: var(--app-font-mono); font-size: 14px; font-weight: 700; color: hsl(var(--foreground)); }
 .stat-label { font-size: 10px; color: hsl(var(--muted-foreground)); margin-top: 3px; }
-.lbpr-meta { font-size: 10px; line-height: 1.35; color: hsl(var(--muted-foreground)); margin-top: 4px; overflow-wrap: anywhere; }
+.lbpr-rounded { color: hsl(var(--muted-foreground)); font-size: .85em; }
+.lbpr-channels { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 5px; font-size: 10px; }
+.lbpr-channel { display: inline-flex; align-items: baseline; gap: 4px; white-space: nowrap; color: hsl(var(--muted-foreground)); }
+.lbpr-channel strong { font-family: var(--app-font-mono); font-weight: 700; color: hsl(var(--foreground)); }
 .signal-stats-bar { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: stretch; overflow: hidden; }
 .signal-stats-heading { min-width: 156px; padding: 8px 10px; border-right: 1px solid hsl(var(--border)); display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 6px; }
 .signal-stats-groups { min-width: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -400,7 +403,7 @@
 .signal-stats-bar .stat-label { font-size: 9px; line-height: 1.25; }
 .signal-stats-bar .lbpr-cell { grid-column: span 3; }
 .signal-stats-bar .lbpr-cell .stat-value { white-space: normal; }
-.signal-stats-bar .lbpr-meta { font-size: 9px; }
+.signal-stats-bar .lbpr-channels { font-size: 9px; }
 .signal-stats-note { grid-column: 1 / -1; padding: 4px 10px; border-top: 1px solid hsl(var(--border)); display: flex; align-items: center; gap: 5px; color: hsl(var(--muted-foreground)); font-size: 9px; line-height: 1.35; }
 @media (min-width: 1101px) and (max-width: 1360px) {
   .signal-stats-bar .stat-cell { padding-inline: 5px; }

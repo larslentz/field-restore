@@ -7,3 +7,4 @@
 - [Repair marker discovery](repair-marker-discovery.md) — file-backed repair marks reflect buffered edited playback, not a silent full-recording scan.
 - [Spectral repair preparation](spectral-repair-preparation.md) — precompute bounded future-aware patches before synchronous file streaming; retain full-source metadata for ranged analysis.
 - [Harmonic spectral floors](harmonic-spectral-floors.md) — common 50/60 Hz series can occupy neighboring FFT bins; estimate floors away from adjacent partials.
+- [LBPR presentation](lbpr-presentation.md) — display unitless LBPR numbers with separate Left and Right readings, without explanatory text below the measurement.
