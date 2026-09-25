@@ -171,20 +171,22 @@ export function analyzeLoudness(
   }
 
   if (!momentaryEnergies.length) momentaryEnergies.push(momentarySum / frameCount);
-  if (!shortTermEnergies.length) shortTermEnergies.push(shortTermSum / frameCount);
-
   const integratedLufs = gatedIntegratedLoudness(momentaryEnergies);
   const shortTermLoudness = shortTermEnergies.map(energyToLufs).filter(Number.isFinite);
-  const lraGate = Number.isFinite(integratedLufs) ? integratedLufs - 20 : -70;
-  const gatedShortTerm = shortTermLoudness.filter((value) => value >= -70 && value >= lraGate).sort((a, b) => a - b);
+  // Tech 3342 gates LRA against the absolute-gated *short-term* mean, not the
+  // separately computed, -10 LU relative-gated programme loudness.
+  const absoluteGatedShort = shortTermEnergies.filter((energy) => energyToLufs(energy) >= -70);
+  const shortTermMean = absoluteGatedShort.length ? energyToLufs(mean(absoluteGatedShort)) : SILENCE_LUFS;
+  const lraGate = Math.max(-70, shortTermMean - 20);
+  const gatedShortTerm = shortTermLoudness.filter((value) => value >= lraGate).sort((a, b) => a - b);
   const loudnessRangeLu = gatedShortTerm.length > 1
     ? Math.max(0, percentile(gatedShortTerm, 0.95) - percentile(gatedShortTerm, 0.1))
-    : 0;
+    : NaN;
 
   return {
     truePeakDbtp: estimateTruePeak(channels, from, to),
     integratedLufs,
     loudnessRangeLu,
-    maxShortTermLufs: shortTermLoudness.length ? Math.max(...shortTermLoudness) : SILENCE_LUFS,
+    maxShortTermLufs: shortTermLoudness.length ? Math.max(...shortTermLoudness) : energyToLufs(shortTermSum / frameCount),
   };
 }

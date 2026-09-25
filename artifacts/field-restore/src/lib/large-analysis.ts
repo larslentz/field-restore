@@ -91,6 +91,7 @@ export async function analyzeLargeLoudness(
   const momentaryBins = new Uint32Array(561);
   const momentaryEnergy = new Float64Array(561);
   const shortBins = new Uint32Array(561);
+  const shortEnergy = new Float64Array(561);
   const shelfFilter = shelf(rate); const highFilter = highPass(rate);
   const shelfStates = Array.from({ length: metadata.channels }, state);
   const highStates = Array.from({ length: metadata.channels }, state);
@@ -103,7 +104,7 @@ export async function analyzeLargeLoudness(
   };
   const addShort = (value: number) => {
     const db = lufs(value); if (!Number.isFinite(db) || db < -120) return;
-    shortBins[bin(db)] += 1;
+    const i = bin(db); shortBins[i] += 1; shortEnergy[i] += value;
   };
   const truePeak = (a: number, b: number, c: number, d: number) => {
     for (let phase = 0; phase < 4; phase += 1) {
@@ -146,7 +147,6 @@ export async function analyzeLargeLoudness(
   // Flush the interpolation tail with duplicated edge samples.
   for (const p of previous) if (p.length >= 2) truePeak(p[0], p[0], p[1], p[1]);
   if (!momentaryBins.some(Boolean)) addMomentary(momentarySum / Math.max(1, frame));
-  if (!shortBins.some(Boolean)) addShort(shortSum / Math.max(1, frame));
 
   let absoluteCount = 0; let absoluteEnergy = 0;
   for (let i = 0; i < momentaryBins.length; i += 1) if (-120 + i / 4 >= -70) {
@@ -159,7 +159,13 @@ export async function analyzeLargeLoudness(
     gatedCount += momentaryBins[i]; gatedEnergy += momentaryEnergy[i];
   }
   const integratedLufs = gatedCount ? lufs(gatedEnergy / gatedCount) : SILENCE;
-  const lraGate = Number.isFinite(integratedLufs) ? integratedLufs - 20 : -70;
+  let absoluteShortCount = 0; let absoluteShortEnergy = 0;
+  for (let i = 0; i < shortBins.length; i += 1) if (-120 + i / 4 >= -70) {
+    absoluteShortCount += shortBins[i]; absoluteShortEnergy += shortEnergy[i];
+  }
+  // Tech 3342 uses the absolute-gated short-term energy mean for its -20 LU gate.
+  const shortTermMean = absoluteShortCount ? lufs(absoluteShortEnergy / absoluteShortCount) : SILENCE;
+  const lraGate = Math.max(-70, shortTermMean - 20);
   let maxShort = SILENCE; let shortCount = 0;
   for (let i = 0; i < shortBins.length; i += 1) if (shortBins[i]) {
     const db = -120 + i / 4;
@@ -169,8 +175,9 @@ export async function analyzeLargeLoudness(
   const percentileGate = Math.max(-70, lraGate);
   const low = histogramPercentile(shortBins, percentileGate, 0.1);
   const high = histogramPercentile(shortBins, percentileGate, 0.95);
+  if (!shortBins.some(Boolean)) maxShort = lufs(shortSum / Math.max(1, frame));
   const result: LargeAnalysisResult = { truePeakDbtp: peak ? 20 * Math.log10(peak) : SILENCE, integratedLufs,
-    loudnessRangeLu: shortCount > 1 && Number.isFinite(low) && Number.isFinite(high) ? Math.max(0, high - low) : 0, maxShortTermLufs: maxShort,
+    loudnessRangeLu: shortCount > 1 && Number.isFinite(low) && Number.isFinite(high) ? Math.max(0, high - low) : NaN, maxShortTermLufs: maxShort,
     progress: { completed: frame, total, fraction: total ? frame / total : 1 } };
   options.onProgress?.(result.progress);
   return result;

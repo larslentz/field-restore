@@ -65,7 +65,7 @@ const SPECTROGRAM_MIN_LEVEL_SPAN_DB = 10;
 const SPECTROGRAM_MAX_LEVEL_SPAN_DB = 180;
 const SPECTROGRAM_DISPLAY_HEIGHT = 110;
 const HUM_MARKER_COLORS = ['#d8ed55', '#75d7ef', '#ffaf78', '#d7a7fa'];
-const EMPTY_STATS: LoudnessStats = { truePeakDbtp: -Infinity, integratedLufs: -Infinity, loudnessRangeLu: 0, maxShortTermLufs: -Infinity };
+const EMPTY_STATS: LoudnessStats = { truePeakDbtp: -Infinity, integratedLufs: -Infinity, loudnessRangeLu: NaN, maxShortTermLufs: -Infinity };
 const EMPTY_SPECTROGRAM = { width: 480, height: 110, values: new Float32Array(480 * 110) };
 
 const EMPTY_CHANNELS: Float32Array[] = [];
@@ -100,6 +100,9 @@ async function warmFileProcessor(
 function formatLevel(value: number, unit: 'dBTP' | 'LUFS' | 'LU') {
   if (!Number.isFinite(value)) return `-∞ ${unit}`;
   return `${value > 0 ? '+' : ''}${value.toFixed(1)} ${unit}`;
+}
+function formatLra(value: number) {
+  return Number.isFinite(value) ? formatLevel(value, 'LU') : 'N/A';
 }
 
 function moduleSummary(module: EditModule, humReadout?: ReturnType<typeof humOpeningReadout>) {
@@ -2656,7 +2659,7 @@ function HumSpectrogramOverlay({ modules, segments, sampleRate, onSeek }: {
 }
 
 function StatsGrid({ stats }: { stats: LoudnessStats }) {
-  return <div className="stat-grid"><div className="stat-cell"><div className="stat-value">{formatLevel(stats.truePeakDbtp, 'dBTP')}</div><div className="stat-label">True peak estimate</div></div><div className="stat-cell"><div className="stat-value">{formatLevel(stats.integratedLufs, 'LUFS')}</div><div className="stat-label">Integrated loudness</div></div><div className="stat-cell"><div className="stat-value">{formatLevel(stats.loudnessRangeLu, 'LU')}</div><div className="stat-label">Loudness range</div></div><div className="stat-cell"><div className="stat-value">{formatLevel(stats.maxShortTermLufs, 'LUFS')}</div><div className="stat-label">Max short-term</div></div></div>;
+  return <div className="stat-grid"><div className="stat-cell"><div className="stat-value">{formatLevel(stats.truePeakDbtp, 'dBTP')}</div><div className="stat-label">True peak estimate</div></div><div className="stat-cell"><div className="stat-value">{formatLevel(stats.integratedLufs, 'LUFS')}</div><div className="stat-label">Integrated loudness</div></div><div className="stat-cell"><div className="stat-value">{formatLra(stats.loudnessRangeLu)}</div><div className="stat-label">Loudness range (LRA)</div></div><div className="stat-cell"><div className="stat-value">{formatLevel(stats.maxShortTermLufs, 'LUFS')}</div><div className="stat-label">Max short-term</div></div></div>;
 }
 
 function RangeControl({ label, value, min, max, step, suffix, onChange, resetValue, wheelStep, testId }: { label: string; value: number; min: number; max: number; step: number; suffix: string; onChange: (value: number) => void; resetValue?: number; wheelStep?: number; testId?: string }) {
@@ -2926,7 +2929,7 @@ function AnalyzePanel({ originalStats, currentStats, selectionOriginalStats, sel
       <section className="panel">
         <div className="panel-header"><div className="section-title">Interpretation notes</div></div>
         <div className="panel-body grid md:grid-cols-3 gap-3 text-[12px]">
-          <div className="border-l-2 border-[#d8ed55] pl-3"><strong>Loudness context</strong><p className="text-muted-foreground mt-1 leading-relaxed">Use integrated loudness for the overall program and loudness range for long-term variation. Preserve headroom for archival work.</p></div>
+          <div className="border-l-2 border-[#d8ed55] pl-3"><strong>Loudness context</strong><p className="text-muted-foreground mt-1 leading-relaxed">Use integrated loudness for the overall program and loudness range (LRA) for long-term variation. LRA needs at least two valid 3-second readings; shorter or silent ranges show N/A. Preserve headroom for archival work.</p></div>
           <div className="border-l-2 border-[#ff8a4c] pl-3"><strong>Chain impact</strong><p className="text-muted-foreground mt-1 leading-relaxed">{modules.filter((module) => module.enabled).length} enabled modules are rendered in order. Bypassed modules remain editable.</p></div>
           <div className="border-l-2 border-[#91a69d] pl-3"><strong>Known boundary</strong><p className="text-muted-foreground mt-1 leading-relaxed">These browser-local readings follow BS.1770-style weighting and gating but are not a substitute for a calibrated compliance meter.</p></div>
         </div>
@@ -2944,8 +2947,8 @@ function SignalComparison({ title, original, current }: { title: string; origina
         <div className="stat-cell"><div className="stat-value">{formatLevel(current.truePeakDbtp, 'dBTP')}</div><div className="stat-label">Current true peak</div></div>
         <div className="stat-cell"><div className="stat-value">{formatLevel(original.integratedLufs, 'LUFS')}</div><div className="stat-label">Original integrated</div></div>
         <div className="stat-cell"><div className="stat-value">{formatLevel(current.integratedLufs, 'LUFS')}</div><div className="stat-label">Current integrated</div></div>
-        <div className="stat-cell"><div className="stat-value">{formatLevel(original.loudnessRangeLu, 'LU')}</div><div className="stat-label">Original LRA</div></div>
-        <div className="stat-cell"><div className="stat-value">{formatLevel(current.loudnessRangeLu, 'LU')}</div><div className="stat-label">Current LRA</div></div>
+        <div className="stat-cell"><div className="stat-value">{formatLra(original.loudnessRangeLu)}</div><div className="stat-label">Original loudness range (LRA)</div></div>
+        <div className="stat-cell"><div className="stat-value">{formatLra(current.loudnessRangeLu)}</div><div className="stat-label">Current loudness range (LRA)</div></div>
         <div className="stat-cell"><div className="stat-value">{formatLevel(original.maxShortTermLufs, 'LUFS')}</div><div className="stat-label">Original max short-term</div></div>
         <div className="stat-cell"><div className="stat-value">{formatLevel(current.maxShortTermLufs, 'LUFS')}</div><div className="stat-label">Current max short-term</div></div>
       </div>
