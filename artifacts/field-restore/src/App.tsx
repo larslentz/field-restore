@@ -1379,11 +1379,13 @@ function App() {
   };
   const addSpectralRepair = (bounds: SpectralBounds | null, opener?: HTMLButtonElement) => {
     if (!bounds || bounds.end <= bounds.start || bounds.high <= bounds.low) {
-      setSpectralError('Drag a time and frequency rectangle in either channel before adding a repair.');
+      setSpectralSelectionMode(true);
+      setSpectralError('Draw a rectangle across time and frequency inside either channel, then click Add Spectral Repair. A time-only selection is not enough (10 seconds maximum).');
       return;
     }
     if (bounds.end - bounds.start > 10) {
-      setSpectralError('Spectral repairs cannot exceed 10 seconds. Select a shorter passage.');
+      setSpectralSelectionMode(true);
+      setSpectralError('This rectangle is longer than 10 seconds. Draw a shorter time-and-frequency rectangle in either channel.');
       return;
     }
     const module = makeModule('spectral-repair');
@@ -1399,7 +1401,13 @@ function App() {
   };
   const addModule = (type: AddModuleType) => {
     if (type === 'spectral-repair') {
-      addSpectralRepair(spectralSelection);
+      setModuleMenu(false);
+      setChainDrawerOpen(false);
+      setActiveTab('edit');
+      setSpectralSelection(null);
+      setSpectralError('');
+      setSpectralSelectionMode(true);
+      requestAnimationFrame(() => canvasRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }));
       return;
     }
     const module = type === 'low-rumble' ? makeLowRumbleRemoval() : type === 'bring-back-low-end' ? makeBringBackLowEnd() : type === 'fade-in' ? makeFadeIn() : type === 'fade-out' ? makeFadeOut() : makeModule(type);
@@ -2336,7 +2344,7 @@ function App() {
                 <>
                   <section className="panel instrument-grid" aria-label="Spectrogram editor">
                     <div className="panel-header spectrogram-panel-header">
-                      <div className="flex items-center gap-3"><Waves size={17} color="hsl(var(--primary))" /><div><div className="section-title">Spectrogram / selection</div><div className="text-[10px] text-muted-foreground mt-0.5">{spectralSelectionMode ? 'Drag a rectangle inside either channel · bounds apply independently to both channels' : 'Drag to select · double-click to clear · scroll/drag the bottom time axis · scroll/drag the left frequency axis · scroll/drag the right dB axis'}</div></div></div>
+                      <div className="flex items-center gap-3"><Waves size={17} color="hsl(var(--primary))" /><div><div className="section-title">Spectrogram / selection</div><div className="text-[10px] text-muted-foreground mt-0.5">{spectralSelectionMode ? 'Spectral selection on · drag across time and frequency inside either channel (10 seconds max) · axis gestures still work' : 'Drag to select time · double-click to clear · scroll/drag the bottom time axis · scroll/drag the left frequency axis · scroll/drag the right dB axis'}</div></div></div>
                       <div className="spectrogram-header-actions">
                         <button type="button" className={`spectral-mode-toggle ${spectralSelectionMode ? 'active' : ''}`} onClick={() => { setSpectralSelectionMode((value) => !value); setSpectralError(''); }} aria-pressed={spectralSelectionMode} data-testid="button-spectral-selection-mode">Spectral selection</button>
                         <div className="spectrogram-source-control" aria-label="Spectrogram source">
@@ -2418,7 +2426,7 @@ function App() {
                         </div>
                       </div>
                       {(spectralSelectionMode || spectralSelection || spectralError) && <div className="spectral-action-strip">
-                        <div className="spectral-action-copy"><strong>Spectral repair</strong><span data-testid="text-spectral-selection">{spectralSelection ? `${formatTime(spectralSelection.start, true)}–${formatTime(spectralSelection.end, true)} · ${Math.round(spectralSelection.low)}–${Math.round(spectralSelection.high)} Hz` : 'Draw a rectangle in either channel to set time and frequency bounds.'}</span></div>
+                        <div className="spectral-action-copy"><strong>Spectral repair · 10 seconds max</strong><span data-testid="text-spectral-selection" aria-live="polite">{spectralSelection ? `${formatTime(spectralSelection.start, true)}–${formatTime(spectralSelection.end, true)} · ${Math.round(spectralSelection.low)}–${Math.round(spectralSelection.high)} Hz` : 'Drag diagonally inside either channel to draw a time-and-frequency rectangle, then click Add. Time-only selection does not count.'}</span></div>
                         <button type="button" className="primary-btn" onClick={(event) => addSpectralRepair(spectralSelection, event.currentTarget)} data-testid="button-add-spectral-repair"><Plus size={13} /> Add Spectral Repair</button>
                         {spectralError && <p role="alert" data-testid="status-spectral-error" className="spectral-error">{spectralError}</p>}
                       </div>}

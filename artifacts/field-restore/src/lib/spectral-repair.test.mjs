@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { renderSpectralRepair } from './spectral-repair.ts';
+import { makeModule, renderChain } from './edit-chain.ts';
 
 const rate = 16000;
 const params = {
@@ -56,6 +57,21 @@ test('repairs the selected band while preserving other frequencies and exact sam
     }
   }
   assert.deepEqual(input[0], source[0], 'source audio remains immutable');
+});
+
+test('a newly added enabled repair audibly differs from the same edit bypassed', () => {
+  const input = signal();
+  const module = {
+    ...makeModule('spectral-repair'),
+    params: { ...makeModule('spectral-repair').params, ...params, strength: 75 },
+  };
+  const edited = renderChain(input, [module], rate)[0];
+  const bypassed = renderChain(input, [{ ...module, enabled: false }], rate)[0];
+  assert.deepEqual(bypassed, input[0]);
+  const originalTone = rmsProjection(bypassed, 1000, .95, 1.05);
+  const editedTone = rmsProjection(edited, 1000, .95, 1.05);
+  assert.ok(originalTone > .2, 'controlled defect is present in bypassed audio');
+  assert.ok(editedTone < originalTone * .7, `edited target ${editedTone} must be lower than bypassed ${originalTone}`);
 });
 
 test('Attenuate retains local phase while Replace reconstructs from contextual complex spectra', () => {
