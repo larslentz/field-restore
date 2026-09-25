@@ -1377,7 +1377,7 @@ function App() {
       setError(caught instanceof Error ? caught.message : 'Could not read the selected noise-only sample.');
     }
   };
-  const addSpectralRepair = (bounds: SpectralBounds | null) => {
+  const addSpectralRepair = (bounds: SpectralBounds | null, opener?: HTMLButtonElement) => {
     if (!bounds || bounds.end <= bounds.start || bounds.high <= bounds.low) {
       setSpectralError('Drag a time and frequency rectangle in either channel before adding a repair.');
       return;
@@ -1393,6 +1393,9 @@ function App() {
     }]);
     setSpectralError('');
     setModuleMenu(false);
+    chainDrawerOpenerRef.current = opener ?? sidebarAddRef.current;
+    setSelectedModuleId(module.id);
+    setChainDrawerOpen(true);
   };
   const addModule = (type: AddModuleType) => {
     if (type === 'spectral-repair') {
@@ -2416,7 +2419,7 @@ function App() {
                       </div>
                       {(spectralSelectionMode || spectralSelection || spectralError) && <div className="spectral-action-strip">
                         <div className="spectral-action-copy"><strong>Spectral repair</strong><span data-testid="text-spectral-selection">{spectralSelection ? `${formatTime(spectralSelection.start, true)}–${formatTime(spectralSelection.end, true)} · ${Math.round(spectralSelection.low)}–${Math.round(spectralSelection.high)} Hz` : 'Draw a rectangle in either channel to set time and frequency bounds.'}</span></div>
-                        <button type="button" className="primary-btn" onClick={() => addSpectralRepair(spectralSelection)} data-testid="button-add-spectral-repair"><Plus size={13} /> Add Spectral Repair</button>
+                        <button type="button" className="primary-btn" onClick={(event) => addSpectralRepair(spectralSelection, event.currentTarget)} data-testid="button-add-spectral-repair"><Plus size={13} /> Add Spectral Repair</button>
                         {spectralError && <p role="alert" data-testid="status-spectral-error" className="spectral-error">{spectralError}</p>}
                       </div>}
                     </div>
