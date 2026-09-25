@@ -2258,7 +2258,21 @@ function App() {
       )}
       <aside className="sidebar-shell" inert={!!modal || presetDialogOpen} aria-hidden={modal || presetDialogOpen ? true : undefined}>
         <div className="px-4 py-5 flex items-center gap-3">
-          <div className="brand-mark" aria-hidden="true" />
+          <svg className="brand-leaf" aria-hidden="true" width="28" height="28" viewBox="0 0 28 28" fill="none">
+            <path
+              d="M22.9 4.9C15.1 4.8 8.2 7 5.6 12.1c-2.2 4.3.1 8.7 4.2 9.5 5.9 1.1 11.8-5.8 13.1-16.7Z"
+              stroke="currentColor"
+              strokeWidth="1.55"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+            <path
+              d="M5.7 21.4c3.5-4.1 7.4-7.2 13.6-11.9"
+              stroke="currentColor"
+              strokeWidth="1.35"
+              strokeLinecap="round"
+            />
+          </svg>
           <div className="brand-copy">
             <div className="font-bold tracking-tight text-[14px]">FIELD RESTORE</div>
             <div className="text-[10px] opacity-55 tracking-[.12em] mt-0.5">BY LARS LENTZ</div>

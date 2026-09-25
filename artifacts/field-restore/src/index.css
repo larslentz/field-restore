@@ -171,8 +171,7 @@
 .sidebar-shell { width: 218px; flex: 0 0 218px; min-height: 0; background-color: hsl(var(--sidebar)); background-image: linear-gradient(90deg, rgba(31, 45, 50, .27), rgba(31, 45, 50, 0)), url('./assets/sunlit-leaves.svg'); background-repeat: no-repeat; background-position: top left, top right; background-size: 100% 294px, 218px 294px; color: hsl(var(--sidebar-foreground)); display: flex; flex-direction: column; border-right: 1px solid hsl(var(--sidebar-border)); }
 .has-edit-layout .sidebar-shell { overflow-y: auto; }
 .has-edit-layout .sidebar-chain { flex: 0 0 auto; height: 44vh; }
-.brand-mark { width: 28px; height: 28px; border: 2px solid hsl(var(--sidebar-primary)); border-radius: 50%; position: relative; display: grid; place-items: center; }
-.brand-mark::after { content: ''; width: 6px; height: 6px; background: hsl(var(--sidebar-primary)); border-radius: 50%; box-shadow: 0 0 0 4px rgba(183, 221, 47, .12); }
+.brand-leaf { display: block; width: 28px; height: 28px; flex: 0 0 28px; color: hsl(var(--sidebar-primary)); }
 .brand-links { display: inline-flex; align-items: center; gap: 4px; margin-top: 6px; color: hsl(var(--sidebar-primary)); font-size: 11px; font-weight: 600; text-decoration: underline; text-underline-offset: 3px; }
 .brand-links:hover { color: #e5f49d; }
 .brand-links:focus-visible, .compact-more-link:focus-visible { outline: 2px solid hsl(var(--sidebar-primary)); outline-offset: 2px; }
