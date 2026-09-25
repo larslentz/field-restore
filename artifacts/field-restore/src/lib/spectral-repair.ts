@@ -69,6 +69,20 @@ function smoothstep(value: number) {
   return t * t * (3 - 2 * t);
 }
 
+/** A robust local noise floor: a minority of recurring bursts in the clean
+ * context cannot raise the estimate as a single reference frame would. */
+function medianMagnitudes(spectra: ComplexFrame[], indices: number[], bins: number): Float64Array {
+  const result = new Float64Array(bins);
+  if (!indices.length) return result;
+  for (let bin = 0; bin < bins; bin += 1) {
+    const values = indices.map((index) => Math.hypot(spectra[index].real[bin], spectra[index].imaginary[bin]));
+    values.sort((a, b) => a - b);
+    const middle = Math.floor(values.length / 2);
+    result[bin] = values.length % 2 ? values[middle] : (values[middle - 1] + values[middle]) / 2;
+  }
+  return result;
+}
+
 function validate(
   input: Float32Array[],
   sampleRate: number,
@@ -88,6 +102,8 @@ function validate(
   const context = Number(params.context);
   const weighting = Number(params.weighting);
   const mode = String(params.mode);
+  // Older saved edits intentionally do not require this new control.
+  const fundamental = mode === 'Harmonic Suppress' ? Number(params.fundamental ?? 100) : 0;
   if (![start, end, low, high, strength, context, weighting].every(Number.isFinite)) {
     throw new RangeError('Spectral repair parameters must be finite numbers.');
   }
@@ -100,15 +116,20 @@ function validate(
   if (strength < 0 || strength > 100) throw new RangeError('Strength must be between 0 and 100.');
   if (context < 0.02 || context > 1) throw new RangeError('Context must be between 0.02 and 1 second.');
   if (weighting < 0 || weighting > 100) throw new RangeError('Weighting must be between 0 and 100.');
-  if (mode !== 'Attenuate' && mode !== 'Replace') throw new RangeError('Mode must be Attenuate or Replace.');
-  return { start, end, low, high, strength, context, weighting, mode };
+  if (!['Attenuate', 'Replace', 'Pattern Suppress', 'Harmonic Suppress'].includes(mode)) {
+    throw new RangeError('Unknown spectral repair mode.');
+  }
+  if (mode === 'Harmonic Suppress' && (!Number.isFinite(fundamental) || fundamental < 20 ||
+    fundamental > sampleRate / 2)) throw new RangeError('Harmonic fundamental must be between 20 Hz and Nyquist.');
+  return { start, end, low, high, strength, context, weighting, mode, fundamental };
 }
 
 /**
  * Repairs a selected time-frequency region using neighboring clean STFT
- * frames. Weighting sets the before/after blend in both modes: 0 favors after,
- * 50 follows balanced temporal interpolation, and 100 favors before. Work is
- * limited to selection, requested context and one FFT overlap margin.
+ * frames. Pattern Suppress estimates a median magnitude from clean frames on
+ * both sides; Harmonic Suppress reduces only narrow multiples of a chosen
+ * fundamental toward the neighboring spectral floor. Neither reconstructs
+ * masked sound. Work is limited to selection, context and one FFT margin.
  */
 export function renderSpectralRepair(
   input: Float32Array[],
@@ -116,7 +137,7 @@ export function renderSpectralRepair(
   params: Record<string, number | string>,
   frameOffset = 0,
 ): Float32Array[] {
-  const { start, end, low, high, strength, context, weighting, mode } =
+  const { start, end, low, high, strength, context, weighting, mode, fundamental } =
     validate(input, sampleRate, params, frameOffset);
   const output = input.map((channel) => new Float32Array(channel));
   if (strength === 0) return output;
@@ -164,6 +185,9 @@ export function renderSpectralRepair(
   // At an actual recording edge one side may not exist; re-use the available clean side.
   if (beforeIndex < 0) beforeIndex = afterIndex;
   if (afterIndex < 0) afterIndex = beforeIndex;
+  // Harmonic Suppress estimates from neighboring bins of the selected frame,
+  // so it can also operate when a selection spans the whole recording.
+  if (mode === 'Harmonic Suppress' && beforeIndex < 0) beforeIndex = afterIndex = 0;
   if (beforeIndex < 0 || afterIndex < 0) return output;
 
   const binWidth = sampleRate / FFT_SIZE;
@@ -176,12 +200,56 @@ export function renderSpectralRepair(
     const highFade = smoothstep(((highBin + edgeBins) - bin) / (2 * edgeBins));
     frequencyMask[bin] = Math.min(lowFade, highFade);
   }
+  if (mode === 'Harmonic Suppress') {
+    for (let bin = 0; bin < frequencyMask.length; bin += 1) {
+      const multiple = Math.max(1, Math.round(bin * binWidth / fundamental));
+      const distance = Math.abs(bin - multiple * fundamental / binWidth);
+      frequencyMask[bin] *= 1 - smoothstep((distance - 1) / 1.5);
+    }
+  }
+  // Low fundamentals can put several harmonics inside a single ±5-bin
+  // neighborhood. Find bins outside ALL selected harmonic lobes rather than
+  // mistaking a stronger adjacent partial for the noise floor.
+  const floorCandidates = mode === 'Harmonic Suppress'
+    ? Array.from({ length: frequencyMask.length }, (_, bin) => {
+      if (frequencyMask[bin] <= 0) return [];
+      const candidates: number[] = [];
+      for (let distance = 3; distance <= 48 && candidates.length < 12; distance += 1) {
+        for (const neighbor of [bin - distance, bin + distance]) {
+          if (neighbor <= 0 || neighbor >= FFT_SIZE / 2) continue;
+          const multiple = Math.max(1, Math.round(neighbor * binWidth / fundamental));
+          const harmonic = multiple * fundamental;
+          const separation = Math.abs(neighbor - harmonic / binWidth);
+          if ((harmonic < low || harmonic > high || separation >= 3) &&
+            Math.abs(neighbor - bin) >= 3) candidates.push(neighbor);
+        }
+      }
+      return candidates;
+    })
+    : null;
 
   const selectionFrames = selectionEnd - selectionStart;
   const fadeFrames = Math.min(Math.round(sampleRate * 0.035), Math.floor(selectionFrames / 3));
   const wet = strength / 100;
   input.forEach((channel, channelIndex) => {
     const spectra = centers.map((center) => readFrame(channel, frameOffset, center));
+    const cleanBefore: number[] = [];
+    const cleanAfter: number[] = [];
+    if (mode === 'Pattern Suppress') {
+      for (let index = 0; index < centers.length; index += 1) {
+        const center = centers[index];
+        if (center - FFT_SIZE / 2 < frameOffset ||
+          center + FFT_SIZE / 2 > frameOffset + channel.length) continue;
+        if (center >= selectionStart - contextFrames && center + FFT_SIZE / 2 <= selectionStart) cleanBefore.push(index);
+        if (center <= selectionEnd + contextFrames && center - FFT_SIZE / 2 >= selectionEnd) cleanAfter.push(index);
+      }
+      if (!cleanBefore.length && beforeIndex >= 0) cleanBefore.push(beforeIndex);
+      if (!cleanAfter.length && afterIndex >= 0) cleanAfter.push(afterIndex);
+    }
+    const beforeMedian = mode === 'Pattern Suppress'
+      ? medianMagnitudes(spectra, cleanBefore, frequencyMask.length) : null;
+    const afterMedian = mode === 'Pattern Suppress'
+      ? medianMagnitudes(spectra, cleanAfter, frequencyMask.length) : null;
     const before = {
       real: spectra[beforeIndex].real.slice(),
       imaginary: spectra[beforeIndex].imaginary.slice(),
@@ -200,6 +268,18 @@ export function renderSpectralRepair(
     for (let frameIndex = 0; frameIndex < centers.length; frameIndex += 1) {
       const center = centers[frameIndex];
       const spectrum = spectra[frameIndex];
+      const magnitudes = floorCandidates
+        ? Float64Array.from({ length: frequencyMask.length }, (_, bin) =>
+          Math.hypot(spectrum.real[bin], spectrum.imaginary[bin]))
+        : null;
+      const harmonicFloor = mode === 'Harmonic Suppress'
+        ? Float64Array.from({ length: frequencyMask.length }, (_, bin) => {
+          const neighbors = floorCandidates![bin];
+          if (!neighbors.length) return magnitudes![bin];
+          const values = neighbors.map((neighbor) => magnitudes![neighbor]).sort((a, b) => a - b);
+          return values[Math.floor((values.length - 1) / 4)];
+        })
+        : null;
       const intersectionStart = Math.max(center - FFT_SIZE / 2, selectionStart);
       const intersectionEnd = Math.min(center + FFT_SIZE / 2, selectionEnd);
       if (intersectionEnd > intersectionStart) {
@@ -228,12 +308,15 @@ export function renderSpectralRepair(
             const afterImaginary = after.imaginary[bin];
             targetReal = beforeReal * beforeWeight + afterReal * (1 - beforeWeight);
             targetImaginary = beforeImaginary * beforeWeight + afterImaginary * (1 - beforeWeight);
-          } else {
-            const beforeMagnitude = Math.hypot(before.real[bin], before.imaginary[bin]);
-            const afterMagnitude = Math.hypot(after.real[bin], after.imaginary[bin]);
+           } else {
+             const beforeMagnitude = beforeMedian ? beforeMedian[bin] : Math.hypot(before.real[bin], before.imaginary[bin]);
+             const afterMagnitude = afterMedian ? afterMedian[bin] : Math.hypot(after.real[bin], after.imaginary[bin]);
             const contextual = beforeMagnitude * beforeWeight + afterMagnitude * (1 - beforeWeight);
             const sourceMagnitude = Math.hypot(real, imaginary);
-            const targetMagnitude = Math.min(sourceMagnitude, contextual);
+             // Sample bins outside the narrow harmonic notch from the original
+             // spectrum, keeping phase and unselected partials intact.
+             const floor = harmonicFloor ? harmonicFloor[bin] : contextual;
+             const targetMagnitude = Math.min(sourceMagnitude, floor);
             const gain = sourceMagnitude > 1e-15 ? targetMagnitude / sourceMagnitude : 1;
             targetReal = real * gain;
             targetImaginary = imaginary * gain;

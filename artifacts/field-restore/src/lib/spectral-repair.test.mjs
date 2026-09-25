@@ -175,6 +175,88 @@ test('weighting 0 favors after context and weighting 100 favors before in both m
   }
 });
 
+test('Pattern Suppress uses a robust nearby level when isolated repeats contaminate reference frames', () => {
+  const input = [Float32Array.from({ length: rate * 2 }, (_, frame) => {
+    const time = frame / rate;
+    const burst = (time >= .595 && time < .625) ||
+      (time >= .9 && time < 1.1) || (time >= 1.395 && time < 1.425);
+    return .1 * Math.sin(2 * Math.PI * 400 * time) +
+      (burst ? .28 * Math.sin(2 * Math.PI * 1000 * time) : 0);
+  })];
+  const selection = { ...params, start: .85, end: 1.15 };
+  const ordinary = renderSpectralRepair(input, rate, selection)[0];
+  const patterned = renderSpectralRepair(input, rate, { ...selection, mode: 'Pattern Suppress' })[0];
+  assert.ok(rmsProjection(patterned, 1000, .96, 1.04) < rmsProjection(ordinary, 1000, .96, 1.04) * .6);
+  assert.ok(Math.abs(rmsProjection(patterned, 400, .96, 1.04) - .1) < .015);
+  assert.equal(patterned[Math.floor(.5 * rate)], input[0][Math.floor(.5 * rate)]);
+});
+
+test('Harmonic Suppress targets multiples of the supplied fundamental, not other tones', () => {
+  const input = [Float32Array.from({ length: rate * 2 }, (_, frame) => {
+    const time = frame / rate;
+    return .12 * Math.sin(2 * Math.PI * 850 * time) +
+      .24 * Math.sin(2 * Math.PI * 600 * time) +
+      .2 * Math.sin(2 * Math.PI * 1200 * time);
+  })];
+  const repaired = renderSpectralRepair(input, rate, {
+    ...params, low: 500, high: 1350, fundamental: 600, mode: 'Harmonic Suppress',
+  })[0];
+  for (const frequency of [600, 1200]) {
+    assert.ok(rmsProjection(repaired, frequency, .95, 1.05) <
+      rmsProjection(input[0], frequency, .95, 1.05) * .55, `${frequency} Hz harmonic reduced`);
+  }
+  assert.ok(Math.abs(rmsProjection(repaired, 850, .95, 1.05) -
+    rmsProjection(input[0], 850, .95, 1.05)) < .015);
+  assert.throws(() => renderSpectralRepair(input, rate, {
+    ...params, mode: 'Harmonic Suppress', fundamental: 0,
+  }), /fundamental/);
+  const entire = renderSpectralRepair(input, rate, {
+    ...params, start: 0, end: 2, low: 500, high: 1350,
+    fundamental: 600, mode: 'Harmonic Suppress',
+  })[0];
+  assert.ok(rmsProjection(entire, 600, .95, 1.05) < rmsProjection(input[0], 600, .95, 1.05) * .55,
+    'a whole-recording selection does not require clean audio outside it');
+});
+
+test('Harmonic Suppress reduces unequal 50/60 Hz harmonic series at recording sample rates', () => {
+  for (const [sampleRate, fundamental] of [[48000, 60], [44100, 50]]) {
+    const input = [Float32Array.from({ length: sampleRate * 2 }, (_, frame) => {
+      const time = frame / sampleRate;
+      return .12 * Math.sin(2 * Math.PI * fundamental * time) +
+        .48 * Math.sin(2 * Math.PI * 2 * fundamental * time) +
+        .14 * Math.sin(2 * Math.PI * 3 * fundamental * time) +
+        .08 * Math.sin(2 * Math.PI * 740 * time);
+    })];
+    const output = renderSpectralRepair(input, sampleRate, {
+      ...params, mode: 'Harmonic Suppress', fundamental, low: 40, high: 400,
+    })[0];
+    for (const frequency of [fundamental, fundamental * 2, fundamental * 3]) {
+      assert.ok(rmsProjection(output, frequency, .95, 1.05, sampleRate) <
+        rmsProjection(input[0], frequency, .95, 1.05, sampleRate) * .7,
+      `${sampleRate} Hz, ${frequency} Hz harmonic reduced`);
+    }
+    assert.ok(Math.abs(rmsProjection(output, 740, .95, 1.05, sampleRate) -
+      rmsProjection(input[0], 740, .95, 1.05, sampleRate)) < .01);
+  }
+});
+
+test('new modes agree at full and bounded offsets; strength zero bypasses exactly', () => {
+  const input = signal({ stereo: true });
+  for (const mode of ['Pattern Suppress', 'Harmonic Suppress']) {
+    const settings = { ...params, mode, fundamental: 1000 };
+    const full = renderSpectralRepair(input, rate, settings);
+    const from = Math.floor((settings.start - settings.context) * rate) - 8192;
+    const until = Math.ceil((settings.end + settings.context) * rate) + 8192;
+    const bounded = renderSpectralRepair(input.map((ch) => ch.slice(from, until)), rate, settings, from);
+    for (let c = 0; c < 2; c++) {
+      for (let i = Math.floor(settings.start * rate); i < Math.ceil(settings.end * rate); i++) {
+        assert.ok(Math.abs(full[c][i] - bounded[c][i - from]) < 1e-6, `${mode} offset parity at ${i}`);
+      }
+      assert.deepEqual(renderSpectralRepair(input, rate, { ...settings, strength: 0 })[c], input[c]);
+    }
+  }
+});
+
 test('validates parameters and finite audio only in the bounded repair work interval', () => {
   const input = signal();
   assert.throws(() => renderSpectralRepair(input, rate, { ...params, end: 11 }), /10 seconds/);

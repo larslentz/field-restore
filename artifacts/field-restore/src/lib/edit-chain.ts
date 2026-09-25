@@ -27,7 +27,7 @@ export const makeModule = (type: ModuleType, options?: { name?: string; params?:
     gain: { db: -2 }, fade: { in: 0, out: 0 }, eq: { mode: 'three-band', low: 0, mid: 0, high: -1, frequency: 55, q: 0.4, gain: 0 }, dc: { mode: 'Auto', amount: 0 },
     hum: { mode: 'Static', frequency: 60, reduction: 12 }, wind: { mode: 'Automatic', ...WIND_DEFAULTS }, noise: { strength: 50 },
     'click-pop': { mode: 'Automatic', strength: 75 },
-    'spectral-repair': { start: 0, end: .5, low: 1000, high: 5000, mode: 'Attenuate', strength: 75, context: .2, weighting: 50 },
+    'spectral-repair': { start: 0, end: .5, low: 1000, high: 5000, mode: 'Attenuate', strength: 75, context: .2, weighting: 50, fundamental: 100 },
     region: { start: 0, end: 0, amount: -8 }, ambient: { start: 0, end: 0, length: 1 },
   };
   return {
@@ -163,7 +163,7 @@ export function makeRestorationReport(input: RestorationReportInput) {
       'Adaptive Hum Removal attenuates detected sustained tones regardless of their source, including wanted held notes and calls; short or changing tones may not be detected.',
       'Automatic wind/rumble detection may miss interference or reduce wanted low sounds.',
       'Click & Pop Removal estimates isolated short discontinuities; it may miss longer defects or soften abrupt wanted impacts.',
-      'Spectral Repair estimates short time-frequency patches from nearby audio; it cannot recover sound fully masked by an unwanted event and may affect overlapping wanted sounds.',
+       'Spectral Repair estimates short time-frequency patches; pattern and harmonic suppression can also reduce wanted repeating sounds or harmonics. It cannot recover fully masked sound.',
       'Edits are conservative sample-domain approximations in this browser build.',
       'Original source remains immutable; export reflects automatic DC correction and enabled modules.',
     ],

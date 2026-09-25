@@ -166,6 +166,52 @@ test('spectral repair settings survive project and preset serialization', () => 
   assert.deepEqual(preset.modules, [module]);
 });
 
+test('new repair modes match memory, file-backed chunks, bypass and export', async () => {
+  const rate = 8000;
+  const frames = rate * 2;
+  const input = [0, 1].map((c) => Float32Array.from({ length: frames }, (_, i) => {
+    const t = i / rate;
+    return .09 * Math.sin(2 * Math.PI * 320 * t + c * .2) +
+      (t > .8 && t < 1.2 ? .23 * Math.sin(2 * Math.PI * 1000 * t) : 0);
+  }));
+  const file = encodeWav({ channels: input, sampleRate: rate, duration: 2, name: 'modes.wav' });
+  const metadata = await parseAudioMetadata(file);
+  for (const mode of ['Pattern Suppress', 'Harmonic Suppress']) {
+    const spectral = makeModule('spectral-repair', { params: {
+      start: .8, end: 1.2, low: 850, high: 1150, mode, fundamental: 1000,
+      context: .2, strength: 80, weighting: 50,
+    } });
+    const modules = makeProcessingChain([spectral]);
+    const expected = renderChain(input, modules, rate);
+    const patches = await prepareSpectralRepairs(file, metadata, modules);
+    const stream = createStreamingEditChain(modules, rate, frames, 0, [], undefined, undefined, undefined, patches);
+    const actual = input.map(() => new Float32Array(frames));
+    for (let frame = 0; frame < frames; frame += 311) {
+      stream.process(await readAudioFrames(file, metadata, frame, Math.min(311, frames - frame)), frame)
+        .forEach((channel, c) => actual[c].set(channel, frame));
+    }
+    actual.forEach((channel, c) => channel.forEach((sample, i) =>
+      assert.ok(Math.abs(sample - expected[c][i]) < 2e-5, `${mode}, channel ${c}, frame ${i}`)));
+    const chunks = [];
+    const exportChain = createStreamingEditChain(modules, rate, frames, 0, [], undefined, undefined, undefined, patches);
+    await writeFloat32WavChunks({ write: async (bytes) => { chunks.push(bytes); }, close: async () => {}, abort: async () => {} }, {
+      channels: 2, sampleRate: rate, frameCount: frames, chunkFrames: 719,
+      readFrames: (start, count) => readAudioFrames(file, metadata, start, count),
+      processFrames: (channels, start) => exportChain.process(channels, start),
+    });
+    parseWav(await new Blob(chunks).arrayBuffer()).channels.forEach((channel, c) => assert.deepEqual(channel, actual[c]));
+    spectral.enabled = false;
+    assert.deepEqual(await prepareSpectralRepairs(file, metadata, modules), {});
+    const bypassed = createStreamingEditChain(modules, rate, frames, 0);
+    const bypassedAudio = bypassed.process(await readAudioFrames(file, metadata, 0, frames), 0);
+    const bypassExpected = renderChain(input, modules, rate);
+    bypassedAudio.forEach((channel, c) => assert.deepEqual(channel, bypassExpected[c]));
+    const saved = new Map();
+    saveChainPreset({ getItem: (key) => saved.get(key) ?? null, setItem: (key, value) => saved.set(key, value) }, mode, [spectral]);
+    assert.equal(parseChainPresets(saved.get('field-restore-chain-presets-v1'))[0].modules[0].params.mode, mode);
+  }
+});
+
 test('a repair later in the source does not invalidate a shorter analysis range', async () => {
   const rate = 8000;
   const input = [Float32Array.from({ length: rate * 4 }, (_, i) => .1 * Math.sin(i * .3))];

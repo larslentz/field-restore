@@ -2728,11 +2728,21 @@ function ModuleCard({ module, humReadout, liveFrequencies, windActive, sampleRat
           {spectralBoundInput('low', 'Low', sampleRate / 2, 1)}
           {spectralBoundInput('high', 'High', sampleRate / 2, 1)}
         </div>
-        <label><span className="field-label">Repair mode</span><select className="select-field" value={String(p.mode)} onChange={(event) => updateParams(module.id, 'mode', event.target.value)} data-testid={`select-spectral-mode-${module.id}`}><option>Attenuate</option><option>Replace</option></select></label>
+         <label><span className="field-label">Repair mode</span><select className="select-field" value={String(p.mode)} onChange={(event) => updateParams(module.id, 'mode', event.target.value)} data-testid={`select-spectral-mode-${module.id}`}><option>Attenuate</option><option>Replace</option><option>Pattern Suppress</option><option>Harmonic Suppress</option></select></label>
+         <p className="spectral-module-note" data-testid={`spectral-mode-help-${module.id}`}>
+           {p.mode === 'Pattern Suppress' ? 'For intermittent repeating interference: estimates a typical level from nearby audio on both sides and reduces louder bursts in the selected band. If the pattern fills most of the context, it may remain.' :
+             p.mode === 'Harmonic Suppress' ? 'For a known repeating set of tones: reduces narrow multiples of the fundamental frequency within the selected band. Wanted harmonics at those frequencies may also be reduced.' :
+               p.mode === 'Replace' ? 'For a short localized defect: blends complex spectra from before and after the selection. Long or changing sounds may not match.' :
+                 'For a louder localized event: limits selected frequencies toward nearby audio while retaining the local phase.'}
+         </p>
+         {p.mode === 'Harmonic Suppress' && <label><span className="field-label">Harmonic fundamental (Hz)</span><input className="input-field font-mono-value" type="number" min={20} max={sampleRate / 2} step={1} value={Number(p.fundamental ?? 100)} onChange={(event) => {
+           const value = Number(event.target.value);
+           if (Number.isFinite(value) && value >= 20 && value <= sampleRate / 2) updateParams(module.id, 'fundamental', value);
+         }} data-testid={`input-spectral-fundamental-${module.id}`} /></label>}
         {numberInput('strength', 'Strength', 0, 100, 1, '%', { resetValue: 75, wheelStep: 5 })}
          {numberInput('context', 'Context', .02, 1, .01, ' s', { resetValue: .2 })}
-        {numberInput('weighting', 'Before / after weighting', 0, 100, 1, '%', { resetValue: 50, wheelStep: 5 })}
-         <p className="spectral-module-note">0% favors audio after; 100% favors audio before; 50% balances both. Compare with bypass before exporting.</p>
+         {p.mode !== 'Harmonic Suppress' && numberInput('weighting', 'Before / after weighting', 0, 100, 1, '%', { resetValue: 50, wheelStep: 5 })}
+          <p className="spectral-module-note">{p.mode === 'Harmonic Suppress' ? 'Context and before / after weighting do not affect this mode. Compare with bypass before exporting.' : '0% favors audio after; 100% favors audio before; 50% balances both. Compare with bypass before exporting.'}</p>
       </div>}
       {module.type === 'ambient' && <div className="grid grid-cols-3 gap-2">{numberInput('start', 'Start', 0, 60, .1, ' s')}{numberInput('length', 'Length', .1, 8, .1, ' s')}{<div className="text-[10px] leading-relaxed text-muted-foreground self-end">Blends nearby ambience conservatively.</div>}</div>}
       <div className="text-[10px] text-muted-foreground flex items-center gap-1"><Info size={11} /> Browser-safe approximation. Preview before archival export.</div>
