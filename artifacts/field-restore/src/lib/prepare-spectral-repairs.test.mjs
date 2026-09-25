@@ -9,6 +9,105 @@ import { writeFloat32WavChunks } from './large-wav.ts';
 import { projectFromSource } from './persistence.ts';
 import { parseChainPresets, saveChainPreset } from './chain-presets.ts';
 
+test('late repairs warm the prefix once and match in-memory edits after stateful upstream filters', async (t) => {
+  const rate = 8000;
+  const frames = rate * 60;
+  const input = [Float32Array.from({ length: frames }, (_, i) =>
+    .07 + .15 * Math.sin(i * .041) + (i > rate * 49 ? .08 * Math.sin(i * .87) : 0))];
+  const repairs = [50, 54].map((start) => makeModule('spectral-repair', { params: {
+    start, end: start + .18, low: 800, high: 1500, mode: 'Replace', strength: 72, context: .18, weighting: 50,
+  } }));
+  const modules = makeProcessingChain([
+    makeModule('eq', { params: { mode: 'low-shelf', frequency: 75, q: .5, gain: 3 } }),
+    repairs[0], makeModule('gain', { params: { db: -1 } }), repairs[1],
+  ]);
+  const expected = renderChain(input, modules, rate);
+  const source = encodeWav({ channels: input, sampleRate: rate, duration: 60, name: 'late.wav' });
+  const metadata = await parseAudioMetadata(source);
+  let bytesRead = 0;
+  // All WAV data reads pass through slice; count them without changing the source.
+  const measured = new Proxy(source, {
+    get(target, key) {
+      if (key === 'slice') return (start, end, type) => {
+        bytesRead += Math.max(0, Math.min(target.size, end ?? target.size) - (start ?? 0));
+        return target.slice(start, end, type);
+      };
+      const value = Reflect.get(target, key, target);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+  const began = performance.now();
+  const patches = await prepareSpectralRepairs(measured, metadata, modules);
+  const elapsed = performance.now() - began;
+  t.diagnostic(`60-second source, repairs at 50s and 54s: ${(bytesRead / source.size).toFixed(2)} source lengths read in ${elapsed.toFixed(0)} ms`);
+  assert.ok(bytesRead < source.size * 1.3,
+    `late preparation read ${(bytesRead / source.size).toFixed(2)} source lengths in ${elapsed.toFixed(0)} ms`);
+  const stream = createStreamingEditChain(modules, rate, frames, 0, [], undefined, undefined, undefined, patches);
+  for (let frame = 0; frame < frames; frame += 4093) {
+    const actual = stream.process(await readAudioFrames(source, metadata, frame, Math.min(4093, frames - frame)), frame)[0];
+    for (let i = 0; i < actual.length; i++) assert.ok(Math.abs(actual[i] - expected[0][frame + i]) < 2e-5,
+      `late parity at frame ${frame + i}: ${actual[i]} vs ${expected[0][frame + i]}`);
+  }
+  const seek = rate * 53;
+  const seekStream = createStreamingEditChain(modules, rate, frames, 0, [], undefined, undefined, undefined, patches);
+  for (let frame = 0; frame < seek; frame += 4093) {
+    seekStream.process(await readAudioFrames(source, metadata, frame, Math.min(4093, seek - frame)), frame);
+  }
+  const loop = seekStream.snapshot();
+  const selection = await readAudioFrames(source, metadata, seek, 2000);
+  const first = seekStream.process(selection, seek);
+  seekStream.restore(loop);
+  assert.deepEqual(seekStream.process(selection, seek), first, 'seek/loop replay preserves the prepared patch');
+  assert.ok(Number.isFinite(elapsed));
+});
+
+test('history-free edits start at the late selection without reading the prefix', async () => {
+  const rate = 8000;
+  const frames = rate * 90;
+  const input = [Float32Array.from({ length: frames }, (_, i) => .12 * Math.sin(i * .13))];
+  const repair = makeModule('spectral-repair', { params: {
+    start: 85, end: 85.15, low: 900, high: 1700, mode: 'Attenuate', strength: 65, context: .15,
+  } });
+  const modules = [makeModule('gain', { params: { db: -2 } }), repair];
+  const source = encodeWav({ channels: input, sampleRate: rate, duration: 90, name: 'late.wav' });
+  const metadata = await parseAudioMetadata(source);
+  let earliest = source.size;
+  const measured = new Proxy(source, {
+    get(target, key) {
+      if (key === 'slice') return (start, end, type) => {
+        earliest = Math.min(earliest, start);
+        return target.slice(start, end, type);
+      };
+      const value = Reflect.get(target, key, target);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+  const patches = await prepareSpectralRepairs(measured, metadata, modules);
+  assert.ok(earliest > source.size * .9, 'a history-free late repair should not decode the prefix');
+  const expected = renderChain(input, modules, rate);
+  const frame = rate * 85;
+  const actual = createStreamingEditChain(modules, rate, frames, frame, [], undefined, undefined, undefined, patches)
+    .process(await readAudioFrames(source, metadata, frame, 2000), frame)[0];
+  actual.forEach((sample, i) => assert.ok(Math.abs(sample - expected[0][frame + i]) < 2e-5));
+});
+
+test('repairs in reverse timeline order still honor module order', async () => {
+  const rate = 8000;
+  const frames = rate * 5;
+  const input = [Float32Array.from({ length: frames }, (_, i) => .09 + .16 * Math.sin(i * .08))];
+  const repair = (start) => makeModule('spectral-repair', { params: {
+    start, end: start + .2, low: 1000, high: 1800, mode: 'Replace', strength: 70, context: .1,
+  } });
+  const modules = makeProcessingChain([repair(3), makeModule('gain', { params: { db: -2 } }), repair(1)]);
+  const source = encodeWav({ channels: input, sampleRate: rate, duration: 5, name: 'reverse.wav' });
+  const metadata = await parseAudioMetadata(source);
+  const patches = await prepareSpectralRepairs(source, metadata, modules);
+  const actual = createStreamingEditChain(modules, rate, frames, 0, [], undefined, undefined, undefined, patches)
+    .process(await readAudioFrames(source, metadata, 0, frames), 0)[0];
+  const expected = renderChain(input, modules, rate)[0];
+  actual.forEach((sample, i) => assert.ok(Math.abs(sample - expected[i]) < 2e-5, `reverse parity at ${i}`));
+});
+
 test('bounded spectral preparation matches in-memory render through chunks, seeks and WAV export', async () => {
   const sampleRate = 8000;
   const frames = sampleRate * 4;
