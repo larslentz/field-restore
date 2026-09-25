@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent as ReactDragEvent, type FormEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import { createPortal } from 'react-dom';
-import { Activity, ArrowDown, ArrowUp, Check, ChevronDown, CircleHelp, Download, ExternalLink, FileAudio, FolderOpen, Gauge, GripVertical, Info, Keyboard, Layers3, LoaderCircle, Menu, PanelRightOpen, Pause, Play, Plus, Redo2, RotateCcw, Save, Settings, Square, Trash2, Undo2, Waves, X, ZoomIn, ZoomOut } from 'lucide-react';
+import { Activity, ArrowDown, ArrowUp, Check, ChevronDown, CircleHelp, Download, ExternalLink, FileAudio, FolderOpen, Gauge, GripVertical, Info, Keyboard, Layers3, LoaderCircle, Menu, PanelBottom, PanelLeft, PanelRightOpen, Pause, Play, Plus, Redo2, RotateCcw, Save, Settings, Square, Trash2, Undo2, Waves, X, ZoomIn, ZoomOut } from 'lucide-react';
 import { createDemoAudio, downloadBlob, encodeWav, parseWav, type AudioSource } from '@/lib/audio';
 import { decodeChannels, loadProject, projectFromSource, saveProject } from '@/lib/persistence';
 import { AUTOMATIC_DC_REMOVAL, humOpeningReadout, isFixedLowRumble, isLegacyWind, lowEndShelfEnabled, lowEndShelfFollowsWind, makeDefaultChain, makeLowRumbleRemoval, makeModule, makeProcessingChain, makeRestorationReport, MODULE_LABELS, toggleEditableModules, withFadeRange, withoutLegacyDcModules, type EditModule, type HumScanState } from '@/lib/edit-chain';
@@ -36,6 +36,7 @@ import type { LargeAnalysisResult } from '@/lib/large-analysis';
 import './index.css';
 
 type ViewTab = 'edit' | 'analyze' | 'project';
+type StatisticsOrientation = 'horizontal' | 'vertical';
 type MonitorMode = 'current' | 'original';
 type Marker = { id: string; time: number; label: string; color: string };
 type Region = { id: string; start: number; end: number; label: string };
@@ -133,6 +134,8 @@ function App() {
   const [markers, setMarkers] = useState<Marker[]>([]);
   const [regions, setRegions] = useState<Region[]>([]);
   const [activeTab, setActiveTab] = useState<ViewTab>('edit');
+  const [statisticsOrientation, setStatisticsOrientation] = useState<StatisticsOrientation>(() =>
+    localStorage.getItem('field-restore-statistics-orientation') === 'vertical' ? 'vertical' : 'horizontal');
   const [zoom, setZoom] = useState(1);
   const [playHead, setPlayHead] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -2421,7 +2424,7 @@ function App() {
              </div>
            )}
            <div className="workspace-grid">
-              <div className={`min-w-0 ${activeTab === 'edit' ? 'edit-workspace' : 'space-y-4'}`}>
+               <div className={`min-w-0 ${activeTab === 'edit' ? `edit-workspace stats-${statisticsOrientation}` : 'space-y-4'}`}>
               {activeTab === 'project' ? (
                  <ProjectPanel title={title} notes={notes} setTitle={setTitle} setNotes={setNotes} source={source} sourceChannelCount={sourceChannelCount} save={() => void save()} openSettings={(event) => openModal(event, 'settings')} />
               ) : activeTab === 'analyze' ? (
@@ -2511,9 +2514,20 @@ function App() {
                     </div>
                   </section>
                    <section className="panel signal-stats-bar" data-testid="panel-signal-statistics" data-request-id={analysisRequestId} data-result-id={analysisResultId}>
-                     <div className="signal-stats-heading">
+                      <div className="signal-stats-heading">
                        <div className="flex items-center gap-2"><Gauge size={15} color="hsl(var(--primary))" /><div className="section-title">Signal statistics</div></div>
-                       <div className="flex flex-wrap gap-1"><span className="chip" data-testid="label-statistics-source">{displayedSourceLabel}</span><span className="chip">estimate</span></div>
+                        <div className="signal-stats-tools">
+                          <span className="chip" data-testid="label-statistics-source">{displayedSourceLabel}</span>
+                          <button type="button" className="stats-orientation-button" aria-label={`Show signal statistics ${statisticsOrientation === 'horizontal' ? 'vertically' : 'horizontally'}`} title={`Show statistics ${statisticsOrientation === 'horizontal' ? 'vertically' : 'horizontally'}`} onClick={() => {
+                            const next = statisticsOrientation === 'horizontal' ? 'vertical' : 'horizontal';
+                            setStatisticsOrientation(next);
+                            localStorage.setItem('field-restore-statistics-orientation', next);
+                          }} data-testid="button-statistics-orientation">
+                            {statisticsOrientation === 'horizontal' ? <PanelLeft size={13} /> : <PanelBottom size={13} />}
+                            {statisticsOrientation === 'horizontal' ? 'Vertical' : 'Horizontal'}
+                          </button>
+                        </div>
+                        <span className="stats-narrow-hint">Vertical view is shown on wider screens</span>
                      </div>
                       <div className="signal-stats-group">
                         <div className="signal-stats-label">{hasSelection
@@ -2526,7 +2540,7 @@ function App() {
                           : statisticsPending ? <div className="signal-stats-pending">{statisticsUnavailableLabel}</div>
                             : <StatsGrid stats={hasSelection ? displayedSelectionStats : displayedStats} />}
                      </div>
-                      <div className="signal-stats-note"><Info size={12} />Local BS.1770-style estimates with 4× true-peak interpolation. Not certified meter readings.</div>
+                       <div className="signal-stats-note"><Info size={12} />Local BS.1770-style estimates with 4× true-peak interpolation. Not certified meter readings.</div>
                    </section>
                     <div className="edit-secondary scrollbar-thin" aria-label="Edit details" data-testid="edit-secondary">
                     {processingModules.some((module) => module.enabled && module.type === 'click-pop' && Number(module.params.strength) > 0) &&
