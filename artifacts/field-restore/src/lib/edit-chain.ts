@@ -15,7 +15,7 @@ export interface EditModule {
 }
 
 export const MODULE_LABELS: Record<ModuleType, string> = {
-  gain: 'Gain', fade: 'Fade', eq: 'EQ', dc: 'DC Offset', hum: 'Hum Removal', wind: 'Wind Removal', noise: 'Noise Reduction',
+  gain: 'Gain', fade: 'Fade In/Out', eq: 'EQ', dc: 'DC Offset', hum: 'Hum Removal', wind: 'Wind Removal', noise: 'Noise Reduction',
   'click-pop': 'Click & Pop Removal', 'spectral-repair': 'Spectral Repair', region: 'Region Attenuation', ambient: 'Ambient Patch',
 };
 
@@ -24,7 +24,7 @@ const DEFAULT_WIND_NAMES = new Set(['Wind / Rumble', 'Wind / Rumble Removal', MO
 let idCounter = 1;
 export const makeModule = (type: ModuleType, options?: { name?: string; params?: Record<string, number | string> }): EditModule => {
   const defaults: Record<ModuleType, Record<string, number | string>> = {
-    gain: { db: -2 }, fade: { in: 0, out: 0 }, eq: { mode: 'three-band', low: 0, mid: 0, high: -1, frequency: 55, q: 0.4, gain: 0 }, dc: { mode: 'Auto', amount: 0 },
+    gain: { db: -2 }, fade: { in: 7, out: 7, inEnabled: 1, outEnabled: 1 }, eq: { mode: 'three-band', low: 0, mid: 0, high: -1, frequency: 55, q: 0.4, gain: 0 }, dc: { mode: 'Auto', amount: 0 },
     hum: { mode: 'Static', frequency: 60, reduction: 12 }, wind: { mode: 'Automatic', ...WIND_DEFAULTS }, noise: { strength: 50 },
     'click-pop': { mode: 'Automatic', strength: 75 },
     'spectral-repair': { start: 0, end: .5, low: 1000, high: 5000, mode: 'Attenuate', strength: 75, context: .2, weighting: 50, fundamental: 100 },
@@ -47,20 +47,13 @@ export const makeLowRumbleRemoval = (): EditModule => {
 export const makeBringBackLowEnd = (): EditModule =>
   makeModule('eq', { name: 'Bring Back the Low End', params: { mode: 'low-shelf', frequency: 55, q: 0.4, gain: 2 } });
 
-export const makeFadeIn = (): EditModule =>
-  makeModule('fade', { name: 'Fade In', params: { in: 7, out: 0, direction: 'in' } });
-
-export const makeFadeOut = (): EditModule =>
-  makeModule('fade', { name: 'Fade Out', params: { in: 0, out: 7, direction: 'out' } });
-
 export const makeDefaultChain = (): EditModule[] => [
   makeModule('gain', { name: 'Gain', params: { db: 0 } }),
   makeLowRumbleRemoval(),
   makeModule('hum', { name: 'Hum Removal', params: { mode: 'Adaptive', frequency: 60, reduction: 12 } }),
   makeModule('wind'),
   makeBringBackLowEnd(),
-  makeFadeIn(),
-  makeFadeOut(),
+  makeModule('fade'),
   makeModule('gain', { name: 'Gain', params: { db: 0 } }),
 ];
 
@@ -114,8 +107,8 @@ export const withFadeRange = (modules: EditModule[], startFrame: number, endFram
 export function fadeGainAtFrame(params: EditModule['params'], frame: number, sampleRate: number, totalFrames: number): number {
   const start = Number(params.fadeStartFrame ?? 0);
   const end = Number(params.fadeEndFrame ?? totalFrames);
-  const fadeIn = params.direction === 'out' ? 0 : Math.floor(Number(params.in) * sampleRate);
-  const fadeOut = params.direction === 'in' ? 0 : Math.floor(Number(params.out) * sampleRate);
+  const fadeIn = Number(params.inEnabled) === 0 ? 0 : Math.floor(Number(params.in) * sampleRate);
+  const fadeOut = Number(params.outEnabled) === 0 ? 0 : Math.floor(Number(params.out) * sampleRate);
   let factor = 1;
   if (fadeIn > 0 && frame < start + fadeIn) factor *= Math.max(0, (frame - start) / fadeIn);
   if (fadeOut > 0 && frame > end - fadeOut) factor *= Math.max(0, (end - frame) / fadeOut);

@@ -47,6 +47,7 @@ Import WAV files, inspect and select waveform ranges, compare Original and Curre
 
 - Use Figtree for interface text and Space Mono for technical values.
 - Keep the product restrained, technical, local-first, and honest about browser DSP limitations.
+- Field Restore has not been released. Do not add migrations or compatibility safeguards for earlier local projects or presets unless explicitly requested.
 
 ## Gotchas
 

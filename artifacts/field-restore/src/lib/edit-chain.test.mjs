@@ -3,9 +3,8 @@ import test from 'node:test';
 import {
   makeBringBackLowEnd,
   makeDefaultChain,
-  makeFadeIn,
-  makeFadeOut,
   makeLowRumbleRemoval,
+  makeModule,
   makeProcessingChain,
   makeRestorationReport,
   renderChain,
@@ -55,12 +54,13 @@ test('new bring back the low end matches the default low-shelf preset with an in
   assert.notEqual(addedModule.id, presetModule.id);
 });
 
-test('default chain and add menu factories create independent, single-direction fades', () => {
+test('default chain and add menu create one fade with independent sides', () => {
   const defaults = makeDefaultChain().filter((module) => module.type === 'fade');
-  assert.deepEqual(defaults.map((module) => module.name), ['Fade In', 'Fade Out']);
-  assert.deepEqual(makeFadeIn().params, { in: 7, out: 0, direction: 'in' });
-  assert.deepEqual(makeFadeOut().params, { in: 0, out: 7, direction: 'out' });
-  assert.deepEqual(defaults.map((module) => module.params), [makeFadeIn().params, makeFadeOut().params]);
+  assert.deepEqual(defaults.map((module) => module.name), ['Fade In/Out']);
+  assert.deepEqual(defaults[0].params, { in: 7, out: 7, inEnabled: 1, outEnabled: 1 });
+  const added = makeModule('fade');
+  assert.deepEqual(added.params, defaults[0].params);
+  assert.notEqual(added.id, defaults[0].id);
 });
 
 test('legacy DC modules are absorbed into exactly one automatic baseline stage', () => {

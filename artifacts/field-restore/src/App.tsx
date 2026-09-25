@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { Activity, ArrowDown, ArrowUp, Check, ChevronDown, CircleHelp, Download, ExternalLink, FileAudio, FolderOpen, Gauge, GripVertical, Info, Keyboard, Layers3, LoaderCircle, Menu, PanelRightOpen, Pause, Play, Plus, Redo2, RotateCcw, Save, Settings, Square, Trash2, Undo2, Waves, X, ZoomIn, ZoomOut } from 'lucide-react';
 import { createDemoAudio, downloadBlob, encodeWav, parseWav, type AudioSource } from '@/lib/audio';
 import { decodeChannels, loadProject, projectFromSource, saveProject } from '@/lib/persistence';
-import { AUTOMATIC_DC_REMOVAL, humOpeningReadout, isFixedLowRumble, isLegacyWind, makeBringBackLowEnd, makeDefaultChain, makeFadeIn, makeFadeOut, makeLowRumbleRemoval, makeModule, makeProcessingChain, makeRestorationReport, MODULE_LABELS, toggleEditableModules, withFadeRange, withoutLegacyDcModules, type EditModule, type HumScanState } from '@/lib/edit-chain';
+import { AUTOMATIC_DC_REMOVAL, humOpeningReadout, isFixedLowRumble, isLegacyWind, makeBringBackLowEnd, makeDefaultChain, makeLowRumbleRemoval, makeModule, makeProcessingChain, makeRestorationReport, MODULE_LABELS, toggleEditableModules, withFadeRange, withoutLegacyDcModules, type EditModule, type HumScanState } from '@/lib/edit-chain';
 import { analyzeLoudness, type LoudnessStats } from '@/lib/loudness';
 import { createPlaybackRangePlan, playbackPositionAtElapsed } from '@/lib/playback-range';
 import type { SpectrogramData } from '@/lib/spectrogram';
@@ -49,9 +49,9 @@ type SpectrogramView = {
   error?: string;
 };
 
-const MODULE_TYPES = ['gain', 'fade-in', 'fade-out', 'low-rumble', 'hum', 'wind', 'noise', 'click-pop', 'spectral-repair', 'bring-back-low-end'] as const;
+const MODULE_TYPES = ['gain', 'fade', 'low-rumble', 'hum', 'wind', 'noise', 'click-pop', 'spectral-repair', 'bring-back-low-end'] as const;
 type AddModuleType = typeof MODULE_TYPES[number];
-const moduleOptionLabel = (type: AddModuleType) => type === 'low-rumble' ? 'Low Rumble Removal' : type === 'bring-back-low-end' ? 'Bring Back the Low End' : type === 'fade-in' ? 'Fade In' : type === 'fade-out' ? 'Fade Out' : MODULE_LABELS[type];
+const moduleOptionLabel = (type: AddModuleType) => type === 'low-rumble' ? 'Low Rumble Removal' : type === 'bring-back-low-end' ? 'Bring Back the Low End' : MODULE_LABELS[type];
 const SPECTROGRAM_LEFT = 48;
 const SPECTROGRAM_RIGHT = 72;
 const SPECTROGRAM_BOTTOM = 42;
@@ -99,14 +99,6 @@ function formatLevel(value: number, unit: 'dBTP' | 'LUFS' | 'LU') {
   return `${value > 0 ? '+' : ''}${value.toFixed(1)} ${unit}`;
 }
 
-function fadeControlDirection(module: EditModule): 'in' | 'out' | 'both' {
-  const p = module.params;
-  if (p.direction === 'in' || p.direction === 'out') return p.direction;
-  if (module.name === 'Fade In' && Number(p.out) === 0) return 'in';
-  if (module.name === 'Fade Out' && Number(p.in) === 0) return 'out';
-  return 'both';
-}
-
 function moduleSummary(module: EditModule, humReadout?: ReturnType<typeof humOpeningReadout>) {
   const p = module.params;
   return module.type === 'gain' ? `${p.db} dB`
@@ -116,8 +108,7 @@ function moduleSummary(module: EditModule, humReadout?: ReturnType<typeof humOpe
         : module.type === 'noise' ? `${p.mode === 'Sample' ? 'Noise-only sample' : 'Auto'} · ${p.strength ?? 50}% strength`
         : module.type === 'click-pop' ? `Automatic · ${p.strength ?? 50}% strength`
         : module.type === 'eq' && p.mode === 'low-shelf' ? `${p.gain} dB · ${p.frequency} Hz`
-          : module.type === 'fade' ? (fadeControlDirection(module) === 'in' ? `${p.in} s in`
-            : fadeControlDirection(module) === 'out' ? `${p.out} s out` : `${p.in} s in · ${p.out} s out`)
+          : module.type === 'fade' ? `${Number(p.inEnabled) === 0 ? 'In off' : `${p.in} s in`} · ${Number(p.outEnabled) === 0 ? 'Out off' : `${p.out} s out`}`
             : module.type;
 }
 
@@ -1410,7 +1401,7 @@ function App() {
       requestAnimationFrame(() => canvasRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }));
       return;
     }
-    const module = type === 'low-rumble' ? makeLowRumbleRemoval() : type === 'bring-back-low-end' ? makeBringBackLowEnd() : type === 'fade-in' ? makeFadeIn() : type === 'fade-out' ? makeFadeOut() : makeModule(type);
+    const module = type === 'low-rumble' ? makeLowRumbleRemoval() : type === 'bring-back-low-end' ? makeBringBackLowEnd() : makeModule(type);
     commitModules([...modules, module]);
     setModuleMenu(false);
   };
@@ -2667,7 +2658,6 @@ function HumHistoryView({ modules, segments, sampleRate, duration, onSeek }: {
 
 function ModuleCard({ module, humReadout, liveFrequencies, windActive, sampleRate, index, total, collapsed, updateModule, updateParams, captureNoiseSample, selectionLength, deleteModule, duplicateModule, moveModule }: { module: EditModule; humReadout?: ReturnType<typeof humOpeningReadout>; liveFrequencies?: number[]; windActive?: boolean | null; sampleRate: number; index: number; total: number; collapsed: boolean; updateModule: (id: string, patch: Partial<EditModule>) => void; updateParams: (id: string, key: string, value: number | string) => void; captureNoiseSample: (id: string) => Promise<void>; selectionLength: number; deleteModule: (id: string) => void; duplicateModule: (module: EditModule) => void; moveModule: (index: number, direction: -1 | 1) => void }) {
   const p = module.params;
-  const fadeDirection = fadeControlDirection(module);
   const numberInput = (key: string, label: string, min: number, max: number, step: number, suffix = '', options?: { resetValue?: number; wheelStep?: number }) => <RangeControl label={label} value={Number(p[key])} min={min} max={max} step={step} suffix={suffix} resetValue={options?.resetValue} wheelStep={options?.wheelStep} onChange={(value) => updateParams(module.id, key, value)} testId={`range-${module.type}-${key}`} />;
   const spectralBoundInput = (key: 'start' | 'end' | 'low' | 'high', label: string, max: number, step: number) => <label><span className="field-label">{label} {key === 'start' || key === 'end' ? '(s)' : '(Hz)'}</span><input key={`${module.id}-${key}-${p[key]}`} className="input-field font-mono-value" type="number" min={0} max={max} step={step} defaultValue={Number(p[key])} onBlur={(event) => {
     const value = Number(event.currentTarget.value);
@@ -2682,11 +2672,17 @@ function ModuleCard({ module, humReadout, liveFrequencies, windActive, sampleRat
   return <div className={`module-card ${module.enabled ? '' : 'bypassed'}`} data-testid={`card-module-${module.id}`}><div className="module-head"><span className="module-index">{String(index + 2).padStart(2, '0')}</span><span className="module-dot" /><button type="button" className="module-name text-left" onDoubleClick={() => { const name = window.prompt('Rename module', module.name); if (name?.trim()) updateModule(module.id, { name: name.trim() }); }} title="Double-click to rename" data-testid={`button-rename-${module.id}`}>{module.name}</button><span className="module-summary">{moduleSummary(module, humReadout)}</span><button type="button" className={`icon-btn !h-6 !min-w-6 ${module.enabled ? 'text-[hsl(var(--primary))]' : ''}`} onClick={() => updateModule(module.id, { enabled: !module.enabled })} aria-label={`${module.enabled ? 'Bypass' : 'Enable'} ${module.name}`} aria-pressed={module.enabled} data-testid={`button-bypass-${module.id}`}><Check size={13} /></button><button type="button" className="icon-btn !h-6 !min-w-6" onClick={() => moveModule(index, -1)} disabled={index === 0} aria-label="Move module up" data-testid={`button-up-${module.id}`}><ArrowUp size={12} /></button><button type="button" className="icon-btn !h-6 !min-w-6" onClick={() => moveModule(index, 1)} disabled={index === total - 1} aria-label="Move module down" data-testid={`button-down-${module.id}`}><ArrowDown size={12} /></button><button type="button" className="icon-btn !h-6 !min-w-6" onClick={() => duplicateModule(module)} aria-label={`Duplicate ${module.name}`} data-testid={`button-duplicate-${module.id}`}><Layers3 size={12} /></button><button type="button" className="icon-btn !h-6 !min-w-6" onClick={() => deleteModule(module.id)} aria-label={`Delete ${module.name}`} data-testid={`button-delete-${module.id}`}><Trash2 size={12} /></button></div>
     {!collapsed && <div className="module-controls">
       {module.type === 'gain' && numberInput('db', 'Gain', -30, 30, .1, ' dB', { resetValue: 0, wheelStep: 1 })}
-      {module.type === 'fade' && <div className={fadeDirection === 'both' ? 'grid grid-cols-2 gap-3' : 'space-y-2'}>
-        {fadeDirection !== 'out' && numberInput('in', 'Fade in', 0, 20, .1, ' s')}
-        {fadeDirection !== 'in' && numberInput('out', 'Fade out', 0, 20, .1, ' s')}
-        {fadeDirection === 'in' && <p className="text-[11px] leading-relaxed text-muted-foreground" data-testid="fade-in-usage-note">This creates a fade in from the Start marker position.</p>}
-        {fadeDirection === 'out' && <p className="text-[11px] leading-relaxed text-muted-foreground" data-testid="fade-out-usage-note">This creates a fade out that ends at the End marker position.</p>}
+      {module.type === 'fade' && <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div className="rounded-md border border-border p-3 space-y-3">
+          <label className="flex items-center gap-2 text-xs font-semibold"><input type="checkbox" checked={Number(p.inEnabled) !== 0} onChange={(event) => updateParams(module.id, 'inEnabled', event.target.checked ? 1 : 0)} data-testid="toggle-fade-in" /> Fade In enabled</label>
+          {numberInput('in', 'Fade in', 0, 20, .1, ' s')}
+          <p className="text-[11px] leading-relaxed text-muted-foreground" data-testid="fade-in-usage-note">This creates a fade in from the Start marker position.</p>
+        </div>
+        <div className="rounded-md border border-border p-3 space-y-3">
+          <label className="flex items-center gap-2 text-xs font-semibold"><input type="checkbox" checked={Number(p.outEnabled) !== 0} onChange={(event) => updateParams(module.id, 'outEnabled', event.target.checked ? 1 : 0)} data-testid="toggle-fade-out" /> Fade Out enabled</label>
+          {numberInput('out', 'Fade out', 0, 20, .1, ' s')}
+          <p className="text-[11px] leading-relaxed text-muted-foreground" data-testid="fade-out-usage-note">This creates a fade out that ends at the End marker position.</p>
+        </div>
       </div>}
       {module.type === 'eq' && p.mode === 'low-shelf' && <div className="space-y-2">
         <div className="grid grid-cols-3 gap-2">{numberInput('frequency', 'Low shelf', 20, 240, .5, ' Hz')}{numberInput('q', 'Q', .1, 2, .01)}{numberInput('gain', 'Gain', -12, 12, .1, ' dB')}</div>

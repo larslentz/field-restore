@@ -1,7 +1,6 @@
 - [Audio restoration integrity](audio-restoration-integrity.md) — keep processing local, non-destructive, stereo-linked by default, and explicit about DSP estimates.
 - [Spectrogram resolution budget](spectrogram-resolution-budget.md) — retain full-band detail for instant axis zoom while keeping processed previews within an interactive budget.
 - [TypeScript validation shim](typescript-validation-shim.md) — if the workspace typecheck script fails with a permission error, run the TypeScript compiler through Node.
-- [Legacy edit modules](legacy-edit-modules.md) — removing a processor from the add menu must not invalidate existing projects or saved presets.
 - [Wind edit migration](wind-edit-migration.md) — older Wind / Rumble edits intentionally convert to automatic, while the separate Low Rumble Removal item stays fixed.
 - [Spectrogram axis semantics](spectrogram-axis-semantics.md) — frequency repeats per channel while level is shared across both; drag labels by moving fixed-value ticks.
 - [FLAC source integrity](flac-source-integrity.md) — verify the final compressed frame and keep ordinary FLAC projects file-backed so saves remain reliable.

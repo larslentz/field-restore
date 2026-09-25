@@ -23,7 +23,7 @@ test('saving an edit chain makes it reloadable without changing the current proj
   await expect(humRow).not.toHaveClass(/bypassed/);
   await presetMenu.selectOption({ label: 'My quiet field chain' });
   await expect(humRow).toHaveClass(/bypassed/);
-  await expect(page.getByTestId('button-open-full-chain')).toContainText('7/8 editable enabled');
+  await expect(page.getByTestId('button-open-full-chain')).toContainText('6/7 editable enabled');
 });
 
 test('a noise sample captured on an imported file cannot be applied after switching to the demo', async ({ page }) => {

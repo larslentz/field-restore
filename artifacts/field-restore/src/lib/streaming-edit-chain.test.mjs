@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { analyzeInitialHum, humOpeningReadout, makeFadeIn, makeFadeOut, makeProcessingChain, renderChain, withFadeRange } from './edit-chain.ts';
+import { analyzeInitialHum, humOpeningReadout, makeModule, makeProcessingChain, renderChain, withFadeRange } from './edit-chain.ts';
 import { analyzeFileInitialHum, createStreamingEditChain } from './streaming-edit-chain.ts';
 import { humAnalysisWindowSize } from './hum-removal.ts';
 import { generateFloat32WavHeader, parseWavMetadata } from './large-wav.ts';
@@ -58,11 +58,8 @@ test('in-memory and file-backed routes produce equivalent restored audio', () =>
 test('in-memory and streamed fades follow edited Start and End markers, including across chunks', () => {
   const rate = 10;
   const frames = 30;
-  const fadeIn = makeFadeIn();
-  const fadeOut = makeFadeOut();
-  fadeIn.params.in = 1;
-  fadeOut.params.out = 1;
-  const anchored = withFadeRange([fadeIn, fadeOut], 5, 25);
+  const fade = makeModule('fade', { params: { in: 1, out: 1 } });
+  const anchored = withFadeRange([fade], 5, 25);
   const input = [Float32Array.from({ length: frames }, () => 1)];
   const memory = renderChain(input, anchored, rate)[0];
   const processor = createStreamingEditChain(anchored, rate, frames);
@@ -78,7 +75,20 @@ test('in-memory and streamed fades follow edited Start and End markers, includin
   const trimmedExport = createStreamingEditChain(anchored, rate, frames, 5)
     .process([input[0].slice(5, 25)], 5)[0];
   assert.deepEqual(trimmedExport, memory.slice(5, 25));
-  assert.equal(fadeIn.params.fadeStartFrame, undefined, 'render-only bounds must not modify saved edits');
+  assert.equal(fade.params.fadeStartFrame, undefined, 'render-only bounds must not modify saved edits');
+  const inOnly = { ...anchored[0], params: { ...anchored[0].params, outEnabled: 0 } };
+  const outOnly = { ...anchored[0], params: { ...anchored[0].params, inEnabled: 0 } };
+  assert.equal(renderChain(input, [inOnly], rate)[0][5], 0);
+  assert.equal(renderChain(input, [inOnly], rate)[0][25], 1);
+  assert.equal(renderChain(input, [outOnly], rate)[0][5], 1);
+  assert.equal(renderChain(input, [outOnly], rate)[0][25], 0);
+  for (const side of [inOnly, outOnly, { ...anchored[0], enabled: false }]) {
+    assert.deepEqual(createStreamingEditChain([side], rate, frames).process(input, 0), renderChain(input, [side], rate));
+  }
+  assert.deepEqual(renderChain(input, [{ ...anchored[0], enabled: false }], rate), input);
+  const shifted = withFadeRange([fade], 8, 22);
+  assert.equal(renderChain(input, shifted, rate)[0][8], 0);
+  assert.equal(renderChain(input, shifted, rate)[0][22], 0);
 });
 
 test('restoring warmed state makes repeated selection loops deterministic', () => {
