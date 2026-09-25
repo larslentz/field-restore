@@ -3,10 +3,10 @@ import { createPortal } from 'react-dom';
 import { Activity, ArrowDown, ArrowUp, Check, ChevronDown, CircleHelp, Download, ExternalLink, FileAudio, FolderOpen, Gauge, GripVertical, Info, Keyboard, Layers3, LoaderCircle, Menu, PanelRightOpen, Pause, Play, Plus, Redo2, RotateCcw, Save, Settings, Square, Trash2, Undo2, Waves, X, ZoomIn, ZoomOut } from 'lucide-react';
 import { createDemoAudio, downloadBlob, encodeWav, parseWav, type AudioSource } from '@/lib/audio';
 import { decodeChannels, loadProject, projectFromSource, saveProject } from '@/lib/persistence';
-import { AUTOMATIC_DC_REMOVAL, analyzeInitialHum, humOpeningReadout, isFixedLowRumble, isLegacyWind, makeBringBackLowEnd, makeDefaultChain, makeFadeIn, makeFadeOut, makeLowRumbleRemoval, makeModule, makeProcessingChain, makeRestorationReport, MODULE_LABELS, renderChain, toggleEditableModules, withFadeRange, withoutLegacyDcModules, type EditModule, type HumScanState } from '@/lib/edit-chain';
+import { AUTOMATIC_DC_REMOVAL, humOpeningReadout, isFixedLowRumble, isLegacyWind, makeBringBackLowEnd, makeDefaultChain, makeFadeIn, makeFadeOut, makeLowRumbleRemoval, makeModule, makeProcessingChain, makeRestorationReport, MODULE_LABELS, toggleEditableModules, withFadeRange, withoutLegacyDcModules, type EditModule, type HumScanState } from '@/lib/edit-chain';
 import { analyzeLoudness, type LoudnessStats } from '@/lib/loudness';
 import { createPlaybackRangePlan, playbackPositionAtElapsed } from '@/lib/playback-range';
-import { calculateSpectrogram, type SpectrogramData } from '@/lib/spectrogram';
+import type { SpectrogramData } from '@/lib/spectrogram';
 import { withLargeExportLeaveWarning, writeFloat32WavChunks } from '@/lib/large-wav';
 import { audioRange, fingerprintAudio, parseAudioMetadata, readAudioFrames, type AudioMetadata } from '@/lib/source-audio';
 import { decodeFlac } from '@/lib/flac';
@@ -22,6 +22,10 @@ import { anchoredFrequencyViewMin, anchoredLevelScaleCeiling, anchoredTimeViewSt
 import { SPECTROGRAM_DATA_HEIGHT, SPECTROGRAM_FFT_SIZE } from '@/lib/spectrogram-resolution';
 import { DEFAULT_SPECTROGRAM_PALETTE, SPECTROGRAM_PALETTES, spectrogramColor, spectrogramColorCss, spectrogramLegendStops, type SpectrogramPaletteId } from '@/lib/spectrogram-palette';
 import { startWorkerJob, type WorkerJob } from '@/lib/worker-analysis';
+import { startMemoryRender, type MemoryRenderJob } from '@/lib/worker-memory-render';
+import type { MemoryRenderResult } from '@/lib/memory-render';
+import type { MemoryLoudnessResult } from '@/lib/memory-loudness.worker';
+import { useMemorySpectrogram } from '@/lib/use-memory-spectrogram';
 import type { LargeAnalysisResult } from '@/lib/large-analysis';
 import './index.css';
 
@@ -30,16 +34,18 @@ type MonitorMode = 'current' | 'original';
 type Marker = { id: string; time: number; label: string; color: string };
 type Region = { id: string; start: number; end: number; label: string };
 type LargeSource = { file: File; metadata: AudioMetadata; fingerprint: string; fileHandle?: FileSystemFileHandle };
-type HumEvent = { moduleId: string; frame: number; frequencies: number[] };
+type HumEvent = MemoryRenderResult['events'][number];
 type LiveHum = { source: AudioSource; chain: EditModule[]; frequencies: Record<string, number[]> };
 type SpectrogramView = {
   left: SpectrogramData;
   right: SpectrogramData;
   startSeconds: number;
   durationSeconds: number;
+  loading?: boolean;
+  error?: string;
 };
 
-const MODULE_TYPES = ['gain', 'fade-in', 'fade-out', 'low-rumble', 'hum', 'wind', 'noise', 'click-pop', 'bring-back-low-end', 'ambient'] as const;
+const MODULE_TYPES = ['gain', 'fade-in', 'fade-out', 'low-rumble', 'hum', 'wind', 'noise', 'click-pop', 'bring-back-low-end', 'region', 'ambient'] as const;
 type AddModuleType = typeof MODULE_TYPES[number];
 const moduleOptionLabel = (type: AddModuleType) => type === 'low-rumble' ? 'Low Rumble Removal' : type === 'bring-back-low-end' ? 'Bring Back the Low End' : type === 'fade-in' ? 'Fade In' : type === 'fade-out' ? 'Fade Out' : MODULE_LABELS[type];
 const SPECTROGRAM_LEFT = 48;
@@ -54,6 +60,8 @@ const SPECTROGRAM_DISPLAY_HEIGHT = 110;
 const HUM_MARKER_COLORS = ['#d8ed55', '#75d7ef', '#ffaf78', '#d7a7fa'];
 const EMPTY_STATS: LoudnessStats = { truePeakDbtp: -Infinity, integratedLufs: -Infinity, loudnessRangeLu: 0, maxShortTermLufs: -Infinity };
 const EMPTY_SPECTROGRAM = { width: 480, height: 110, values: new Float32Array(480 * 110) };
+
+const EMPTY_CHANNELS: Float32Array[] = [];
 function formatTime(seconds: number, precise = false) {
   const safe = Math.max(0, seconds || 0);
   const minutes = Math.floor(safe / 60);
@@ -369,6 +377,16 @@ function App() {
   const spectrogramGenerationRef = useRef(0);
   const backgroundPausedRef = useRef(false);
   const exportJobRef = useRef<AbortController | null>(null);
+  const memoryJobRef = useRef<{ source: AudioSource; chain: EditModule[]; job: MemoryRenderJob } | null>(null);
+  const pendingMemoryPlaybackRef = useRef(false);
+  const monitorRef = useRef<MonitorMode>(monitor);
+  const [memoryResult, setMemoryResult] = useState<{ source: AudioSource; chain: EditModule[]; result: MemoryRenderResult } | null>(null);
+  const [memoryRenderError, setMemoryRenderError] = useState('');
+  const [memoryLoudness, setMemoryLoudness] = useState<{
+    source: AudioSource; channels: Float32Array[]; start: number; end: number;
+    selectionStart: number; selectionEnd: number; result: MemoryLoudnessResult;
+  } | null>(null);
+  const [memoryLoudnessError, setMemoryLoudnessError] = useState('');
   const scheduledNodesRef = useRef<AudioBufferSourceNode[]>([]);
   const playbackSessionRef = useRef(0);
   const restoreTrim = useCallback((range: [number, number] | undefined | null, length: number) => {
@@ -409,9 +427,24 @@ function App() {
   const [fileHumScan, setFileHumScan] = useState<{
     source: LargeSource; chain: EditModule[]; frequencies: number[][]; error: boolean;
   } | null>(null);
-  const memoryHumFrequencies = useMemo(() => largeSource || !source.channels.length ? [] :
-    analyzeInitialHum(source.channels, processingModules, source.sampleRate, source.channels[0].length),
-  [largeSource, source.channels, source.sampleRate, processingModules]);
+  useEffect(() => {
+    if (largeSource || !source.channels.length) return;
+    const job = startMemoryRender(source.channels, processingModules, source.sampleRate);
+    memoryJobRef.current = { source, chain: processingModules, job };
+    setMemoryRenderError('');
+    void job.promise.then((result) => {
+      setMemoryResult({ source, chain: processingModules, result });
+    }).catch((caught: unknown) => {
+      if (caught instanceof Error && caught.name !== 'AbortError') setMemoryRenderError(caught.message);
+    });
+    return () => {
+      job.cancel();
+      if (memoryJobRef.current?.job === job) memoryJobRef.current = null;
+    };
+  }, [largeSource, source, processingModules]);
+  const memoryRender = memoryResult?.source === source && memoryResult.chain === processingModules && !largeSource
+    ? memoryResult.result : null;
+  const memoryHumFrequencies = memoryRender?.frequencies ?? EMPTY_FREQUENCIES;
   useEffect(() => {
     if (!largeSource || !processingModules.some((module) =>
       module.enabled && module.type === 'hum' && module.params.mode !== 'Static' && Number(module.params.reduction) > 0)) return;
@@ -430,32 +463,23 @@ function App() {
     const hasSource = largeSource || source.channels.length > 0;
     const enoughFrames = hasSource && humPrefixFrames(source.sampleRate,
       largeSource?.metadata.frameCount ?? source.channels[0]?.length ?? 0) === 2 * humAnalysisWindowSize(source.sampleRate);
-    const scanCurrent = !largeSource || (fileHumScan?.source === largeSource && fileHumScan.chain === processingModules);
+    const scanCurrent = largeSource
+      ? fileHumScan?.source === largeSource && fileHumScan.chain === processingModules
+      : !!memoryRender;
     const state: HumScanState = !hasSource ? 'unavailable' : !enoughFrames ? 'too-short'
-      : !scanCurrent ? 'loading' : fileHumScan?.error && largeSource ? 'error' : 'complete';
+      : memoryRenderError && !largeSource ? 'error' : !scanCurrent ? 'loading' : fileHumScan?.error && largeSource ? 'error' : 'complete';
     return humOpeningReadout(module, state, largeSource ? (scanCurrent ? fileHumScan?.frequencies[index] : undefined) : memoryHumFrequencies[index]);
   };
   const liveHumFrequencies = isPlaying && monitor === 'current' &&
     liveHum?.source === source && liveHum.chain === processingModules ? liveHum.frequencies : null;
-  const memoryRender = useMemo(() => {
-    const events: HumEvent[] = [];
-    const windEvents: Array<{ moduleId: string; frame: number; active: boolean }> = [];
-    const channels = largeSource ? [] : renderChain(source.channels, processingModules, source.sampleRate, {},
-      memoryHumFrequencies, (moduleId, frame, frequencies) => events.push({ moduleId, frame, frequencies }),
-      (moduleId, frame, active) => windEvents.push({ moduleId, frame, active }));
-    events.sort((a, b) => a.frame - b.frame);
-    windEvents.sort((a, b) => a.frame - b.frame);
-    return { channels, events, windEvents };
-  }, [largeSource, source.channels, source.sampleRate, processingModules, memoryHumFrequencies]);
-  const currentChannels = memoryRender.channels;
+  const currentChannels = memoryRender?.channels ?? EMPTY_CHANNELS;
   const windActivityFor = (moduleId: string) => {
     if (!isPlaying || monitor !== 'current') return null;
     const events = largeSource
       ? (liveWind?.source === source && liveWind.chain === processingModules ? liveWind.events : [])
-      : memoryRender.windEvents;
+      : memoryRender?.windEvents ?? [];
     return [...events].reverse().find((entry) => entry.moduleId === moduleId && entry.frame <= playHead * source.sampleRate)?.active ?? false;
   };
-  const currentSource = useMemo<AudioSource>(() => ({ ...source, channels: currentChannels }), [source, currentChannels]);
   const duration = source.duration;
   const trimStart = trim?.[0] ?? 0;
   const trimEnd = trim?.[1] ?? duration;
@@ -473,6 +497,27 @@ function App() {
     () => visibleHumHistory(historySegments, source.sampleRate, viewStart, viewDuration),
     [historySegments, source.sampleRate, viewStart, viewDuration],
   );
+  useEffect(() => {
+    if (largeSource || !memoryRender) return;
+    // Debounce selection drags to avoid copying the same recording into many superseded workers.
+    let worker: Worker | null = null;
+    const timer = window.setTimeout(() => {
+      worker = new Worker(new URL('./lib/memory-loudness.worker.ts', import.meta.url), { type: 'module' });
+      worker.onmessage = (event: MessageEvent<{ type: 'result'; result: MemoryLoudnessResult } | { type: 'error'; message: string }>) => {
+        if (event.data.type === 'result') {
+          setMemoryLoudness({ source, channels: currentChannels, start: committedTrimStart, end: committedTrimEnd,
+            selectionStart, selectionEnd, result: event.data.result });
+          setMemoryLoudnessError('');
+        } else setMemoryLoudnessError(event.data.message);
+        worker?.terminate();
+      };
+      worker.onerror = (event) => { setMemoryLoudnessError(event.message || 'Loudness analysis failed.'); worker?.terminate(); };
+      worker.postMessage({ original: source.channels, current: currentChannels, sampleRate: source.sampleRate,
+        kept: [committedTrimStart * source.sampleRate, committedTrimEnd * source.sampleRate],
+        selection: hasSelection ? [selectionStart * source.sampleRate, selectionEnd * source.sampleRate] : null });
+    }, 100);
+    return () => { window.clearTimeout(timer); worker?.terminate(); };
+  }, [largeSource, memoryRender, source, currentChannels, committedTrimStart, committedTrimEnd, selectionStart, selectionEnd, hasSelection]);
   const spectrogramFloorDb = spectrogramCeilingDb - spectrogramLevelSpanDb;
   const [memorySpectrogramView, setMemorySpectrogramView] = useState(() => ({
     startSeconds: viewStart,
@@ -488,31 +533,18 @@ function App() {
     }, 100);
     return () => window.clearTimeout(timer);
   }, [viewDuration, viewStart]);
-  const memorySpectrograms = useMemo(
-    () => ({
-      left: largeSource || !currentChannels[0] ? EMPTY_SPECTROGRAM : calculateSpectrogram([currentChannels[0]], source.sampleRate, memorySpectrogramView.startSeconds, memorySpectrogramView.durationSeconds, 480, SPECTROGRAM_DATA_HEIGHT, 0, source.sampleRate / 2, SPECTROGRAM_DATA_FLOOR_DB, SPECTROGRAM_DATA_CEILING_DB, SPECTROGRAM_FFT_SIZE),
-      right: largeSource || !currentChannels[0] ? EMPTY_SPECTROGRAM : calculateSpectrogram([currentChannels[1] ?? currentChannels[0]], source.sampleRate, memorySpectrogramView.startSeconds, memorySpectrogramView.durationSeconds, 480, SPECTROGRAM_DATA_HEIGHT, 0, source.sampleRate / 2, SPECTROGRAM_DATA_FLOOR_DB, SPECTROGRAM_DATA_CEILING_DB, SPECTROGRAM_FFT_SIZE),
-      startSeconds: memorySpectrogramView.startSeconds,
-      durationSeconds: memorySpectrogramView.durationSeconds,
-    }),
-    [currentChannels, largeSource, memorySpectrogramView, source.sampleRate],
-  );
-  const memoryOriginalSpectrograms = useMemo(
-    () => ({
-      left: largeSource || !source.channels[0] ? EMPTY_SPECTROGRAM : calculateSpectrogram([source.channels[0]], source.sampleRate, memorySpectrogramView.startSeconds, memorySpectrogramView.durationSeconds, 480, SPECTROGRAM_DATA_HEIGHT, 0, source.sampleRate / 2, SPECTROGRAM_DATA_FLOOR_DB, SPECTROGRAM_DATA_CEILING_DB, SPECTROGRAM_FFT_SIZE),
-      right: largeSource || !source.channels[0] ? EMPTY_SPECTROGRAM : calculateSpectrogram([source.channels[1] ?? source.channels[0]], source.sampleRate, memorySpectrogramView.startSeconds, memorySpectrogramView.durationSeconds, 480, SPECTROGRAM_DATA_HEIGHT, 0, source.sampleRate / 2, SPECTROGRAM_DATA_FLOOR_DB, SPECTROGRAM_DATA_CEILING_DB, SPECTROGRAM_FFT_SIZE),
-      startSeconds: memorySpectrogramView.startSeconds,
-      durationSeconds: memorySpectrogramView.durationSeconds,
-    }),
-    [largeSource, memorySpectrogramView, source.channels, source.sampleRate],
-  );
+  const memorySpectrograms = useMemorySpectrogram(largeSource ? EMPTY_CHANNELS : currentChannels, source.sampleRate, memorySpectrogramView);
+  const memoryOriginalSpectrograms = useMemorySpectrogram(largeSource ? EMPTY_CHANNELS : source.channels, source.sampleRate, memorySpectrogramView);
   const spectrograms = spectrogramSource === 'original'
     ? (largeSource ? largeOriginalSpectrograms : memoryOriginalSpectrograms)
     : (largeSource ? largeSpectrograms : memorySpectrograms);
-  const memoryOriginalStats = useMemo(() => largeSource ? EMPTY_STATS : analyzeLoudness(source.channels, source.sampleRate), [largeSource, source.channels, source.sampleRate]);
-  const memoryCurrentStats = useMemo(() => largeSource ? EMPTY_STATS : analyzeLoudness(currentChannels, source.sampleRate, committedTrimStart * source.sampleRate, committedTrimEnd * source.sampleRate), [committedTrimEnd, committedTrimStart, currentChannels, largeSource, source.sampleRate]);
-  const memorySelectionOriginalStats = useMemo(() => largeSource || !hasSelection ? EMPTY_STATS : analyzeLoudness(source.channels, source.sampleRate, selectionStart * source.sampleRate, selectionEnd * source.sampleRate), [hasSelection, largeSource, source.channels, selectionStart, selectionEnd, source.sampleRate]);
-  const memorySelectionCurrentStats = useMemo(() => largeSource || !hasSelection || Math.min(selectionEnd, committedTrimEnd) <= Math.max(selectionStart, committedTrimStart) ? EMPTY_STATS : analyzeLoudness(currentChannels, source.sampleRate, Math.max(selectionStart, committedTrimStart) * source.sampleRate, Math.min(selectionEnd, committedTrimEnd) * source.sampleRate), [committedTrimEnd, committedTrimStart, currentChannels, hasSelection, largeSource, selectionStart, selectionEnd, source.sampleRate]);
+  const currentMemoryLoudness = memoryLoudness?.source === source && memoryLoudness.channels === currentChannels &&
+    memoryLoudness.start === committedTrimStart && memoryLoudness.end === committedTrimEnd &&
+    memoryLoudness.selectionStart === selectionStart && memoryLoudness.selectionEnd === selectionEnd ? memoryLoudness.result : null;
+  const memoryOriginalStats = currentMemoryLoudness?.original ?? EMPTY_STATS;
+  const memoryCurrentStats = currentMemoryLoudness?.current ?? EMPTY_STATS;
+  const memorySelectionOriginalStats = currentMemoryLoudness?.selectionOriginal ?? EMPTY_STATS;
+  const memorySelectionCurrentStats = currentMemoryLoudness?.selectionCurrent ?? EMPTY_STATS;
   const originalStats = largeSource ? largeOriginalStats : memoryOriginalStats;
   const currentStats = largeSource ? largeCurrentStats : memoryCurrentStats;
   const selectionOriginalStats = largeSource ? largeSelectionOriginalStats : memorySelectionOriginalStats;
@@ -520,8 +552,11 @@ function App() {
   const displayedStats = spectrogramSource === 'original' ? originalStats : currentStats;
   const displayedSelectionStats = spectrogramSource === 'original' ? selectionOriginalStats : selectionCurrentStats;
   const displayedSourceLabel = spectrogramSource === 'original' ? 'Original' : 'Edited';
-  const statisticsPending = Boolean(largeSource && analysisRequestId !== analysisResultId);
-  const statisticsUnavailableLabel = analysisStatus ? 'Calculating statistics…' : 'Statistics unavailable';
+  const statisticsPending = Boolean(largeSource && analysisRequestId !== analysisResultId) ||
+    Boolean(!largeSource && !currentMemoryLoudness);
+  const statisticsUnavailableLabel = !largeSource && !currentMemoryLoudness
+    ? memoryRenderError || memoryLoudnessError ? `Statistics unavailable: ${memoryRenderError || memoryLoudnessError}` : 'Calculating statistics…'
+    : analysisStatus ? 'Calculating statistics…' : 'Statistics unavailable';
 
   const stageSavedProject = useCallback((record: ProjectRecord) => {
     setRestoredProject(true);
@@ -847,6 +882,7 @@ function App() {
 
   const stopPlayback = useCallback(() => {
     playbackSessionRef.current += 1;
+    pendingMemoryPlaybackRef.current = false;
     setLiveHum(null);
     flushHumHistory();
     scheduledNodesRef.current.forEach((node) => {
@@ -875,6 +911,8 @@ function App() {
   };
 
   const startPlayback = useCallback((channels: Float32Array[], startPosition: number) => {
+    // Any new source, including Original A/B, supersedes a queued edited Play.
+    pendingMemoryPlaybackRef.current = false;
     const AudioContextClass = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
     if (!AudioContextClass) { setError('This browser does not expose Web Audio playback.'); return; }
     const context = audioContextRef.current ?? new AudioContextClass();
@@ -930,7 +968,7 @@ function App() {
           if (module.enabled && module.type === 'hum' && module.params.mode !== 'Static' && Number(module.params.reduction) > 0)
             frequencies[module.id] = memoryHumFrequencies[index] ?? [];
         });
-        for (const event of memoryRender.events) {
+        for (const event of memoryRender?.events ?? []) {
           if (event.frame > frame) break;
           frequencies[event.moduleId] = event.frequencies;
         }
@@ -943,7 +981,7 @@ function App() {
       animationRef.current = requestAnimationFrame(tick);
     };
     animationRef.current = requestAnimationFrame(tick);
-  }, [duration, flushHumHistory, loop, memoryHumFrequencies, memoryRender.events, monitor, processingModules, rate, recordHeardHum, source]);
+  }, [duration, flushHumHistory, loop, memoryHumFrequencies, memoryRender, monitor, processingModules, rate, recordHeardHum, source]);
 
   const startLargePlayback = useCallback(async (startPosition: number) => {
     if (!largeSource) return;
@@ -1128,9 +1166,30 @@ function App() {
   const play = useCallback(() => {
     if (isPlaying) { stopPlayback(); return; }
     if (largeSource) { void startLargePlayback(playHeadRef.current); return; }
+    if (monitor === 'current' && !memoryRender) {
+      if (pendingMemoryPlaybackRef.current) { stopPlayback(); return; }
+      const pending = memoryJobRef.current;
+      if (!pending || pending.source !== source || pending.chain !== processingModules) {
+        setError(memoryRenderError ? `Unable to render edited audio: ${memoryRenderError}` : 'Edited audio is not ready. Please try again.');
+        return;
+      }
+      pendingMemoryPlaybackRef.current = true;
+      const session = playbackSessionRef.current;
+      void pending.job.promise.then((result) => {
+        if (!pendingMemoryPlaybackRef.current || monitorRef.current !== 'current' ||
+          playbackSessionRef.current !== session || memoryJobRef.current !== pending) return;
+        pendingMemoryPlaybackRef.current = false;
+        startPlayback(result.channels, playHeadRef.current);
+      }).catch((caught: unknown) => {
+        if (playbackSessionRef.current !== session) return;
+        pendingMemoryPlaybackRef.current = false;
+        if (caught instanceof Error && caught.name !== 'AbortError') setError(`Unable to render edited audio: ${caught.message}`);
+      });
+      return;
+    }
     const channels = monitor === 'original' ? source.channels : currentChannels;
     startPlayback(channels, playHeadRef.current);
-  }, [currentChannels, isPlaying, largeSource, monitor, source.channels, startLargePlayback, startPlayback, stopPlayback]);
+  }, [currentChannels, isPlaying, largeSource, memoryRender, memoryRenderError, monitor, processingModules, source, startLargePlayback, startPlayback, stopPlayback]);
 
   const seekTo = useCallback((time: number) => {
     const position = Math.max(0, Math.min(duration, time));
@@ -1138,17 +1197,20 @@ function App() {
     setPlayHead(position);
     if (isPlaying) {
       if (largeSource) { void startLargePlayback(position); return; }
+      if (monitor === 'current' && !memoryRender) { stopPlayback(); return; }
       const channels = monitor === 'original' ? source.channels : currentChannels;
       startPlayback(channels, position);
     }
-  }, [currentChannels, duration, isPlaying, largeSource, monitor, source.channels, startLargePlayback, startPlayback]);
+  }, [currentChannels, duration, isPlaying, largeSource, memoryRender, monitor, source.channels, startLargePlayback, startPlayback, stopPlayback]);
 
+  const playbackChannels = monitor === 'original' ? source.channels : currentChannels;
+  const streamingPlaybackChain = largeSource ? processingModules : null;
   useEffect(() => {
     if (!isPlaying) return;
     if (largeSource) { void startLargePlayback(playHeadRef.current); return; }
-    const channels = monitor === 'original' ? source.channels : currentChannels;
-    startPlayback(channels, playHeadRef.current);
-  }, [currentChannels, largeSource, loop, monitor, processingModules, rate, source]);
+    if (!playbackChannels.length) { stopPlayback(); return; }
+    startPlayback(playbackChannels, playHeadRef.current);
+  }, [playbackChannels, largeSource, loop, monitor, rate, source, streamingPlaybackChain]);
 
   useEffect(() => () => { stopPlayback(); audioContextRef.current?.close(); }, [stopPlayback]);
 
@@ -1496,9 +1558,31 @@ function App() {
         if (exportJobRef.current === controller) exportJobRef.current = null;
       }
     } else {
+      let rendered = memoryRender;
+      if (!rendered) {
+        const pending = memoryJobRef.current;
+        if (!pending || pending.source !== source || pending.chain !== processingModules) {
+          setError(memoryRenderError ? `Unable to render edited audio: ${memoryRenderError}` : 'Edited audio is not ready for export. Please try again.');
+          return;
+        }
+        setOperationStatus('Preparing edited audio');
+        try {
+          rendered = await pending.job.promise;
+        } catch (caught) {
+          setOperationStatus('');
+          setError(caught instanceof Error ? `Unable to render edited audio: ${caught.message}` : 'Unable to render edited audio.');
+          return;
+        }
+        // Never export a result that was superseded while the user waited.
+        if (memoryJobRef.current !== pending) {
+          setOperationStatus('');
+          setError('The edits changed while preparing the export. Please export again.');
+          return;
+        }
+      }
       const firstFrame = Math.floor(trimStart * source.sampleRate);
       const lastFrame = Math.min(source.channels[0]?.length ?? 0, Math.ceil(trimEnd * source.sampleRate));
-      downloadBlob(encodeWav({ ...currentSource, channels: currentChannels.map((channel) => channel.subarray(firstFrame, lastFrame)) }), `${safeName || 'field-restore'}-rx.wav`);
+      downloadBlob(encodeWav({ ...source, channels: rendered.channels.map((channel) => channel.subarray(firstFrame, lastFrame)) }), `${safeName || 'field-restore'}-rx.wav`);
     }
     const report = makeRestorationReport({
       source: source.name,
@@ -2118,6 +2202,9 @@ function App() {
                           })}
                         </div>}
                       </div>
+                      {!largeSource && (spectrograms.error
+                        ? <p role="alert" className="text-[11px] text-red-700 mt-2">Spectrogram unavailable: {spectrograms.error}</p>
+                        : spectrograms.loading && <p role="status" className="text-[11px] text-muted-foreground mt-2">Preparing spectrogram…</p>)}
                       <div className="trim-summary" data-testid="trim-summary">
                         <span><strong>Edited range</strong> {formatTime(trimStart, true)} – {formatTime(trimEnd, true)} <span className="text-muted-foreground">({formatTime(trimEnd - trimStart, true)} kept)</span></span>
                         <span className="text-muted-foreground">Drag START and END on the edited spectrogram. Original stays untouched.</span>
@@ -2159,6 +2246,10 @@ function App() {
                    </section>
                   <section className="transport" aria-label="Audio transport">
                     <button type="button" className="icon-btn !bg-[#d8ed55] !text-[#18231f] !rounded-full" onClick={play} aria-label={isPlaying ? 'Pause playback' : 'Play playback'} data-testid="button-play">{isPlaying ? <Pause size={16} fill="currentColor" /> : <Play size={16} fill="currentColor" />}</button>
+                    {!largeSource && monitor === 'current' && !memoryRender &&
+                      <span role="status" className="text-[11px] text-muted-foreground" data-testid="memory-render-status">
+                        {memoryRenderError ? 'Edited audio could not be rendered' : 'Preparing edited audio…'}
+                      </span>}
                     <button type="button" className="icon-btn" onClick={() => { stopPlayback(); setPlayHead(0); }} aria-label="Stop and return to start" data-testid="button-stop"><Square size={14} fill="currentColor" /></button>
                     <div className="time-readout" data-testid="text-playhead">{formatTime(playHead)} <span className="font-sans text-[10px] opacity-55">/ {formatTime(duration)}</span></div>
                     <div className="h-5 w-px bg-white/15 mx-1" />
@@ -2173,7 +2264,12 @@ function App() {
                       </select>
                       <span className="h-5 w-px bg-white/15 mx-1" />
                       <span className="text-[10px] opacity-60">MONITOR</span>
-                      <select className="transport-select border border-white/15 rounded px-2 py-1 text-[11px]" value={monitor} onChange={(event) => setMonitor(event.target.value as MonitorMode)} aria-label="Monitor source" data-testid="select-monitor"><option value="current">Current</option><option value="original">Original A/B</option></select>
+                      <select className="transport-select border border-white/15 rounded px-2 py-1 text-[11px]" value={monitor} onChange={(event) => {
+                        const next = event.target.value as MonitorMode;
+                        monitorRef.current = next;
+                        pendingMemoryPlaybackRef.current = false;
+                        setMonitor(next);
+                      }} aria-label="Monitor source" data-testid="select-monitor"><option value="current">Current</option><option value="original">Original A/B</option></select>
                       <select className="transport-select border border-white/15 rounded px-2 py-1 text-[11px]" value={rate} onChange={(event) => setRate(Number(event.target.value))} aria-label="Playback rate" data-testid="select-playback-rate"><option value="0.5">0.5×</option><option value="1">1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option></select>
                     </div>
                   </section>
@@ -2508,3 +2604,5 @@ function SettingsModal({ onClose, spectrogramPalette, onSpectrogramPaletteChange
 }
 
 export default App;
+
+const EMPTY_FREQUENCIES: number[][] = [];

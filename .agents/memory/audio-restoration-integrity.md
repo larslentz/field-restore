@@ -39,6 +39,12 @@ For automatic hum removal, a bounded opening scan may seed *confirmed frequencie
 
 **How to apply:** Run the opening scan through preceding edits, then start fresh filter histories for actual rendering and carry the same frequency decision through seek, loop, analysis, and export routes.
 
+When dense adaptive tone cleanup becomes slow, move the canonical processing off the UI thread rather than capping confirmed tones or replacing its filter decisions with a faster approximation. Keep the original source available for A/B playback, and do not expose a stale render after edits change.
+
+**Why:** Hundreds of simultaneous confirmed tones can take seconds to render a long recording; dropping tones or using separate render logic for playback and export would violate the user's full-coverage preference and make comparisons unreliable.
+
+**How to apply:** Ensure async results belong to the active source and edit chain, and make edited playback and export wait for the same completed processing result.
+
 Live hum readouts must follow the audible playhead, not the detector's render progress. File-backed playback buffers ahead, so a newly rendered decision is not yet what the listener hears.
 
 **Why:** Showing a future filter choice while older audio is playing misrepresents the current restoration; an opening scan is also not a whole-recording measurement.
