@@ -49,7 +49,7 @@ type SpectrogramView = {
   error?: string;
 };
 
-const MODULE_TYPES = ['gain', 'fade-in', 'fade-out', 'low-rumble', 'hum', 'wind', 'noise', 'click-pop', 'spectral-repair', 'bring-back-low-end', 'region', 'ambient'] as const;
+const MODULE_TYPES = ['gain', 'fade-in', 'fade-out', 'low-rumble', 'hum', 'wind', 'noise', 'click-pop', 'spectral-repair', 'bring-back-low-end'] as const;
 type AddModuleType = typeof MODULE_TYPES[number];
 const moduleOptionLabel = (type: AddModuleType) => type === 'low-rumble' ? 'Low Rumble Removal' : type === 'bring-back-low-end' ? 'Bring Back the Low End' : type === 'fade-in' ? 'Fade In' : type === 'fade-out' ? 'Fade Out' : MODULE_LABELS[type];
 const SPECTROGRAM_LEFT = 48;
