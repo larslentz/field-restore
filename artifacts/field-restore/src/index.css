@@ -183,6 +183,7 @@
 .topbar-processing .topbar-recording .chip, .topbar-processing .topbar-recording .dc-status { display: none; }
 .main-content { min-height: 0; flex: 1; overflow: auto; padding: 18px 24px 26px; }
 .main-content-edit { padding: 8px 18px 10px; }
+.transport-dock { flex: 0 0 auto; min-width: 0; max-height: 45dvh; overflow-y: auto; padding: 0 18px max(10px, env(safe-area-inset-bottom)); background: hsl(var(--background)); }
 .work-banner { min-width: 0; flex: 1 1 400px; height: 42px; padding: 4px 8px; display: flex; align-items: center; gap: 8px; color: #f2f4e8; background: #263746; border: 2px solid #b7dd2f; border-radius: 6px; box-shadow: 0 2px 10px rgba(24,35,31,.14); }
 .work-banner-spinner { flex: 0 0 auto; color: #d8ed55; animation: work-spin 1.4s linear infinite; }
 .work-banner-spinner.paused { animation-play-state: paused; }
@@ -463,6 +464,7 @@
 @media (max-width: 560px) {
   .spectrogram-source-label.with-hum-history { display: none; }
   .main-content { padding: 10px; }
+  .transport-dock { padding: 0 10px max(10px, env(safe-area-inset-bottom)); }
   .topbar { height: 52px; flex-basis: 52px; }
   .topbar-processing .topbar-recording-copy, .topbar-processing .topbar-actions { display: none; }
   .topbar-processing .topbar-recording { flex: 0 0 auto; }

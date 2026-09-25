@@ -2524,35 +2524,6 @@ function App() {
                      </div>
                       <div className="signal-stats-note"><Info size={12} />Local BS.1770-style estimates with 4× true-peak interpolation. Not certified meter readings.</div>
                    </section>
-                  <section className="transport" aria-label="Audio transport">
-                    <button type="button" className="icon-btn !bg-[#d8ed55] !text-[#18231f] !rounded-full" onClick={play} aria-label={isPlaying ? 'Pause playback' : 'Play playback'} data-testid="button-play">{isPlaying ? <Pause size={16} fill="currentColor" /> : <Play size={16} fill="currentColor" />}</button>
-                    {!largeSource && monitor === 'current' && !memoryRender &&
-                      <span role="status" className="text-[11px] text-muted-foreground" data-testid="memory-render-status">
-                        {memoryRenderError ? 'Edited audio could not be rendered' : 'Preparing edited audio…'}
-                      </span>}
-                    <button type="button" className="icon-btn" onClick={() => { stopPlayback(); setPlayHead(0); }} aria-label="Stop and return to start" data-testid="button-stop"><Square size={14} fill="currentColor" /></button>
-                    <div className="time-readout" data-testid="text-playhead">{formatTime(playHead)} <span className="font-sans text-[10px] opacity-55">/ {formatTime(duration)}</span></div>
-                    <div className="h-5 w-px bg-white/15 mx-1" />
-                    <button type="button" className={`icon-btn !text-[11px] !font-bold ${loop ? '!bg-white/10 !text-[#d8ed55]' : ''}`} onClick={() => setLoop(!loop)} aria-pressed={loop} data-testid="button-loop">LOOP</button>
-                    <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
-                      <span className="text-[10px] opacity-60">PRESET</span>
-                      <select className="transport-select border border-white/15 rounded px-2 py-1 text-[11px] max-w-[210px]" value="" onChange={(event) => loadChainPreset(event.target.value, event.currentTarget)} aria-label="Load or save local preset" data-testid="select-local-preset">
-                        <option value="" disabled>Load or save preset…</option>
-                        <option value="save">Save current chain as preset…</option>
-                        <option value="common-field">Common Field Recording Adjustments</option>
-                        {chainPresets.length > 0 && <optgroup label="Your saved presets">{chainPresets.map((preset, index) => <option key={index} value={`saved:${index}`}>{preset.name}</option>)}</optgroup>}
-                      </select>
-                      <span className="h-5 w-px bg-white/15 mx-1" />
-                      <span className="text-[10px] opacity-60">MONITOR</span>
-                      <select className="transport-select border border-white/15 rounded px-2 py-1 text-[11px]" value={monitor} onChange={(event) => {
-                        const next = event.target.value as MonitorMode;
-                        monitorRef.current = next;
-                        pendingMemoryPlaybackRef.current = false;
-                        setMonitor(next);
-                      }} aria-label="Monitor source" data-testid="select-monitor"><option value="current">Current</option><option value="original">Original A/B</option></select>
-                      <select className="transport-select border border-white/15 rounded px-2 py-1 text-[11px]" value={rate} onChange={(event) => setRate(Number(event.target.value))} aria-label="Playback rate" data-testid="select-playback-rate"><option value="0.5">0.5×</option><option value="1">1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option></select>
-                    </div>
-                  </section>
                    {isPlaying && monitor === 'current' && modules.some((module) =>
                      module.enabled && module.type === 'hum' && module.params.mode !== 'Static' && Number(module.params.reduction) > 0) &&
                      <div className="text-[11px] text-muted-foreground px-2 py-1" role="status" data-testid="live-hum-transport">
@@ -2570,6 +2541,37 @@ function App() {
             </div>
           </div>
         </main>
+        {activeTab === 'edit' && <div className="transport-dock" data-testid="transport-dock">
+          <section className="transport" aria-label="Audio transport">
+            <button type="button" className="icon-btn !bg-[#d8ed55] !text-[#18231f] !rounded-full" onClick={play} aria-label={isPlaying ? 'Pause playback' : 'Play playback'} data-testid="button-play">{isPlaying ? <Pause size={16} fill="currentColor" /> : <Play size={16} fill="currentColor" />}</button>
+            {!largeSource && monitor === 'current' && !memoryRender &&
+              <span role="status" className="text-[11px] text-muted-foreground" data-testid="memory-render-status">
+                {memoryRenderError ? 'Edited audio could not be rendered' : 'Preparing edited audio…'}
+              </span>}
+            <button type="button" className="icon-btn" onClick={() => { stopPlayback(); setPlayHead(0); }} aria-label="Stop and return to start" data-testid="button-stop"><Square size={14} fill="currentColor" /></button>
+            <div className="time-readout" data-testid="text-playhead">{formatTime(playHead)} <span className="font-sans text-[10px] opacity-55">/ {formatTime(duration)}</span></div>
+            <div className="h-5 w-px bg-white/15 mx-1" />
+            <button type="button" className={`icon-btn !text-[11px] !font-bold ${loop ? '!bg-white/10 !text-[#d8ed55]' : ''}`} onClick={() => setLoop(!loop)} aria-pressed={loop} data-testid="button-loop">LOOP</button>
+            <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+              <span className="text-[10px] opacity-60">PRESET</span>
+              <select className="transport-select border border-white/15 rounded px-2 py-1 text-[11px] max-w-[210px]" value="" onChange={(event) => loadChainPreset(event.target.value, event.currentTarget)} aria-label="Load or save local preset" data-testid="select-local-preset">
+                <option value="" disabled>Load or save preset…</option>
+                <option value="save">Save current chain as preset…</option>
+                <option value="common-field">Common Field Recording Adjustments</option>
+                {chainPresets.length > 0 && <optgroup label="Your saved presets">{chainPresets.map((preset, index) => <option key={index} value={`saved:${index}`}>{preset.name}</option>)}</optgroup>}
+              </select>
+              <span className="h-5 w-px bg-white/15 mx-1" />
+              <span className="text-[10px] opacity-60">MONITOR</span>
+              <select className="transport-select border border-white/15 rounded px-2 py-1 text-[11px]" value={monitor} onChange={(event) => {
+                const next = event.target.value as MonitorMode;
+                monitorRef.current = next;
+                pendingMemoryPlaybackRef.current = false;
+                setMonitor(next);
+              }} aria-label="Monitor source" data-testid="select-monitor"><option value="current">Current</option><option value="original">Original A/B</option></select>
+              <select className="transport-select border border-white/15 rounded px-2 py-1 text-[11px]" value={rate} onChange={(event) => setRate(Number(event.target.value))} aria-label="Playback rate" data-testid="select-playback-rate"><option value="0.5">0.5×</option><option value="1">1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option></select>
+            </div>
+          </section>
+        </div>}
       </section>
       <input ref={fileRef} type="file" accept=".wav,.flac,audio/wav,audio/flac" onChange={importFile} className="hidden" inert={!!modal || presetDialogOpen} aria-hidden={modal || presetDialogOpen ? true : undefined} data-testid="input-import-wav" />
       {modal === 'export' && <ExportModal onClose={() => setModal(null)} onExport={exportAudio} title={title} />}

@@ -18,8 +18,7 @@ test('clearing a selection plays the full track, even when looping, and allows s
   await page.getByTestId('button-stop').click();
 
   const canvas = page.getByTestId('canvas-spectrogram');
-  // The expanded statistics panel can scroll the spectrogram out of view after
-  // the transport buttons are used; mouse coordinates must be viewport-visible.
+  // Pointer coordinates must refer to the visible part of the scrolling editor.
   await canvas.scrollIntoViewIfNeeded();
   const bounds = (await canvas.boundingBox())!;
   const y = bounds.y + bounds.height / 4;
