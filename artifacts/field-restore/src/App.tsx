@@ -39,7 +39,7 @@ type SpectrogramView = {
   durationSeconds: number;
 };
 
-const MODULE_TYPES = ['gain', 'fade-in', 'fade-out', 'low-rumble', 'hum', 'wind', 'noise', 'bring-back-low-end', 'ambient'] as const;
+const MODULE_TYPES = ['gain', 'fade-in', 'fade-out', 'low-rumble', 'hum', 'wind', 'noise', 'click-pop', 'bring-back-low-end', 'ambient'] as const;
 type AddModuleType = typeof MODULE_TYPES[number];
 const moduleOptionLabel = (type: AddModuleType) => type === 'low-rumble' ? 'Low Rumble Removal' : type === 'bring-back-low-end' ? 'Bring Back the Low End' : type === 'fade-in' ? 'Fade In' : type === 'fade-out' ? 'Fade Out' : MODULE_LABELS[type];
 const SPECTROGRAM_LEFT = 48;
@@ -101,6 +101,7 @@ function moduleSummary(module: EditModule, humReadout?: ReturnType<typeof humOpe
     : module.type === 'hum' ? humReadout?.summary ?? `${p.mode} · ${p.frequency} Hz`
       : module.type === 'wind' ? (isFixedLowRumble(module) ? `HPF ${p.cutoff} Hz` : `Auto · ${p.detection ?? 'Medium'} detection · ${p.removal ?? 'Medium'} removal`)
         : module.type === 'noise' ? `${p.mode === 'Sample' ? 'Noise-only sample' : 'Auto'} · ${p.strength ?? 50}% strength`
+        : module.type === 'click-pop' ? `Automatic · ${p.strength ?? 50}% strength`
         : module.type === 'eq' && p.mode === 'low-shelf' ? `${p.gain} dB · ${p.frequency} Hz`
           : module.type === 'fade' ? (fadeControlDirection(module) === 'in' ? `${p.in} s in`
             : fadeControlDirection(module) === 'out' ? `${p.out} s out` : `${p.in} s in · ${p.out} s out`)
@@ -2388,6 +2389,11 @@ function ModuleCard({ module, humReadout, liveFrequencies, windActive, sampleRat
          {numberInput('strength', 'Reduction strength', 0, 100, 1, '%', { resetValue: 50, wheelStep: 5 })}
           <p className="text-[11px] leading-relaxed text-muted-foreground" data-testid="noise-reduction-usage-note">This gentle, stereo-linked reduction is approximate and may soften wanted ambience. It will not repair clicks, isolate voices, or remove all noise. Compare with bypass before exporting.</p>
        </div>}
+        {module.type === 'click-pop' && <div className="space-y-2">
+          <p className="text-[11px] leading-relaxed text-muted-foreground">Automatic detection</p>
+          {numberInput('strength', 'Removal strength', 0, 100, 1, '%', { resetValue: 75, wheelStep: 5 })}
+          <p className="text-[11px] leading-relaxed text-muted-foreground" data-testid="click-pop-usage-note">Targets short, isolated clicks and pops. Longer or overlapping sounds may remain, and wanted transients can be softened. Compare with bypass before exporting.</p>
+        </div>}
        {module.type === 'wind' && (isFixedLowRumble(module)
           ? <div className="space-y-2">
             <div className="grid grid-cols-2 gap-3">{numberInput('cutoff', 'High-pass cutoff', 20, 240, .5, ' Hz')}{numberInput('q', 'Q', .1, 2, .01)}</div>

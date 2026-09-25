@@ -62,3 +62,9 @@ Noise-only samples are recording-specific. Keep the compact estimate tied to the
 **Why:** File-backed previews, worker analysis, seeks, and exports must use one identical noise estimate; silently treating a profile from another recording as universally applicable can soften wanted sounds.
 
 **How to apply:** Preserve the user's sample and mode in saved edits; on unverified cross-recording preset use, discard the old estimate and switch to Automatic while offering recapture. Keep preview and export using the same resulting chain.
+
+Automatic click/pop cleanup in a same-length streaming pipeline cannot know at an abrupt onset whether it is a defect or a wanted attack: both have the same initial samples. Treat this as a product limitation rather than promising perfect classification.
+
+**Why:** A fixed-duration hold can mute a genuine sustained onset and create a second audible edge when released; quieter clicks also disappear from detection if the threshold is tied to a loudness floor.
+
+**How to apply:** Prefer bounded, gradually decaying correction with a threshold informed by local variation, disclose that sharp wanted impacts may soften, and check the pop tail and abrupt-onset release as well as the first corrected sample.

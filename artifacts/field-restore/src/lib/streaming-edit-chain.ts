@@ -3,6 +3,7 @@ import { automaticDcBlockerPole, analyzeInitialHum, fadeGainAtFrame, isFixedLowR
 import { WindProcessor, windLevel, type WindSnapshot } from './wind-reduction';
 import { HumProcessor, humPrefixFrames, type HumSnapshot } from './hum-removal';
 import { NoiseReductionProcessor, noiseProfileFromParams, type NoiseReductionSnapshot } from './noise-reduction';
+import { ClickPopProcessor, type ClickPopSnapshot } from './click-pop-removal';
 import { readAudioFrames, type AudioMetadata } from './source-audio';
 
 interface FilterState {
@@ -22,11 +23,15 @@ interface ModuleState {
   hum: HumProcessor | undefined;
   wind: WindProcessor | undefined;
   noise: NoiseReductionProcessor | undefined;
+  clickPop: ClickPopProcessor | undefined;
 }
 
 export interface StreamingEditChainSnapshot {
   nextFrame: number;
-  state: Array<Omit<ModuleState, 'hum' | 'wind' | 'noise'> & { hum: HumSnapshot | undefined; wind: WindSnapshot | undefined; noise: NoiseReductionSnapshot | undefined }>;
+  state: Array<Omit<ModuleState, 'hum' | 'wind' | 'noise' | 'clickPop'> & {
+    hum: HumSnapshot | undefined; wind: WindSnapshot | undefined;
+    noise: NoiseReductionSnapshot | undefined; clickPop: ClickPopSnapshot | undefined;
+  }>;
 }
 
 interface Biquad {
@@ -108,6 +113,7 @@ export class StreamingEditChain {
       hum: undefined,
       wind: undefined,
       noise: undefined,
+      clickPop: undefined,
     }));
     this.nextFrame = initialFrame;
   }
@@ -123,6 +129,7 @@ export class StreamingEditChain {
       state.hum = undefined;
       state.wind = undefined;
       state.noise = undefined;
+      state.clickPop = undefined;
     });
     this.nextFrame = startFrame;
   }
@@ -148,6 +155,7 @@ export class StreamingEditChain {
         hum: state.hum?.snapshot(),
         wind: state.wind?.snapshot(),
         noise: state.noise?.snapshot(),
+        clickPop: state.clickPop?.snapshot(),
       })),
     };
   }
@@ -178,6 +186,10 @@ export class StreamingEditChain {
           noiseProfileFromParams(this.modules[index].params))
         : undefined;
       if (saved.noise) target.noise?.restore(saved.noise);
+      target.clickPop = saved.clickPop
+        ? new ClickPopProcessor(this.modules[index].params, this.sampleRate, saved.clickPop.lastRaw.length)
+        : undefined;
+      if (saved.clickPop) target.clickPop?.restore(saved.clickPop);
     });
     this.nextFrame = snapshot.nextFrame;
   }
@@ -259,6 +271,9 @@ export class StreamingEditChain {
       } else if (module.type === 'noise') {
         state.noise ??= new NoiseReductionProcessor(this.sampleRate, output.length, Number(p.strength), noiseProfileFromParams(p));
         state.noise.process(output);
+      } else if (module.type === 'click-pop') {
+        state.clickPop ??= new ClickPopProcessor(p, this.sampleRate, output.length);
+        state.clickPop.process(output);
       } else if (module.type === 'region') {
         const start = Math.max(0, Math.floor(Math.max(0, Number(p.start)) * this.sampleRate));
         const end = Math.floor(Math.max(Number(p.end), Number(p.start)) * this.sampleRate);

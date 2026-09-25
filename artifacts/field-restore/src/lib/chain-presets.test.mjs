@@ -37,6 +37,18 @@ test('duplicate names and corrupt stored data never overwrite saved presets', ()
   assert.throws(() => parseChainPresets('{broken'), /could not be read/);
 });
 
+test('presets accept and preserve automatic click and pop removal settings', () => {
+  const module = {
+    id: 'click-pop-test',
+    type: 'click-pop',
+    name: 'Click & Pop Removal',
+    enabled: false,
+    params: { mode: 'Automatic', strength: 72 },
+  };
+  const preset = parseChainPresets(JSON.stringify([{ name: 'Clicks', modules: [module] }]))[0];
+  assert.deepEqual(preparePresetModules(preset, null).modules, [module]);
+});
+
 test('older presets containing Region Attenuation still load and process in memory and chunks', () => {
   const region = makeModule('region', { params: { start: .25, end: .75, amount: -6 } });
   const preset = parseChainPresets(JSON.stringify([{ name: 'Older cleanup', modules: [region] }]))[0];
