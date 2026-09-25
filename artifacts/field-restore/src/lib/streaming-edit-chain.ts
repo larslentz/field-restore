@@ -1,5 +1,5 @@
 import type { ChannelData } from './audio';
-import { automaticDcBlockerPole, analyzeInitialHum, fadeGainAtFrame, isFixedLowRumble, lowEndShelfCoefficients, lowEndShelfEnabled, type EditModule } from './edit-chain';
+import { automaticDcBlockerPole, analyzeInitialHum, fadeGainAtFrame, isFixedLowRumble, lowEndShelfCoefficients, lowEndShelfEnabled, lowEndShelfFollowsWind, type EditModule } from './edit-chain';
 import { WindProcessor, windLevel, type WindSnapshot } from './wind-reduction';
 import { HumProcessor, humPrefixFrames, type HumSnapshot } from './hum-removal';
 import { NoiseReductionProcessor, noiseProfileFromParams, type NoiseReductionSnapshot } from './noise-reduction';
@@ -269,6 +269,8 @@ export class StreamingEditChain {
           (frame, frequencies) => this.onHumChange?.(module.id, this.nextFrame + frame, frequencies));
         state.hum.process(output);
       } else if (module.type === 'wind') {
+        const followsWind = !isFixedLowRumble(module) && lowEndShelfEnabled(p) && lowEndShelfFollowsWind(p);
+        const shelf = followsWind ? lowEndShelfCoefficients(p, this.sampleRate) : undefined;
         if (isFixedLowRumble(module)) {
           const coefficients = highPass(this.sampleRate, Math.max(20, Number(p.cutoff) || 55.5),
             Math.max(0.1, Number(p.q) || .38));
@@ -281,9 +283,19 @@ export class StreamingEditChain {
         } else {
           state.wind ??= new WindProcessor(this.sampleRate, output.length, windLevel(p.detection), windLevel(p.removal),
             (frame, active) => this.onWindChange?.(module.id, frame, active), startFrame);
-          state.wind.process(output);
+          state.wind.process(output, followsWind ? (frame, amount) => {
+            for (let c = 0; c < output.length; c++) {
+              const channel = output[c];
+              const filter = state.shelfFilters[c];
+              const sample = channel[frame];
+              const filtered = shelf!.b0 * sample + shelf!.b1 * filter.x1 + shelf!.b2 * filter.x2
+                - shelf!.a1 * filter.y1 - shelf!.a2 * filter.y2;
+              filter.x2 = filter.x1; filter.x1 = sample; filter.y2 = filter.y1; filter.y1 = filtered;
+              channel[frame] = finite(sample + amount * (filtered - sample));
+            }
+          } : undefined);
         }
-        if (lowEndShelfEnabled(p)) {
+        if (lowEndShelfEnabled(p) && !followsWind) {
           const coefficients = lowEndShelfCoefficients(p, this.sampleRate);
           output.forEach((channel, c) => channel.forEach((sample, i) => {
             const f = state.shelfFilters[c];

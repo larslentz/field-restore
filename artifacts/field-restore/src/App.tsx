@@ -3,7 +3,8 @@ import { createPortal } from 'react-dom';
 import { Activity, ArrowDown, ArrowUp, Check, ChevronDown, CircleHelp, Download, ExternalLink, FileAudio, FolderOpen, Gauge, GripVertical, Info, Keyboard, Layers3, LoaderCircle, Menu, PanelRightOpen, Pause, Play, Plus, Redo2, RotateCcw, Save, Settings, Square, Trash2, Undo2, Waves, X, ZoomIn, ZoomOut } from 'lucide-react';
 import { createDemoAudio, downloadBlob, encodeWav, parseWav, type AudioSource } from '@/lib/audio';
 import { decodeChannels, loadProject, projectFromSource, saveProject } from '@/lib/persistence';
-import { AUTOMATIC_DC_REMOVAL, humOpeningReadout, isFixedLowRumble, isLegacyWind, lowEndShelfEnabled, makeDefaultChain, makeLowRumbleRemoval, makeModule, makeProcessingChain, makeRestorationReport, MODULE_LABELS, toggleEditableModules, withFadeRange, withoutLegacyDcModules, type EditModule, type HumScanState } from '@/lib/edit-chain';
+import { AUTOMATIC_DC_REMOVAL, humOpeningReadout, isFixedLowRumble, isLegacyWind, lowEndShelfEnabled, lowEndShelfFollowsWind, makeDefaultChain, makeLowRumbleRemoval, makeModule, makeProcessingChain, makeRestorationReport, MODULE_LABELS, toggleEditableModules, withFadeRange, withoutLegacyDcModules, type EditModule, type HumScanState } from '@/lib/edit-chain';
+import { WIND_SHELF_SCOPE_DETECTED, WIND_SHELF_SCOPE_WHOLE } from '@/lib/wind-reduction';
 import { analyzeLoudness, type LoudnessStats } from '@/lib/loudness';
 import { createPlaybackRangePlan, playbackPositionAtElapsed } from '@/lib/playback-range';
 import type { SpectrogramData } from '@/lib/spectrogram';
@@ -104,7 +105,7 @@ function moduleSummary(module: EditModule, humReadout?: ReturnType<typeof humOpe
   return module.type === 'gain' ? `${p.db} dB`
     : module.type === 'spectral-repair' ? `${p.mode} · ${Number(p.start).toFixed(2)}–${Number(p.end).toFixed(2)} s · ${Math.round(Number(p.low))}–${Math.round(Number(p.high))} Hz`
     : module.type === 'hum' ? humReadout?.summary ?? `${p.mode} · ${p.frequency} Hz`
-      : module.type === 'wind' ? `${isFixedLowRumble(module) ? `HPF ${p.cutoff} Hz` : `Auto · ${p.detection ?? 'Medium'} detection · ${p.removal ?? 'Medium'} removal`} · ${lowEndShelfEnabled(p) ? `Low end ${Number(p.lowEndGain) >= 0 ? '+' : ''}${p.lowEndGain} dB` : 'Low end off'}`
+      : module.type === 'wind' ? `${isFixedLowRumble(module) ? `HPF ${p.cutoff} Hz` : `Auto · ${p.detection ?? 'Medium'} detection · ${p.removal ?? 'Medium'} removal`} · ${lowEndShelfEnabled(p) ? `Low end ${Number(p.lowEndGain) >= 0 ? '+' : ''}${p.lowEndGain} dB · ${lowEndShelfFollowsWind(p) ? 'detected wind only' : 'whole recording'}` : 'Low end off'}`
         : module.type === 'noise' ? `${p.mode === 'Sample' ? 'Noise-only sample' : 'Auto'} · ${p.strength ?? 50}% strength`
         : module.type === 'click-pop' ? `Automatic · ${p.strength ?? 50}% strength`
         : module.type === 'eq' && p.mode === 'low-shelf' ? `${p.gain} dB · ${p.frequency} Hz`
@@ -2724,12 +2725,13 @@ function ModuleCard({ module, humReadout, liveFrequencies, windActive, sampleRat
          </div>)}
         {module.type === 'wind' && <div className="rounded-md border border-border p-3 space-y-3" data-testid={`low-end-controls-${module.id}`}>
           <label className="flex items-center gap-2 text-xs font-semibold"><input type="checkbox" checked={lowEndShelfEnabled(p)} onChange={(event) => updateParams(module.id, 'lowEndEnabled', event.target.checked ? 1 : 0)} data-testid={`toggle-low-end-${module.id}`} /> Bring Back the Low End</label>
+           {!isFixedLowRumble(module) && <label className="block"><span className="field-label">Apply compensation</span><select className="select-field" value={lowEndShelfFollowsWind(p) ? WIND_SHELF_SCOPE_DETECTED : WIND_SHELF_SCOPE_WHOLE} onChange={(event) => updateParams(module.id, 'lowEndScope', event.target.value)} data-testid={`select-low-end-scope-${module.id}`}><option value={WIND_SHELF_SCOPE_WHOLE}>Whole recording</option><option value={WIND_SHELF_SCOPE_DETECTED}>Detected wind only</option></select></label>}
           <div className="grid grid-cols-3 gap-2">
             {numberInput('lowEndFrequency', 'Low shelf', 20, 240, .5, ' Hz')}
             {numberInput('lowEndQ', 'Q', .1, 2, .01)}
             {numberInput('lowEndGain', 'Gain', -12, 12, .1, ' dB')}
           </div>
-          <p className="text-[11px] leading-relaxed text-muted-foreground" data-testid={`bring-back-low-end-usage-note-${module.id}`}>Only use this filter if you previously used the {isFixedLowRumble(module) ? 'Low Rumble Removal' : 'Wind Removal'} filter. This one attempts to bring back a bit of low end to smooth and compensate for what was removed with {isFixedLowRumble(module) ? 'Low Rumble Removal' : 'Wind Removal'}. Adjust values to somewhat match what was used in the {isFixedLowRumble(module) ? 'Low Rumble Removal' : 'Wind Removal'} filter, or adjust to taste.</p>
+           <p className="text-[11px] leading-relaxed text-muted-foreground" data-testid={`bring-back-low-end-usage-note-${module.id}`}>Only use this filter if you previously used the {isFixedLowRumble(module) ? 'Low Rumble Removal' : 'Wind Removal'} filter. This one attempts to bring back a bit of low end to smooth and compensate for what was removed with {isFixedLowRumble(module) ? 'Low Rumble Removal' : 'Wind Removal'}. {isFixedLowRumble(module) ? 'Adjust values to somewhat match the removed filter, or adjust to taste.' : lowEndShelfFollowsWind(p) ? 'Detected-wind mode follows the detector’s smoothed attack and release, leaving other passages unchanged.' : 'Whole-recording mode keeps the shelf active throughout, as before.'}</p>
         </div>}
         {(module.type === 'eq' || isFixedLowRumble(module) || (module.type === 'wind' && lowEndShelfEnabled(p))) && <EqCurve module={module} sampleRate={sampleRate} />}
       {module.type === 'region' && <div className="grid grid-cols-3 gap-2">{numberInput('start', 'Start', 0, 60, .1, ' s')}{numberInput('end', 'End', 0, 60, .1, ' s')}{numberInput('amount', 'Attenuate', -24, 0, .5, ' dB')}</div>}

@@ -3,6 +3,7 @@ import test from 'node:test';
 import { isFixedLowRumble, isLegacyWind, makeDefaultChain, makeLowRumbleRemoval, makeModule, renderChain, withoutLegacyDcModules } from './edit-chain.ts';
 import { parseChainPresets } from './chain-presets.ts';
 import { createStreamingEditChain } from './streaming-edit-chain.ts';
+import { WindProcessor } from './wind-reduction.ts';
 
 const sampleRate = 24000;
 const count = sampleRate * 4;
@@ -50,6 +51,16 @@ test('wind bursts engage only where detected, spare quiet passages and wanted up
   assert.ok(toneLevel(output, 530, sampleRate * 2, sampleRate * 2.5) >
     toneLevel(input, 530, sampleRate * 2, sampleRate * 2.5) * .94);
   assert.ok(Math.abs(rms(output, sampleRate / 2, sampleRate) - rms(input, sampleRate / 2, sampleRate)) < 1e-5);
+});
+
+test('the wind envelope used for compensation ramps and releases smoothly', () => {
+  const envelope = [];
+  new WindProcessor(sampleRate, 1, 'Medium', 'Medium')
+    .process([sampleInput()], (_frame, amount) => envelope.push(amount));
+  const largestStep = envelope.slice(1).reduce((largest, value, index) =>
+    Math.max(largest, Math.abs(value - envelope[index])), 0);
+  assert.ok(envelope.some((amount) => amount > .9), 'the gust should reach full compensation');
+  assert.ok(largestStep <= .002, `envelope step ${largestStep} should not create an abrupt shelf edge`);
 });
 
 test('persistent broadband rumble is reduced, while a single wanted bass tone is spared', () => {
@@ -101,6 +112,58 @@ test('memory, chunks, stereo, and restored loops have identical detector state a
   processor.restore(snapshot);
   assert.deepEqual(processor.process(channels.map((channel) => channel.slice(loopStart, loopStart + 257)), loopStart),
     whole.map((channel) => channel.slice(loopStart, loopStart + 257)));
+});
+
+test('low-end compensation can follow the smoothed wind envelope without changing quiet ambience', () => {
+  const input = sampleInput();
+  const base = wind();
+  const gated = {
+    ...base,
+    params: {
+      ...base.params,
+      lowEndEnabled: 1,
+      lowEndScope: 'Detected wind only',
+      lowEndGain: 8,
+    },
+  };
+  const unboosted = renderChain([input], [base], sampleRate)[0];
+  const inMemory = renderChain([input], [gated], sampleRate)[0];
+
+  assert.deepEqual(inMemory.slice(0, sampleRate), unboosted.slice(0, sampleRate),
+    'the clean opening should be byte-for-byte unchanged');
+  assert.ok(inMemory.some((value, index) => Math.abs(value - unboosted[index]) > 1e-4),
+    'the shelf should engage during detected wind');
+
+  const streamed = createStreamingEditChain([gated], sampleRate, count);
+  const streamedAudio = new Float32Array(count);
+  let loopSnapshot;
+  const loopStart = 257 * 200;
+  for (let start = 0; start < count; start += 257) {
+    if (start === loopStart) loopSnapshot = streamed.snapshot();
+    const end = Math.min(count, start + 257);
+    streamed.process([input.slice(start, end)], start)[0].forEach((value, index) => {
+      streamedAudio[start + index] = value;
+    });
+  }
+  assert.deepEqual(streamedAudio, inMemory, 'file-backed chunks must match in-memory rendering');
+  streamed.restore(loopSnapshot);
+  assert.deepEqual(
+    streamed.process([input.slice(loopStart, loopStart + 257)], loopStart),
+    [inMemory.slice(loopStart, loopStart + 257)],
+    'restoring a loop must restore both detector and shelf histories',
+  );
+
+  const alwaysOn = {
+    ...gated,
+    params: { ...gated.params, lowEndScope: 'Whole recording' },
+  };
+  const wholeRecording = renderChain([input], [alwaysOn], sampleRate)[0];
+  assert.ok(wholeRecording.some((value, index) => Math.abs(value - input[index]) > 1e-4),
+    'the existing whole-recording mode should remain available');
+  const legacyWholeRecording = { ...alwaysOn, params: { ...alwaysOn.params } };
+  delete legacyWholeRecording.params.lowEndScope;
+  assert.deepEqual(renderChain([input], [legacyWholeRecording], sampleRate)[0], wholeRecording,
+    'saved wind edits without a scope setting should retain whole-recording behavior');
 });
 
 test('stereo-linked detection responds when gusts occur only in the right channel', () => {

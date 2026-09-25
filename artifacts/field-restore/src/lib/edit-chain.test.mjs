@@ -46,6 +46,7 @@ test('wind and low rumble have separate low-end settings without a standalone ed
   const wind = defaults.find((module) => module.name === 'Wind Removal');
   const lowRumble = defaults.find((module) => module.name === 'Low Rumble Removal');
   assert.equal(wind.params.lowEndEnabled, 0);
+  assert.equal(wind.params.lowEndScope, 'Whole recording');
   assert.equal(lowRumble.params.lowEndEnabled, 1);
   assert.deepEqual(
     ['lowEndFrequency', 'lowEndQ', 'lowEndGain'].map((key) => wind.params[key]),

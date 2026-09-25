@@ -1,6 +1,6 @@
 import { cloneChannels, type ChannelData } from './audio';
 import { HumProcessor, humAnalysisWindowSize, humPrefixFrames } from './hum-removal';
-import { WindProcessor, WIND_DEFAULTS, windLevel } from './wind-reduction';
+import { WindProcessor, WIND_DEFAULTS, WIND_SHELF_SCOPE_DETECTED, WIND_SHELF_SCOPE_WHOLE, windLevel } from './wind-reduction';
 import { NoiseReductionProcessor, noiseProfileFromParams } from './noise-reduction';
 import { ClickPopProcessor } from './click-pop-removal';
 import { renderSpectralRepair } from './spectral-repair';
@@ -25,7 +25,7 @@ let idCounter = 1;
 export const makeModule = (type: ModuleType, options?: { name?: string; params?: Record<string, number | string> }): EditModule => {
   const defaults: Record<ModuleType, Record<string, number | string>> = {
     gain: { db: -2 }, fade: { in: 7, out: 7, inEnabled: 1, outEnabled: 1 }, eq: { mode: 'three-band', low: 0, mid: 0, high: -1, frequency: 55, q: 0.4, gain: 0 }, dc: { mode: 'Auto', amount: 0 },
-    hum: { mode: 'Static', frequency: 60, reduction: 12 }, wind: { mode: 'Automatic', ...WIND_DEFAULTS, lowEndEnabled: 0, lowEndFrequency: 55, lowEndQ: .4, lowEndGain: 2 }, noise: { strength: 50 },
+    hum: { mode: 'Static', frequency: 60, reduction: 12 }, wind: { mode: 'Automatic', ...WIND_DEFAULTS, lowEndEnabled: 0, lowEndScope: WIND_SHELF_SCOPE_WHOLE, lowEndFrequency: 55, lowEndQ: .4, lowEndGain: 2 }, noise: { strength: 50 },
     'click-pop': { mode: 'Automatic', strength: 75 },
     'spectral-repair': { start: 0, end: .5, low: 1000, high: 5000, mode: 'Attenuate', strength: 75, context: .2, weighting: 50, fundamental: 100 },
     region: { start: 0, end: 0, amount: -8 }, ambient: { start: 0, end: 0, length: 1 },
@@ -69,6 +69,8 @@ export const isFixedLowRumble = (module: EditModule) => module.type === 'wind' &
         Number(module.params.cutoff) === 55.5 && Number(module.params.q) === .38))));
 
 export const lowEndShelfEnabled = (params: EditModule['params']) => Number(params.lowEndEnabled) === 1;
+export const lowEndShelfFollowsWind = (params: EditModule['params']) =>
+  params.lowEndScope === WIND_SHELF_SCOPE_DETECTED;
 export const lowEndShelfCoefficients = (params: EditModule['params'], sampleRate: number) =>
   lowShelf(sampleRate, Math.max(20, Number(params.lowEndFrequency) || 55),
     Math.max(.1, Number(params.lowEndQ) || .4), Number(params.lowEndGain) || 0);
@@ -279,14 +281,31 @@ export function applyModule(input: ChannelData, module: EditModule, sampleRate: 
     new HumProcessor(p, sampleRate, output.length, context.initialHumFrequencies,
       context.onHumChange && ((frame, frequencies) => context.onHumChange!(frameOffset + frame, frequencies))).process(output);
   } else if (module.type === 'wind') {
+    const followsWind = !isFixedLowRumble(module) && lowEndShelfEnabled(p) && lowEndShelfFollowsWind(p);
+    const shelf = followsWind ? lowEndShelfCoefficients(p, sampleRate) : undefined;
+    const shelfFilters = followsWind
+      ? output.map(() => ({ x1: 0, x2: 0, y1: 0, y2: 0 }))
+      : [];
+    const applyShelfAtFrame = (frame: number, amount: number) => {
+      for (let c = 0; c < output.length; c++) {
+        const channel = output[c];
+        const filter = shelfFilters[c];
+        const sample = channel[frame];
+        const filtered = shelf!.b0 * sample + shelf!.b1 * filter.x1 + shelf!.b2 * filter.x2
+          - shelf!.a1 * filter.y1 - shelf!.a2 * filter.y2;
+        filter.x2 = filter.x1; filter.x1 = sample; filter.y2 = filter.y1; filter.y1 = filtered;
+        channel[frame] = sample + amount * (filtered - sample);
+      }
+    };
     if (isFixedLowRumble(module)) {
       const coefficients = highPass(sampleRate, Math.max(20, Number(p.cutoff) || 55.5), Math.max(.1, Number(p.q) || .38));
       output.forEach((channel) => processBiquad(channel, coefficients));
     } else {
       new WindProcessor(sampleRate, output.length, windLevel(p.detection), windLevel(p.removal),
-        context.onWindChange && ((frame, active) => context.onWindChange!(frameOffset + frame, active))).process(output);
+        context.onWindChange && ((frame, active) => context.onWindChange!(frameOffset + frame, active)))
+        .process(output, followsWind ? applyShelfAtFrame : undefined);
     }
-    if (lowEndShelfEnabled(p)) {
+    if (lowEndShelfEnabled(p) && !followsWind) {
       const coefficients = lowEndShelfCoefficients(p, sampleRate);
       output.forEach((channel) => processBiquad(channel, coefficients));
     }

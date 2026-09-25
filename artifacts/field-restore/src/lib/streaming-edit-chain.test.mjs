@@ -243,6 +243,56 @@ test('file-backed chunked export matches in-memory output and preserves source b
   assert.deepEqual(new Uint8Array(await file.arrayBuffer()), originalBytes);
 });
 
+test('file-backed detected-wind compensation export and restored playback match memory', async () => {
+  const rate = 24000, count = rate * 4;
+  const input = [0, 1].map((channel) => {
+    let seed = 12345 + channel * 17;
+    let low = 0;
+    let slow = 0;
+    return Float32Array.from({ length: count }, (_, frame) => {
+      seed = (1664525 * seed + 1013904223) >>> 0;
+      const random = (seed / 0xffffffff - .5) * 2;
+      low += .035 * (random - low);
+      slow += .001 * (low - slow);
+      const gust = frame >= rate && frame < rate * 3 ? (low - slow) * 1.4 : 0;
+      return gust + .045 * Math.sin(2 * Math.PI * 530 * frame / rate + channel * .2);
+    });
+  });
+  const wind = makeModule('wind', {
+    params: { lowEndEnabled: 1, lowEndScope: 'Detected wind only', lowEndGain: 8 },
+  });
+  const processingModules = makeProcessingChain([wind]);
+  const memory = renderChain(input, processingModules, rate);
+  const file = encodeWav({ channels: input, sampleRate: rate, duration: 4, name: 'wind-compensation.wav' });
+  const originalBytes = new Uint8Array(await file.arrayBuffer());
+  const metadata = await parseWavMetadata(file);
+  const processor = createStreamingEditChain(processingModules, rate, count);
+  const parts = [];
+  await writeFloat32WavChunks({ write: async (part) => { parts.push(part); }, close: async () => {}, abort: async () => {} }, {
+    channels: 2, sampleRate: rate, frameCount: count, chunkFrames: 4093,
+    readFrames: (start, frames) => readFrames(file, metadata, start, frames),
+    processFrames: (channels, start) => processor.process(channels, start),
+  });
+  const exported = parseWav(await new Blob(parts).arrayBuffer()).channels;
+  for (let channel = 0; channel < 2; channel++) assert.deepEqual(exported[channel], memory[channel]);
+  assert.deepEqual(new Uint8Array(await file.arrayBuffer()), originalBytes, 'processing must not modify source audio');
+
+  const loopStart = rate * 2;
+  const playback = createStreamingEditChain(processingModules, rate, count);
+  for (let start = 0; start < loopStart; start += 4093) {
+    const frames = Math.min(4093, loopStart - start);
+    playback.process(await readFrames(file, metadata, start, frames), start);
+  }
+  const snapshot = playback.snapshot();
+  const loopInput = await readFrames(file, metadata, loopStart, 4093);
+  const firstPass = playback.process(loopInput, loopStart);
+  firstPass.forEach((channel, index) =>
+    assert.deepEqual(channel, memory[index].slice(loopStart, loopStart + channel.length)));
+  playback.restore(snapshot);
+  assert.deepEqual(playback.process(loopInput, loopStart), firstPass,
+    'restoring the loop must retain wind and compensation state');
+});
+
 function toneLevel(samples, frequency, from = 0) {
   let sine = 0;
   let cosine = 0;

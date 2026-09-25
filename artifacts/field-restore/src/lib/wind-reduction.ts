@@ -2,6 +2,8 @@ import type { ChannelData } from './audio';
 
 export type WindLevel = 'Low' | 'Medium' | 'High';
 export const WIND_DEFAULTS = { detection: 'Medium', removal: 'Medium' } as const;
+export const WIND_SHELF_SCOPE_WHOLE = 'Whole recording' as const;
+export const WIND_SHELF_SCOPE_DETECTED = 'Detected wind only' as const;
 
 export function windLevel(value: unknown): WindLevel {
   return value === 'Low' || value === 'High' ? value : 'Medium';
@@ -46,6 +48,7 @@ export class WindProcessor {
   private readonly wideAlpha: number;
   private readonly attack: number;
   private readonly release: number;
+  private readonly maxWet: number;
   private readonly coefficients: { b0: number; b1: number; b2: number; a1: number; a2: number };
 
   constructor(private readonly sampleRate: number, private readonly channelCount: number,
@@ -59,6 +62,7 @@ export class WindProcessor {
     this.wideAlpha = pole(1100);
     this.attack = 1 - Math.exp(-1 / (.025 * sampleRate));
     this.release = 1 - Math.exp(-1 / (.18 * sampleRate));
+    this.maxWet = removal === 'Low' ? .38 : removal === 'High' ? .96 : .72;
     const omega = 2 * Math.PI * Math.min(140, sampleRate * .2) / sampleRate;
     const cos = Math.cos(omega);
     const alpha = Math.sin(omega) / (2 * .707);
@@ -83,10 +87,9 @@ export class WindProcessor {
   restore(snapshot: WindSnapshot) { this.state = structuredClone(snapshot); }
   isActive() { return this.state.active; }
 
-  process(channels: ChannelData) {
+  process(channels: ChannelData, onWindEnvelope?: (frame: number, amount: number) => void) {
     const s = this.state;
     const { b0, b1, b2, a1, a2 } = this.coefficients;
-    const maxWet = this.removal === 'Low' ? .38 : this.removal === 'High' ? .96 : .72;
     const threshold = this.detection === 'Low' ? 1.8 : this.detection === 'High' ? .7 : 1;
     const floor = this.detection === 'Low' ? .005 : this.detection === 'High' ? .0015 : .003;
     for (let i = 0; i < (channels[0]?.length ?? 0); i++) {
@@ -135,7 +138,7 @@ export class WindProcessor {
         const tonal = strongest.crossingCount >= 4 && variation < .2;
         const detected = !tonal && low + upper > Math.max(floor, mid * threshold)
           && Math.min(low, upper) > Math.max(floor * .12, Math.max(low, upper) * .12);
-        s.target = detected ? maxWet : 0;
+        s.target = detected ? this.maxWet : 0;
         if (detected !== s.active) {
           s.active = detected;
           this.onChange?.(s.frame, detected);
@@ -154,6 +157,7 @@ export class WindProcessor {
         f.x2 = f.x1; f.x1 = sample; f.y2 = f.y1; f.y1 = filtered;
         channels[c][i] = sample + s.wet * (filtered - sample);
       }
+      onWindEnvelope?.(i, s.wet / this.maxWet);
     }
   }
 }
