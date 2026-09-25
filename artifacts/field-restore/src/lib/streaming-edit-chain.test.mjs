@@ -23,6 +23,25 @@ function source() {
   ];
 }
 
+function highRateWindSource(rate, durationSeconds = 4) {
+  const frames = rate * durationSeconds;
+  return [0, 1].map((channel) => {
+    let seed = 12345 + channel * 17;
+    let low = 0;
+    let slow = 0;
+    const lowAlpha = 1 - Math.exp(-2 * Math.PI * 135 / rate);
+    const slowAlpha = 1 - Math.exp(-2 * Math.PI * 4 / rate);
+    return Float32Array.from({ length: frames }, (_, frame) => {
+      seed = (1664525 * seed + 1013904223) >>> 0;
+      const random = (seed / 0xffffffff - .5) * 2;
+      low += lowAlpha * (random - low);
+      slow += slowAlpha * (low - slow);
+      const gust = frame >= rate && frame < rate * 3 ? (low - slow) * 1.4 : 0;
+      return gust + (channel ? .03 : .045) * Math.sin(2 * Math.PI * 530 * frame / rate + channel * .2);
+    });
+  });
+}
+
 test('sequential chunks equal one streaming pass across boundaries', () => {
   const input = source();
   const whole = createStreamingEditChain(modules, sampleRate, totalFrames).process(input, 0);
@@ -241,6 +260,60 @@ test('file-backed chunked export matches in-memory output and preserves source b
   const memory = renderChain(input, modules, rate);
   for (let channel = 0; channel < 2; channel++) assert.deepEqual(exported[channel], memory[channel]);
   assert.deepEqual(new Uint8Array(await file.arrayBuffer()), originalBytes);
+});
+
+test('96 kHz stereo wind compensation export and restored playback match finite in-memory audio', async () => {
+  const rate = 96000, count = rate * 4;
+  const input = highRateWindSource(rate);
+  const wind = makeModule('wind', {
+    params: {
+      lowEndEnabled: 1, lowEndScope: 'Detected wind only', lowEndGain: 8,
+      compensationAttackMs: 95, compensationReleaseMs: 520,
+    },
+  });
+  const processingModules = makeProcessingChain([wind]);
+  const memory = renderChain(input, processingModules, rate);
+  assert.ok(memory.every((channel) => channel.every(Number.isFinite)),
+    'in-memory compensation must remain finite on high-rate stereo input');
+  const file = encodeWav({ channels: input, sampleRate: rate, duration: 4, name: 'high-rate-wind.wav' });
+  const originalBytes = new Uint8Array(await file.arrayBuffer());
+  const metadata = await parseWavMetadata(file);
+  const events = [];
+  const processor = createStreamingEditChain(processingModules, rate, count, 0, [], undefined,
+    (_id, frame, active) => events.push({ frame, active }));
+  const parts = [];
+  await writeFloat32WavChunks({ write: async (part) => { parts.push(part); }, close: async () => {}, abort: async () => {} }, {
+    channels: 2, sampleRate: rate, frameCount: count, chunkFrames: 4093,
+    readFrames: (start, frames) => readFrames(file, metadata, start, frames),
+    processFrames: (channels, start) => processor.process(channels, start),
+  });
+  const exported = parseWav(await new Blob(parts).arrayBuffer()).channels;
+  assert.ok(events.some(({ frame, active }) => active && frame >= rate && frame < rate * 3),
+    'the streamed high-rate gust should be detected');
+  assert.ok(events.some(({ frame, active }) => !active && frame > rate * 3),
+    'the streamed detector should release after the gust');
+  for (let channel = 0; channel < 2; channel++) {
+    assert.ok(exported[channel].every(Number.isFinite), 'exported compensation must remain finite');
+    assert.deepEqual(exported[channel], memory[channel],
+      'high-rate file-backed export must match in-memory rendering sample-for-sample');
+  }
+  assert.deepEqual(new Uint8Array(await file.arrayBuffer()), originalBytes, 'processing must not modify source audio');
+
+  const loopStart = rate * 2;
+  const playback = createStreamingEditChain(processingModules, rate, count);
+  for (let start = 0; start < loopStart; start += 4093) {
+    const frames = Math.min(4093, loopStart - start);
+    playback.process(await readFrames(file, metadata, start, frames), start);
+  }
+  const snapshot = playback.snapshot();
+  const loopInput = await readFrames(file, metadata, loopStart, 4093);
+  const firstPass = playback.process(loopInput, loopStart);
+  firstPass.forEach((channel, index) =>
+    assert.deepEqual(channel, memory[index].slice(loopStart, loopStart + channel.length),
+      'high-rate loop playback must match in-memory rendering'));
+  playback.restore(snapshot);
+  assert.deepEqual(playback.process(loopInput, loopStart), firstPass,
+    'restoring a high-rate loop must retain detector and compensation state');
 });
 
 test('file-backed detected-wind compensation export and restored playback match memory', async () => {

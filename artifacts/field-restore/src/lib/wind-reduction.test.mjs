@@ -24,6 +24,25 @@ function sampleInput(from = sampleRate, to = sampleRate * 3) {
   });
 }
 
+function highRateWindInput(rate, durationSeconds = 4) {
+  const frames = rate * durationSeconds;
+  return [0, 1].map((channel) => {
+    let seed = 12345 + channel * 17;
+    let low = 0;
+    let slow = 0;
+    const lowAlpha = 1 - Math.exp(-2 * Math.PI * 135 / rate);
+    const slowAlpha = 1 - Math.exp(-2 * Math.PI * 4 / rate);
+    return Float32Array.from({ length: frames }, (_, frame) => {
+      seed = (1664525 * seed + 1013904223) >>> 0;
+      const random = (seed / 0xffffffff - .5) * 2;
+      low += lowAlpha * (random - low);
+      slow += slowAlpha * (low - slow);
+      const gust = frame >= rate && frame < rate * 3 ? (low - slow) * 1.4 : 0;
+      return gust + (channel ? .03 : .045) * Math.sin(2 * Math.PI * 530 * frame / rate + channel * .2);
+    });
+  });
+}
+
 function rms(data, from, to) {
   let sum = 0;
   for (let i = from; i < to; i++) sum += data[i] ** 2;
@@ -74,6 +93,31 @@ test('the wind envelope used for compensation ramps and releases smoothly', () =
     Math.max(largest, Math.abs(value - envelope[index])), 0);
   assert.ok(envelope.some((amount) => amount > .9), 'the gust should reach full compensation');
   assert.ok(largestStep <= .002, `envelope step ${largestStep} should not create an abrupt shelf edge`);
+});
+
+test('96 kHz stereo wind compensation stays finite and smooth through quiet-to-gust transitions', () => {
+  const rate = 96000;
+  const input = highRateWindInput(rate);
+  const original = input.map((channel) => new Float32Array(channel));
+  const events = [];
+  const envelope = [];
+  new WindProcessor(rate, input.length, 'Medium', 'Medium',
+    (frame, active) => events.push({ frame, active }))
+    .process(input, (frame, amount) => envelope.push(amount));
+
+  assert.ok(events.some(({ frame, active }) => active && frame >= rate && frame < rate * 3),
+    'the high-rate gust should be detected');
+  assert.ok(events.some(({ frame, active }) => !active && frame > rate * 3),
+    'the detector should release after the gust');
+  assert.ok(input.every((channel) => channel.every(Number.isFinite)), 'processed stereo output must stay finite');
+  for (let channel = 0; channel < input.length; channel++) {
+    assert.deepEqual(input[channel].slice(0, rate), original[channel].slice(0, rate),
+      'the quiet opening should remain untouched before wind is detected');
+  }
+  const largestStep = envelope.slice(1).reduce((largest, value, index) =>
+    Math.max(largest, Math.abs(value - envelope[index])), 0);
+  assert.ok(envelope.some((amount) => amount > .9), 'compensation should reach the gust');
+  assert.ok(largestStep <= .001, `96 kHz compensation envelope step ${largestStep} should remain smooth`);
 });
 
 test('adjustable compensation fades do not change wind removal and default to its current timing', () => {
