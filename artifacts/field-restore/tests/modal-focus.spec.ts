@@ -50,7 +50,7 @@ for (const { name, opener: openerId, close: closeId, action: actionId, last: las
       await expect(page.getByRole('navigation', { name: 'Workspace navigation' })).toHaveCount(0);
       await expect(page.getByRole('main')).toHaveCount(0);
       await expect(page.getByRole('button', { name: 'Play playback' })).toHaveCount(0);
-      await expect(page.getByRole('button', { name: 'Export', exact: true })).toHaveCount(0);
+       await expect(page.getByRole('button', { name: 'Export 32-bit WAV', exact: true })).toHaveCount(0);
       await expect(dialog.getByRole('heading', { name })).toBeVisible();
 
       await page.keyboard.press('Shift+Tab');

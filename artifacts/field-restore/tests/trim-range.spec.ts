@@ -67,7 +67,7 @@ test('dragged trim handles affect only Edited, survive save and shorten exported
   await page.getByTestId('button-clear-selection').click();
 
   await page.getByTestId('nav-save').click();
-  await expect(page.locator('.topbar .chip').first()).toContainText('Saved locally');
+  await expect(page.locator('.topbar .chip').first()).toContainText('Project saved in this browser');
   await page.reload();
   await expect(page.getByTestId('text-source-name')).toHaveText('trim-test.wav');
   await expect(page.getByTestId('trim-summary')).toContainText('00:00.800');
