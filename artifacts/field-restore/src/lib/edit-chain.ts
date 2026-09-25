@@ -3,8 +3,9 @@ import { HumProcessor, humAnalysisWindowSize, humPrefixFrames } from './hum-remo
 import { WindProcessor, WIND_DEFAULTS, windLevel } from './wind-reduction';
 import { NoiseReductionProcessor, noiseProfileFromParams } from './noise-reduction';
 import { ClickPopProcessor } from './click-pop-removal';
+import { renderSpectralRepair } from './spectral-repair';
 
-export type ModuleType = 'gain' | 'fade' | 'eq' | 'dc' | 'hum' | 'wind' | 'noise' | 'click-pop' | 'region' | 'ambient';
+export type ModuleType = 'gain' | 'fade' | 'eq' | 'dc' | 'hum' | 'wind' | 'noise' | 'click-pop' | 'spectral-repair' | 'region' | 'ambient';
 export interface EditModule {
   id: string;
   type: ModuleType;
@@ -15,7 +16,7 @@ export interface EditModule {
 
 export const MODULE_LABELS: Record<ModuleType, string> = {
   gain: 'Gain', fade: 'Fade', eq: 'EQ', dc: 'DC Offset', hum: 'Hum Removal', wind: 'Wind Removal', noise: 'Noise Reduction',
-  'click-pop': 'Click & Pop Removal', region: 'Region Attenuation', ambient: 'Ambient Patch',
+  'click-pop': 'Click & Pop Removal', 'spectral-repair': 'Spectral Repair', region: 'Region Attenuation', ambient: 'Ambient Patch',
 };
 
 const DEFAULT_WIND_NAMES = new Set(['Wind / Rumble', 'Wind / Rumble Removal', MODULE_LABELS.wind]);
@@ -25,7 +26,9 @@ export const makeModule = (type: ModuleType, options?: { name?: string; params?:
   const defaults: Record<ModuleType, Record<string, number | string>> = {
     gain: { db: -2 }, fade: { in: 0, out: 0 }, eq: { mode: 'three-band', low: 0, mid: 0, high: -1, frequency: 55, q: 0.4, gain: 0 }, dc: { mode: 'Auto', amount: 0 },
     hum: { mode: 'Static', frequency: 60, reduction: 12 }, wind: { mode: 'Automatic', ...WIND_DEFAULTS }, noise: { strength: 50 },
-    'click-pop': { mode: 'Automatic', strength: 75 }, region: { start: 0, end: 0, amount: -8 }, ambient: { start: 0, end: 0, length: 1 },
+    'click-pop': { mode: 'Automatic', strength: 75 },
+    'spectral-repair': { start: 0, end: .5, low: 1000, high: 5000, mode: 'Attenuate', strength: 75, context: .2, weighting: 50 },
+    region: { start: 0, end: 0, amount: -8 }, ambient: { start: 0, end: 0, length: 1 },
   };
   return {
     id: `${type}-${Date.now()}-${idCounter++}`,
@@ -160,6 +163,7 @@ export function makeRestorationReport(input: RestorationReportInput) {
       'Adaptive Hum Removal attenuates detected sustained tones regardless of their source, including wanted held notes and calls; short or changing tones may not be detected.',
       'Automatic wind/rumble detection may miss interference or reduce wanted low sounds.',
       'Click & Pop Removal estimates isolated short discontinuities; it may miss longer defects or soften abrupt wanted impacts.',
+      'Spectral Repair estimates short time-frequency patches from nearby audio; it cannot recover sound fully masked by an unwanted event and may affect overlapping wanted sounds.',
       'Edits are conservative sample-domain approximations in this browser build.',
       'Original source remains immutable; export reflects automatic DC correction and enabled modules.',
     ],
@@ -293,6 +297,8 @@ export function applyModule(input: ChannelData, module: EditModule, sampleRate: 
   } else if (module.type === 'click-pop') {
     new ClickPopProcessor(p, sampleRate, output.length,
       context.onClickRepair && ((frame) => context.onClickRepair!(frameOffset + frame))).process(output);
+  } else if (module.type === 'spectral-repair') {
+    return renderSpectralRepair(output, sampleRate, p, frameOffset);
   } else if (module.type === 'region') {
     const start = Math.max(0, Math.floor(Math.max(0, Number(p.start)) * sampleRate) - frameOffset);
     const end = Math.min(length, Math.floor(Math.max(Number(p.end), Number(p.start)) * sampleRate) - frameOffset);

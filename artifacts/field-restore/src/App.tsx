@@ -13,6 +13,8 @@ import { decodeFlac } from '@/lib/flac';
 import { isVerifiedRelink, openVerifiedFileHandle } from '@/lib/file-access';
 import { listProjects, loadProject as loadProjectV2, queryFileHandlePermission, requestFileHandlePermission, saveProject as saveProjectV2, type ProjectRecord } from '@/lib/project-store';
 import { analyzeFileInitialHum, createStreamingEditChain } from '@/lib/streaming-edit-chain';
+import type { SpectralRepairPatches } from '@/lib/streaming-edit-chain';
+import { prepareSpectralRepairsInWorker } from '@/lib/worker-spectral-prep';
 import { measureNoiseProfile, NOISE_PROFILE_BANDS, NOISE_SAMPLE_MAX_SECONDS, NOISE_SAMPLE_MIN_SECONDS } from '@/lib/noise-reduction';
 import { humAnalysisWindowSize, humPrefixFrames } from '@/lib/hum-removal';
 import { recordHumHistory, visibleHumHistory, type HumHistorySegment, type VisibleHumSegment } from '@/lib/hum-history';
@@ -34,6 +36,7 @@ type ViewTab = 'edit' | 'analyze' | 'project';
 type MonitorMode = 'current' | 'original';
 type Marker = { id: string; time: number; label: string; color: string };
 type Region = { id: string; start: number; end: number; label: string };
+type SpectralBounds = { start: number; end: number; low: number; high: number };
 type LargeSource = { file: File; metadata: AudioMetadata; fingerprint: string; fileHandle?: FileSystemFileHandle };
 type HumEvent = MemoryRenderResult['events'][number];
 type LiveHum = { source: AudioSource; chain: EditModule[]; frequencies: Record<string, number[]> };
@@ -46,7 +49,7 @@ type SpectrogramView = {
   error?: string;
 };
 
-const MODULE_TYPES = ['gain', 'fade-in', 'fade-out', 'low-rumble', 'hum', 'wind', 'noise', 'click-pop', 'bring-back-low-end', 'region', 'ambient'] as const;
+const MODULE_TYPES = ['gain', 'fade-in', 'fade-out', 'low-rumble', 'hum', 'wind', 'noise', 'click-pop', 'spectral-repair', 'bring-back-low-end', 'region', 'ambient'] as const;
 type AddModuleType = typeof MODULE_TYPES[number];
 const moduleOptionLabel = (type: AddModuleType) => type === 'low-rumble' ? 'Low Rumble Removal' : type === 'bring-back-low-end' ? 'Bring Back the Low End' : type === 'fade-in' ? 'Fade In' : type === 'fade-out' ? 'Fade Out' : MODULE_LABELS[type];
 const SPECTROGRAM_LEFT = 48;
@@ -107,6 +110,7 @@ function fadeControlDirection(module: EditModule): 'in' | 'out' | 'both' {
 function moduleSummary(module: EditModule, humReadout?: ReturnType<typeof humOpeningReadout>) {
   const p = module.params;
   return module.type === 'gain' ? `${p.db} dB`
+    : module.type === 'spectral-repair' ? `${p.mode} · ${Number(p.start).toFixed(2)}–${Number(p.end).toFixed(2)} s · ${Math.round(Number(p.low))}–${Math.round(Number(p.high))} Hz`
     : module.type === 'hum' ? humReadout?.summary ?? `${p.mode} · ${p.frequency} Hz`
       : module.type === 'wind' ? (isFixedLowRumble(module) ? `HPF ${p.cutoff} Hz` : `Auto · ${p.detection ?? 'Medium'} detection · ${p.removal ?? 'Medium'} removal`)
         : module.type === 'noise' ? `${p.mode === 'Sample' ? 'Noise-only sample' : 'Auto'} · ${p.strength ?? 50}% strength`
@@ -123,6 +127,9 @@ function App() {
   const [undoStack, setUndoStack] = useState<EditModule[][]>([]);
   const [redoStack, setRedoStack] = useState<EditModule[][]>([]);
   const [selection, setSelection] = useState<[number, number]>([4.1, 7.8]);
+  const [spectralSelectionMode, setSpectralSelectionMode] = useState(false);
+  const [spectralSelection, setSpectralSelection] = useState<SpectralBounds | null>(null);
+  const [spectralError, setSpectralError] = useState('');
   const [trim, setTrim] = useState<[number, number] | null>(null);
   const [committedTrim, setCommittedTrim] = useState<[number, number] | null>(null);
   const [markers, setMarkers] = useState<Marker[]>([]);
@@ -352,6 +359,7 @@ function App() {
   const selectionRef = useRef<[number, number]>([4.1, 7.8]);
   const trimRef = useRef<[number, number] | null>(null);
   const pointerDragRef = useRef<{ start: number; current: number; startClientX: number; moved: boolean } | null>(null);
+  const spectralDragRef = useRef<{ start: number; frequency: number; pane: number; moved: boolean } | null>(null);
   const frequencyDragRef = useRef<{ grabbedFrequency: number; paneTop: number; paneHeight: number; span: number } | null>(null);
   const levelDragRef = useRef<{
     grabbedLevel: number;
@@ -381,6 +389,9 @@ function App() {
   const backgroundPausedRef = useRef(false);
   const exportJobRef = useRef<AbortController | null>(null);
   const memoryJobRef = useRef<{ source: AudioSource; chain: EditModule[]; job: MemoryRenderJob } | null>(null);
+  const spectralPatchCacheRef = useRef<{
+    source: LargeSource; chain: EditModule[]; patches?: SpectralRepairPatches; pending?: Promise<SpectralRepairPatches>;
+  } | null>(null);
   const pendingMemoryPlaybackRef = useRef(false);
   const monitorRef = useRef<MonitorMode>(monitor);
   const [memoryResult, setMemoryResult] = useState<{ source: AudioSource; chain: EditModule[]; result: MemoryRenderResult } | null>(null);
@@ -404,6 +415,24 @@ function App() {
     Math.floor((committedTrim?.[0] ?? 0) * source.sampleRate),
     Math.min(Math.floor(source.duration * source.sampleRate), Math.ceil((committedTrim?.[1] ?? source.duration) * source.sampleRate)),
   ), [modules, committedTrim, source.sampleRate, source.duration]);
+  const getSpectralPatches = useCallback(async (signal?: AbortSignal): Promise<SpectralRepairPatches> => {
+    if (!largeSource) return {};
+    const cached = spectralPatchCacheRef.current;
+    if (cached?.source === largeSource && cached.chain === processingModules) {
+      if (cached.patches) return cached.patches;
+      if (cached.pending && !signal) return cached.pending;
+    }
+    const pending = prepareSpectralRepairsInWorker(largeSource.file, largeSource.metadata, processingModules, signal);
+    if (!signal) spectralPatchCacheRef.current = { source: largeSource, chain: processingModules, pending };
+    try {
+      const patches = await pending;
+      if (!signal?.aborted) spectralPatchCacheRef.current = { source: largeSource, chain: processingModules, patches };
+      return patches;
+    } catch (caught) {
+      if (spectralPatchCacheRef.current?.pending === pending) spectralPatchCacheRef.current = null;
+      throw caught;
+    }
+  }, [largeSource, processingModules]);
   useEffect(() => {
     humHistoryRef.current = [];
     humHistoryOwnerRef.current = null;
@@ -413,6 +442,10 @@ function App() {
     setFileRepairs(null);
     setSelectedRepair(null);
   }, [source, processingModules]);
+  useEffect(() => {
+    setSpectralSelection(null);
+    setSpectralError('');
+  }, [source]);
   const recordHeardHum = useCallback((moduleId: string, frame: number, frequencies: number[], sampleRate: number) => {
     const previous = humHistoryRef.current;
     const next = recordHumHistory(previous, moduleId, frame, frequencies, sampleRate);
@@ -695,7 +728,7 @@ function App() {
       );
       jobs = [originalLeftJob, originalRightJob];
       spectrogramJobRef.current = jobs;
-      Promise.all([originalLeftJob.promise, originalRightJob.promise]).then(([left, right]) => {
+      Promise.all([originalLeftJob.promise, originalRightJob.promise]).then(async ([left, right]) => {
         if (generation === spectrogramGenerationRef.current) {
           setLargeOriginalSpectrograms({
             left,
@@ -705,12 +738,14 @@ function App() {
           });
           setSpectrogramStatus('Building edited spectrogram');
           setSpectrogramProgress(0);
+          const patches = await getSpectralPatches();
+          if (generation !== spectrogramGenerationRef.current) return;
           const editedLeftJob = startWorkerJob<SpectrogramData>(
-            { kind: 'spectrogram', file, metadata, modules: processingModules, options: { ...options, channelIndex: 0 } },
+            { kind: 'spectrogram', file, metadata, modules: processingModules, patches, options: { ...options, channelIndex: 0 } },
             (fraction) => { if (generation === spectrogramGenerationRef.current) setSpectrogramProgress(fraction / 2); },
           );
           const editedRightJob = startWorkerJob<SpectrogramData>(
-            { kind: 'spectrogram', file, metadata, modules: processingModules, options: { ...options, channelIndex: Math.min(1, metadata.channels - 1) } },
+            { kind: 'spectrogram', file, metadata, modules: processingModules, patches, options: { ...options, channelIndex: Math.min(1, metadata.channels - 1) } },
             (fraction) => { if (generation === spectrogramGenerationRef.current) setSpectrogramProgress(0.5 + fraction / 2); },
           );
           jobs = [editedLeftJob, editedRightJob];
@@ -748,7 +783,7 @@ function App() {
         jobs.forEach((job) => job.cancel());
       }
     };
-  }, [largeSource, processingModules, viewDuration, viewStart]);
+  }, [getSpectralPatches, largeSource, processingModules, viewDuration, viewStart]);
 
   useEffect(() => {
     if (!largeSource) return;
@@ -769,7 +804,12 @@ function App() {
     setAnalysisStatus(hasSelection ? 'Analyzing selection' : 'Analyzing original recording');
     setAnalysisProgress(0);
     setOperationPaused(false);
-    const run = (request: Parameters<typeof startWorkerJob<LargeAnalysisResult>>[0], stage: number) => {
+    const run = async (request: Parameters<typeof startWorkerJob<LargeAnalysisResult>>[0], stage: number) => {
+      if (request.kind === 'loudness' && request.modules) {
+        const patches = await getSpectralPatches();
+        if (generation !== analysisGenerationRef.current) throw new DOMException('Stale analysis.', 'AbortError');
+        request = { ...request, patches };
+      }
       const job = startWorkerJob<LargeAnalysisResult>(
         request,
         (fraction) => {
@@ -812,6 +852,7 @@ function App() {
         file,
         metadata: editedMetadata,
         modules: processingModules,
+        sourceMetadata: metadata,
         frameOffset: editedSelectionStartFrame,
         sourceFrameCount: metadata.frameCount,
         warmup: warmStart < editedSelectionStartFrame
@@ -838,6 +879,7 @@ function App() {
       if (cachedCurrent?.modules === processingModules && cachedCurrent.start === startFrame && cachedCurrent.end === endFrame) return cachedCurrent.stats;
       const trimmedMetadata = audioRange(metadata, startFrame, endFrame - startFrame);
       return run({ kind: 'loudness', file, metadata: trimmedMetadata, modules: processingModules, frameOffset: startFrame, sourceFrameCount: metadata.frameCount,
+         sourceMetadata: metadata,
          warmup: startFrame > 0 ? { metadata, startFrame: 0, frameCount: startFrame } : undefined,
        }, hasSelection ? 3 : 1);
     }).then((stats) => {
@@ -860,7 +902,7 @@ function App() {
       if (generation === analysisGenerationRef.current) analysisGenerationRef.current += 1;
       analysisJobRef.current?.cancel();
     };
-  }, [committedTrimEnd, committedTrimStart, hasSelection, largeSource, processingModules, selectionEnd, selectionStart]);
+  }, [committedTrimEnd, committedTrimStart, getSpectralPatches, hasSelection, largeSource, processingModules, selectionEnd, selectionStart]);
 
   const pauseBackgroundWork = useCallback(() => {
     backgroundPausedRef.current = true;
@@ -917,6 +959,8 @@ function App() {
     if (zoom > 1) setTimeViewCenter(viewStart + viewDuration / 2);
     selectionRef.current = [0, 0];
     setSelection([0, 0]);
+    setSpectralSelection(null);
+    setSpectralError('');
     playHeadRef.current = 0;
     setPlayHead(0);
   };
@@ -1025,7 +1069,9 @@ function App() {
     const warmStart = loop ? Math.min(seekWarmStart, loopStartFrame) : seekWarmStart;
     setOperationStatus('Buffering playback');
     let initialHumFrequencies: number[][];
+    let spectralPatches: SpectralRepairPatches;
     try {
+      spectralPatches = monitor === 'current' ? await getSpectralPatches() : {};
       initialHumFrequencies = monitor === 'current'
         ? await analyzeFileInitialHum(file, metadata, processingModules)
         : [];
@@ -1049,7 +1095,7 @@ function App() {
        },
        (moduleId, frame) => {
          if (chunkRepairs) chunkRepairs = addRepairMark(chunkRepairs, { moduleId, frame }, metadata.sampleRate);
-       });
+        }, spectralPatches);
     const loopStateFrame = loop ? loopStartFrame : nextFrame;
     if (monitor === 'current' && warmStart < loopStateFrame) {
       try {
@@ -1178,7 +1224,7 @@ function App() {
       animationRef.current = requestAnimationFrame(tick);
     };
     animationRef.current = requestAnimationFrame(tick);
-  }, [duration, flushHumHistory, largeSource, loop, monitor, processingModules, rate, recordHeardHum, source, stopPlayback]);
+  }, [duration, flushHumHistory, getSpectralPatches, largeSource, loop, monitor, processingModules, rate, recordHeardHum, source, stopPlayback]);
 
   useEffect(() => {
     playHeadRef.current = playHead;
@@ -1331,7 +1377,28 @@ function App() {
       setError(caught instanceof Error ? caught.message : 'Could not read the selected noise-only sample.');
     }
   };
+  const addSpectralRepair = (bounds: SpectralBounds | null) => {
+    if (!bounds || bounds.end <= bounds.start || bounds.high <= bounds.low) {
+      setSpectralError('Drag a time and frequency rectangle in either channel before adding a repair.');
+      return;
+    }
+    if (bounds.end - bounds.start > 10) {
+      setSpectralError('Spectral repairs cannot exceed 10 seconds. Select a shorter passage.');
+      return;
+    }
+    const module = makeModule('spectral-repair');
+    commitModules([...modules, {
+      ...module,
+      params: { ...module.params, ...bounds, mode: 'Attenuate', strength: 75, context: 0.2, weighting: 50 },
+    }]);
+    setSpectralError('');
+    setModuleMenu(false);
+  };
   const addModule = (type: AddModuleType) => {
+    if (type === 'spectral-repair') {
+      addSpectralRepair(spectralSelection);
+      return;
+    }
     const module = type === 'low-rumble' ? makeLowRumbleRemoval() : type === 'bring-back-low-end' ? makeBringBackLowEnd() : type === 'fade-in' ? makeFadeIn() : type === 'fade-out' ? makeFadeOut() : makeModule(type);
     commitModules([...modules, module]);
     setModuleMenu(false);
@@ -1567,8 +1634,10 @@ function App() {
           const lastFrame = Math.min(metadata.frameCount, Math.ceil(trimEnd * metadata.sampleRate));
           const warmStart = 0;
           setOperationStatus('Analyzing opening audio');
+          const spectralPatches = await getSpectralPatches(controller.signal);
           const initialHumFrequencies = await analyzeFileInitialHum(file, metadata, processingModules, controller.signal);
-          const processor = createStreamingEditChain(processingModules, metadata.sampleRate, metadata.frameCount, warmStart, initialHumFrequencies);
+          const processor = createStreamingEditChain(processingModules, metadata.sampleRate, metadata.frameCount, warmStart,
+            initialHumFrequencies, undefined, undefined, undefined, spectralPatches);
           if (warmStart < firstFrame) {
             setOperationStatus('Preparing trimmed export');
             await warmFileProcessor(file, metadata, processor, warmStart, firstFrame, controller.signal);
@@ -1644,6 +1713,12 @@ function App() {
     const x = Math.max(0, Math.min(1, (event.clientX - bounds.left - SPECTROGRAM_LEFT) / plotWidth));
     return Math.max(0, Math.min(duration, viewStart + x * viewDuration));
   };
+  const canvasPointToFrequency = (event: ReactPointerEvent<HTMLCanvasElement>, pane: number) => {
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const paneHeight = Math.max(1, (bounds.height - SPECTROGRAM_BOTTOM) / 2);
+    const y = Math.max(0, Math.min(1, (event.clientY - bounds.top - pane * paneHeight) / paneHeight));
+    return spectrogramMaxFrequency - y * (spectrogramMaxFrequency - spectrogramMinFrequency);
+  };
   const setTrimEdge = (edge: 'start' | 'end', time: number, commit = false) => {
     const current = trimRef.current ?? [0, duration];
     const gap = Math.min(0.01, duration / 2);
@@ -1716,12 +1791,30 @@ function App() {
       }
       return;
     }
+    if (spectralSelectionMode && localY >= 0 && localY < graphBottom) {
+      const pane = localY < graphBottom / 2 ? 0 : 1;
+      spectralDragRef.current = { start: canvasPointToTime(event), frequency: canvasPointToFrequency(event, pane), pane, moved: false };
+      setSpectralError('');
+      event.currentTarget.setPointerCapture(event.pointerId);
+      return;
+    }
     const time = canvasPointToTime(event);
     pointerDragRef.current = { start: time, current: time, startClientX: event.clientX, moved: false };
     event.currentTarget.setPointerCapture(event.pointerId);
     seekTo(time);
   };
   const onCanvasPointerMove = (event: ReactPointerEvent<HTMLCanvasElement>) => {
+    if (spectralDragRef.current) {
+      const drag = spectralDragRef.current;
+      const time = canvasPointToTime(event);
+      const frequency = canvasPointToFrequency(event, drag.pane);
+      if (Math.abs(time - drag.start) > 0.001 || Math.abs(frequency - drag.frequency) > 1) drag.moved = true;
+      if (drag.moved) setSpectralSelection({
+        start: Math.min(drag.start, time), end: Math.max(drag.start, time),
+        low: Math.min(drag.frequency, frequency), high: Math.max(drag.frequency, frequency),
+      });
+      return;
+    }
     if (timeDragRef.current) {
       if (!timeDragRef.current.moved) {
         if (Math.abs(event.clientX - timeDragRef.current.startClientX) < 3) return;
@@ -1779,6 +1872,19 @@ function App() {
     setSelection([pointerDragRef.current.start, time]);
   };
   const onCanvasPointerUp = (event: ReactPointerEvent<HTMLCanvasElement>) => {
+    if (spectralDragRef.current) {
+      const drag = spectralDragRef.current;
+      if (drag.moved) {
+        const time = canvasPointToTime(event);
+        const frequency = canvasPointToFrequency(event, drag.pane);
+        setSpectralSelection({
+          start: Math.min(drag.start, time), end: Math.max(drag.start, time),
+          low: Math.min(drag.frequency, frequency), high: Math.max(drag.frequency, frequency),
+        });
+      }
+      spectralDragRef.current = null;
+      return;
+    }
     if (timeDragRef.current) {
       timeDragRef.current = null;
       return;
@@ -1961,6 +2067,32 @@ function App() {
       context.fillStyle = 'rgba(214, 237, 85, .13)'; context.fillRect(selectedLeft, 0, selectedRight - selectedLeft, graphBottom);
       context.strokeStyle = 'rgba(216, 237, 85, .5)'; context.strokeRect(selectedLeft, 0, selectedRight - selectedLeft, graphBottom);
     }
+    const drawSpectralBounds = (bounds: SpectralBounds, saved: boolean, enabled = true) => {
+      const left = graphLeft + (bounds.start - viewStart) / viewDuration * graphWidth;
+      const right = graphLeft + (bounds.end - viewStart) / viewDuration * graphWidth;
+      const top = (spectrogramMaxFrequency - bounds.high) / Math.max(1, spectrogramMaxFrequency - spectrogramMinFrequency) * paneHeight;
+      const bottom = (spectrogramMaxFrequency - bounds.low) / Math.max(1, spectrogramMaxFrequency - spectrogramMinFrequency) * paneHeight;
+      if (right < graphLeft || left > graphRight || bottom < 0 || top > paneHeight) return;
+      for (const paneTop of [0, paneHeight]) {
+        context.save();
+        context.beginPath();
+        context.rect(graphLeft, paneTop, graphWidth, paneHeight);
+        context.clip();
+        context.fillStyle = saved ? 'rgba(255, 175, 120, .10)' : 'rgba(216, 237, 85, .21)';
+        context.strokeStyle = saved ? 'rgba(255, 175, 120, .86)' : '#d8ed55';
+        context.lineWidth = saved ? 1.5 : 2;
+        context.setLineDash(saved || !enabled ? [5, 3] : []);
+        context.fillRect(left, paneTop + top, right - left, bottom - top);
+        context.strokeRect(left, paneTop + top, right - left, bottom - top);
+        context.restore();
+      }
+    };
+    modules.filter((module) => module.type === 'spectral-repair').forEach((module) => {
+      const p = module.params;
+      const bounds = { start: Number(p.start), end: Number(p.end), low: Number(p.low), high: Number(p.high) };
+      if (Object.values(bounds).every(Number.isFinite)) drawSpectralBounds(bounds, true, module.enabled);
+    });
+    if (spectralSelection) drawSpectralBounds(spectralSelection, false);
     if (spectrogramSource === 'current') {
       const startX = Math.max(graphLeft, Math.min(graphRight, graphLeft + ((trimStart - viewStart) / viewDuration) * graphWidth));
       const endX = Math.max(graphLeft, Math.min(graphRight, graphLeft + ((trimEnd - viewStart) / viewDuration) * graphWidth));
@@ -2009,7 +2141,7 @@ function App() {
     context.rotate(Math.PI / 2);
     context.fillText('LEVEL (dB)', 0, 0);
     context.restore();
-  }, [activeTab, canvasBounds, hasSelection, playHead, selectionEnd, selectionStart, sourceChannelCount, spectrogramCeilingDb, spectrogramFloorDb, spectrogramMaxFrequency, spectrogramMinFrequency, spectrogramPalette, spectrogramSource, spectrograms, trimEnd, trimStart, viewDuration, viewStart]);
+  }, [activeTab, canvasBounds, hasSelection, modules, spectralSelection, playHead, selectionEnd, selectionStart, sourceChannelCount, spectrogramCeilingDb, spectrogramFloorDb, spectrogramMaxFrequency, spectrogramMinFrequency, spectrogramPalette, spectrogramSource, spectrograms, trimEnd, trimStart, viewDuration, viewStart]);
 
   useEffect(() => {
     const keyHandler = (event: KeyboardEvent) => {
@@ -2201,8 +2333,9 @@ function App() {
                 <>
                   <section className="panel instrument-grid" aria-label="Spectrogram editor">
                     <div className="panel-header spectrogram-panel-header">
-                      <div className="flex items-center gap-3"><Waves size={17} color="hsl(var(--primary))" /><div><div className="section-title">Spectrogram / selection</div><div className="text-[10px] text-muted-foreground mt-0.5">Drag to select · double-click to clear · scroll/drag the bottom time axis · scroll/drag the left frequency axis · scroll/drag the right dB axis</div></div></div>
+                      <div className="flex items-center gap-3"><Waves size={17} color="hsl(var(--primary))" /><div><div className="section-title">Spectrogram / selection</div><div className="text-[10px] text-muted-foreground mt-0.5">{spectralSelectionMode ? 'Drag a rectangle inside either channel · bounds apply independently to both channels' : 'Drag to select · double-click to clear · scroll/drag the bottom time axis · scroll/drag the left frequency axis · scroll/drag the right dB axis'}</div></div></div>
                       <div className="spectrogram-header-actions">
+                        <button type="button" className={`spectral-mode-toggle ${spectralSelectionMode ? 'active' : ''}`} onClick={() => { setSpectralSelectionMode((value) => !value); setSpectralError(''); }} aria-pressed={spectralSelectionMode} data-testid="button-spectral-selection-mode">Spectral selection</button>
                         <div className="spectrogram-source-control" aria-label="Spectrogram source">
                           <span className="spectrogram-source-caption">Viewing</span>
                           <div className="spectrogram-source-toggle">
@@ -2218,7 +2351,7 @@ function App() {
                     </div>
                     <div className="panel-body !pt-3">
                       <div className="waveform-wrap">
-                        <canvas ref={canvasRef} className="waveform-canvas" onPointerDown={onCanvasPointerDown} onPointerMove={onCanvasPointerMove} onPointerUp={onCanvasPointerUp} onPointerCancel={onCanvasPointerUp} onDoubleClick={(event) => { event.preventDefault(); if (hasSelection) clearSelection(); }} aria-label={`${spectrogramSource === 'original' ? 'Original recording' : 'Edited signal'} interactive spectrogram from ${spectrogramMinFrequency / 1000} to ${spectrogramMaxFrequency / 1000} kilohertz with ${spectrogramFloorDb} to ${spectrogramCeilingDb} decibel scale, time from ${formatTime(viewStart)} to ${formatTime(viewStart + viewDuration)}`} data-testid="canvas-spectrogram" data-request-id={spectrogramRequestId} data-result-id={spectrogramResultId} />
+                        <canvas ref={canvasRef} className={`waveform-canvas ${spectralSelectionMode ? 'spectral-selecting' : ''}`} onPointerDown={onCanvasPointerDown} onPointerMove={onCanvasPointerMove} onPointerUp={onCanvasPointerUp} onPointerCancel={onCanvasPointerUp} onDoubleClick={(event) => { event.preventDefault(); if (spectralSelectionMode) { setSpectralSelection(null); setSpectralError(''); } else if (hasSelection) clearSelection(); }} aria-label={`${spectrogramSource === 'original' ? 'Original recording' : 'Edited signal'} interactive spectrogram from ${spectrogramMinFrequency / 1000} to ${spectrogramMaxFrequency / 1000} kilohertz with ${spectrogramFloorDb} to ${spectrogramCeilingDb} decibel scale, time from ${formatTime(viewStart)} to ${formatTime(viewStart + viewDuration)}`} data-testid="canvas-spectrogram" data-request-id={spectrogramRequestId} data-result-id={spectrogramResultId} />
                         {spectrogramSource === 'current' && visibleRepairs.length > 0 && <div className="repair-marker-rail" aria-label="Detected click and pop repairs on the time axis">
                           {visibleRepairs.map((mark) => {
                             const time = mark.frame / source.sampleRate;
@@ -2281,6 +2414,11 @@ function App() {
                           {hasSelection && <button type="button" className="quiet-btn !py-1 !px-2 !text-[10px]" onClick={clearSelection} title="Clear selection and return playback to the start" data-testid="button-clear-selection"><X size={12} /> Clear selection</button>}
                         </div>
                       </div>
+                      {(spectralSelectionMode || spectralSelection || spectralError) && <div className="spectral-action-strip">
+                        <div className="spectral-action-copy"><strong>Spectral repair</strong><span data-testid="text-spectral-selection">{spectralSelection ? `${formatTime(spectralSelection.start, true)}–${formatTime(spectralSelection.end, true)} · ${Math.round(spectralSelection.low)}–${Math.round(spectralSelection.high)} Hz` : 'Draw a rectangle in either channel to set time and frequency bounds.'}</span></div>
+                        <button type="button" className="primary-btn" onClick={() => addSpectralRepair(spectralSelection)} data-testid="button-add-spectral-repair"><Plus size={13} /> Add Spectral Repair</button>
+                        {spectralError && <p role="alert" data-testid="status-spectral-error" className="spectral-error">{spectralError}</p>}
+                      </div>}
                     </div>
                   </section>
                    <section className="panel signal-stats-bar" data-testid="panel-signal-statistics" data-request-id={analysisRequestId} data-result-id={analysisResultId}>
@@ -2520,6 +2658,16 @@ function ModuleCard({ module, humReadout, liveFrequencies, windActive, sampleRat
   const p = module.params;
   const fadeDirection = fadeControlDirection(module);
   const numberInput = (key: string, label: string, min: number, max: number, step: number, suffix = '', options?: { resetValue?: number; wheelStep?: number }) => <RangeControl label={label} value={Number(p[key])} min={min} max={max} step={step} suffix={suffix} resetValue={options?.resetValue} wheelStep={options?.wheelStep} onChange={(value) => updateParams(module.id, key, value)} testId={`range-${module.type}-${key}`} />;
+  const spectralBoundInput = (key: 'start' | 'end' | 'low' | 'high', label: string, max: number, step: number) => <label><span className="field-label">{label} {key === 'start' || key === 'end' ? '(s)' : '(Hz)'}</span><input key={`${module.id}-${key}-${p[key]}`} className="input-field font-mono-value" type="number" min={0} max={max} step={step} defaultValue={Number(p[key])} onBlur={(event) => {
+    const value = Number(event.currentTarget.value);
+    const next = { start: Number(p.start), end: Number(p.end), low: Number(p.low), high: Number(p.high), [key]: value };
+    if (!event.currentTarget.value.trim() || !Number.isFinite(value) || value < 0 || value > max ||
+      next.end <= next.start || next.end - next.start > 10 || next.high <= next.low) {
+      event.currentTarget.value = String(p[key]);
+      return;
+    }
+    updateParams(module.id, key, value);
+  }} onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }} data-testid={`input-spectral-${key}-${module.id}`} /></label>;
   return <div className={`module-card ${module.enabled ? '' : 'bypassed'}`} data-testid={`card-module-${module.id}`}><div className="module-head"><span className="module-index">{String(index + 2).padStart(2, '0')}</span><span className="module-dot" /><button type="button" className="module-name text-left" onDoubleClick={() => { const name = window.prompt('Rename module', module.name); if (name?.trim()) updateModule(module.id, { name: name.trim() }); }} title="Double-click to rename" data-testid={`button-rename-${module.id}`}>{module.name}</button><span className="module-summary">{moduleSummary(module, humReadout)}</span><button type="button" className={`icon-btn !h-6 !min-w-6 ${module.enabled ? 'text-[hsl(var(--primary))]' : ''}`} onClick={() => updateModule(module.id, { enabled: !module.enabled })} aria-label={`${module.enabled ? 'Bypass' : 'Enable'} ${module.name}`} aria-pressed={module.enabled} data-testid={`button-bypass-${module.id}`}><Check size={13} /></button><button type="button" className="icon-btn !h-6 !min-w-6" onClick={() => moveModule(index, -1)} disabled={index === 0} aria-label="Move module up" data-testid={`button-up-${module.id}`}><ArrowUp size={12} /></button><button type="button" className="icon-btn !h-6 !min-w-6" onClick={() => moveModule(index, 1)} disabled={index === total - 1} aria-label="Move module down" data-testid={`button-down-${module.id}`}><ArrowDown size={12} /></button><button type="button" className="icon-btn !h-6 !min-w-6" onClick={() => duplicateModule(module)} aria-label={`Duplicate ${module.name}`} data-testid={`button-duplicate-${module.id}`}><Layers3 size={12} /></button><button type="button" className="icon-btn !h-6 !min-w-6" onClick={() => deleteModule(module.id)} aria-label={`Delete ${module.name}`} data-testid={`button-delete-${module.id}`}><Trash2 size={12} /></button></div>
     {!collapsed && <div className="module-controls">
       {module.type === 'gain' && numberInput('db', 'Gain', -30, 30, .1, ' dB', { resetValue: 0, wheelStep: 1 })}
@@ -2569,6 +2717,20 @@ function ModuleCard({ module, humReadout, liveFrequencies, windActive, sampleRat
          </div>)}
        {(module.type === 'eq' || isFixedLowRumble(module)) && <EqCurve module={module} sampleRate={sampleRate} />}
       {module.type === 'region' && <div className="grid grid-cols-3 gap-2">{numberInput('start', 'Start', 0, 60, .1, ' s')}{numberInput('end', 'End', 0, 60, .1, ' s')}{numberInput('amount', 'Attenuate', -24, 0, .5, ' dB')}</div>}
+      {module.type === 'spectral-repair' && <div className="spectral-module-settings">
+        <p className="spectral-module-note">One rectangle, restored independently in each channel. The original recording remains untouched.</p>
+        <div className="spectral-bounds-grid">
+          {spectralBoundInput('start', 'Start', 86400, .001)}
+          {spectralBoundInput('end', 'End', 86400, .001)}
+          {spectralBoundInput('low', 'Low', sampleRate / 2, 1)}
+          {spectralBoundInput('high', 'High', sampleRate / 2, 1)}
+        </div>
+        <label><span className="field-label">Repair mode</span><select className="select-field" value={String(p.mode)} onChange={(event) => updateParams(module.id, 'mode', event.target.value)} data-testid={`select-spectral-mode-${module.id}`}><option>Attenuate</option><option>Replace</option></select></label>
+        {numberInput('strength', 'Strength', 0, 100, 1, '%', { resetValue: 75, wheelStep: 5 })}
+         {numberInput('context', 'Context', .02, 1, .01, ' s', { resetValue: .2 })}
+        {numberInput('weighting', 'Before / after weighting', 0, 100, 1, '%', { resetValue: 50, wheelStep: 5 })}
+         <p className="spectral-module-note">0% favors audio after; 100% favors audio before; 50% balances both. Compare with bypass before exporting.</p>
+      </div>}
       {module.type === 'ambient' && <div className="grid grid-cols-3 gap-2">{numberInput('start', 'Start', 0, 60, .1, ' s')}{numberInput('length', 'Length', .1, 8, .1, ' s')}{<div className="text-[10px] leading-relaxed text-muted-foreground self-end">Blends nearby ambience conservatively.</div>}</div>}
       <div className="text-[10px] text-muted-foreground flex items-center gap-1"><Info size={11} /> Browser-safe approximation. Preview before archival export.</div>
     </div>}

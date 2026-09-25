@@ -4,6 +4,7 @@ import { analyzeLargeLoudness } from './large-analysis';
 import { calculateFileSpectrogram } from './large-spectrogram';
 import { readAudioFrames } from './source-audio';
 import { analyzeFileInitialHum, createStreamingEditChain } from './streaming-edit-chain';
+import { prepareSpectralRepairs } from './prepare-spectral-repairs';
 import type { WorkerInboundMessage, WorkerJobRequest, WorkerOutboundMessage } from './analysis-worker-protocol';
 
 const scope = self as DedicatedWorkerGlobalScope;
@@ -28,16 +29,24 @@ async function checkpoint() {
 
 async function run(request: WorkerJobRequest) {
   await checkpoint();
+  const sourceMetadata = request.kind === 'loudness'
+    ? request.sourceMetadata ?? request.warmup?.metadata ?? request.metadata
+    : request.metadata;
   const initialHumFrequencies = request.modules
-    ? await analyzeFileInitialHum(request.file, request.kind === 'loudness' ? request.warmup?.metadata ?? request.metadata : request.metadata, request.modules)
+    ? await analyzeFileInitialHum(request.file, sourceMetadata, request.modules)
     : [];
+  await checkpoint();
+  const patches = request.patches ?? (request.modules
+    ? await prepareSpectralRepairs(request.file, sourceMetadata, request.modules)
+    : {});
   await checkpoint();
   if (request.kind === 'spectrogram') {
     const channelIndex = request.options.channelIndex ?? 0;
     const continuousTransform = request.modules?.some((module) =>
-      module.enabled && module.type === 'noise' && Number(module.params.strength) > 0) ?? false;
+      module.enabled && ((module.type === 'noise' || module.type === 'spectral-repair') && Number(module.params.strength) > 0)) ?? false;
     const continuousProcessor = continuousTransform
-      ? createStreamingEditChain(request.modules, request.metadata.sampleRate, request.metadata.frameCount, 0, initialHumFrequencies)
+      ? createStreamingEditChain(request.modules, request.metadata.sampleRate, request.metadata.frameCount, 0, initialHumFrequencies,
+        undefined, undefined, undefined, patches)
       : undefined;
     const result = await calculateFileSpectrogram(request.file, request.metadata, {
       ...request.options,
@@ -52,6 +61,7 @@ async function run(request: WorkerJobRequest) {
           request.metadata.frameCount,
           frame,
           initialHumFrequencies,
+          undefined, undefined, undefined, patches,
         ).process(channels, frame);
       },
       onProgress: (completed, total) => send({ type: 'progress', fraction: total ? completed / total : 1 }),
@@ -62,7 +72,8 @@ async function run(request: WorkerJobRequest) {
 
   const offset = request.frameOffset ?? 0;
   const processor = request.modules
-    ? createStreamingEditChain(request.modules, request.metadata.sampleRate, request.sourceFrameCount ?? request.metadata.frameCount, request.warmup?.startFrame ?? offset, initialHumFrequencies)
+    ? createStreamingEditChain(request.modules, request.metadata.sampleRate, request.sourceFrameCount ?? request.metadata.frameCount,
+      request.warmup?.startFrame ?? offset, initialHumFrequencies, undefined, undefined, undefined, patches)
     : null;
   if (processor && request.warmup?.frameCount) {
     const { metadata, startFrame, frameCount } = request.warmup;

@@ -6,6 +6,12 @@ import { NoiseReductionProcessor, noiseProfileFromParams, type NoiseReductionSna
 import { ClickPopProcessor, type ClickPopSnapshot } from './click-pop-removal';
 import { readAudioFrames, type AudioMetadata } from './source-audio';
 
+export interface SpectralRepairPatch {
+  startFrame: number;
+  channels: Float32Array[];
+}
+export type SpectralRepairPatches = Record<string, SpectralRepairPatch>;
+
 interface FilterState {
   x1: number;
   x2: number;
@@ -98,6 +104,7 @@ export class StreamingEditChain {
     private readonly onHumChange?: (moduleId: string, frame: number, frequencies: number[]) => void,
     private readonly onWindChange?: (moduleId: string, frame: number, active: boolean) => void,
     private readonly onClickRepair?: (moduleId: string, frame: number) => void,
+    private readonly spectralPatches: SpectralRepairPatches = {},
   ) {
     this.modules = modules;
     this.sampleRate = sampleRate;
@@ -277,6 +284,23 @@ export class StreamingEditChain {
         state.clickPop ??= new ClickPopProcessor(p, this.sampleRate, output.length,
           (frame) => this.onClickRepair?.(module.id, frame));
         state.clickPop.process(output, startFrame);
+      } else if (module.type === 'spectral-repair') {
+        const first = Math.max(0, Math.floor(Number(p.start) * this.sampleRate));
+        const last = Math.min(this.totalFrames, Math.ceil(Number(p.end) * this.sampleRate));
+        if (startFrame < last && startFrame + length > first && Number(p.strength) > 0) {
+          const patch = this.spectralPatches[module.id];
+          if (!patch) throw new Error(`Spectral Repair "${module.name}" is not prepared for file-backed processing.`);
+          const from = Math.max(startFrame, first);
+          const until = Math.min(startFrame + length, last);
+          if (from < patch.startFrame || until > patch.startFrame + (patch.channels[0]?.length ?? 0) ||
+            patch.channels.length !== output.length) {
+            throw new Error('Prepared Spectral Repair does not cover this audio range.');
+          }
+          output.forEach((channel, index) => channel.set(
+            patch.channels[index].subarray(from - patch.startFrame, until - patch.startFrame),
+            from - startFrame,
+          ));
+        }
       } else if (module.type === 'region') {
         const start = Math.max(0, Math.floor(Math.max(0, Number(p.start)) * this.sampleRate));
         const end = Math.floor(Math.max(Number(p.end), Number(p.start)) * this.sampleRate);
@@ -312,7 +336,8 @@ export const createStreamingEditChain = (
   onHumChange?: (moduleId: string, frame: number, frequencies: number[]) => void,
   onWindChange?: (moduleId: string, frame: number, active: boolean) => void,
   onClickRepair?: (moduleId: string, frame: number) => void,
-) => new StreamingEditChain(modules, sampleRate, totalFrames, initialFrame, initialHumFrequencies, onHumChange, onWindChange, onClickRepair);
+  spectralPatches: SpectralRepairPatches = {},
+) => new StreamingEditChain(modules, sampleRate, totalFrames, initialFrame, initialHumFrequencies, onHumChange, onWindChange, onClickRepair, spectralPatches);
 
 /** Reads at most two detector windows from a file; never decodes the whole take. */
 export async function analyzeFileInitialHum(file: Blob, metadata: AudioMetadata, modules: EditModule[], signal?: AbortSignal) {

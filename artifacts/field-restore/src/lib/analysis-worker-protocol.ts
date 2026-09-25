@@ -1,6 +1,7 @@
 import type { EditModule } from './edit-chain';
 import type { AudioMetadata } from './source-audio';
 import type { FileSpectrogramOptions } from './large-spectrogram';
+import type { SpectralRepairPatches } from './streaming-edit-chain';
 
 export type WorkerJobRequest =
   | {
@@ -10,6 +11,9 @@ export type WorkerJobRequest =
       modules?: EditModule[];
       frameOffset?: number;
       sourceFrameCount?: number;
+      /** Full recording metadata, even when metadata describes a trimmed analysis slice. */
+      sourceMetadata?: AudioMetadata;
+      patches?: SpectralRepairPatches;
       warmup?: { metadata: AudioMetadata; startFrame: number; frameCount: number };
     }
   | {
@@ -17,6 +21,7 @@ export type WorkerJobRequest =
       file: File;
       metadata: AudioMetadata;
       modules: EditModule[];
+      patches?: SpectralRepairPatches;
       options: Omit<FileSpectrogramOptions, 'signal' | 'onProgress' | 'transform' | 'checkpoint'>;
     };
 
