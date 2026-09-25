@@ -1,6 +1,6 @@
 import { cloneChannels, type ChannelData } from './audio';
 import { HumProcessor, humAnalysisWindowSize, humPrefixFrames } from './hum-removal';
-import { WindProcessor, WIND_DEFAULTS, WIND_SHELF_SCOPE_DETECTED, WIND_SHELF_SCOPE_WHOLE, windLevel } from './wind-reduction';
+import { WindProcessor, WIND_COMPENSATION_TIMING, WIND_DEFAULTS, WIND_SHELF_SCOPE_DETECTED, WIND_SHELF_SCOPE_WHOLE, windCompensationTiming, windLevel } from './wind-reduction';
 import { NoiseReductionProcessor, noiseProfileFromParams } from './noise-reduction';
 import { ClickPopProcessor } from './click-pop-removal';
 import { renderSpectralRepair } from './spectral-repair';
@@ -25,7 +25,7 @@ let idCounter = 1;
 export const makeModule = (type: ModuleType, options?: { name?: string; params?: Record<string, number | string> }): EditModule => {
   const defaults: Record<ModuleType, Record<string, number | string>> = {
     gain: { db: -2 }, fade: { in: 7, out: 7, inEnabled: 1, outEnabled: 1 }, eq: { mode: 'three-band', low: 0, mid: 0, high: -1, frequency: 55, q: 0.4, gain: 0 }, dc: { mode: 'Auto', amount: 0 },
-    hum: { mode: 'Static', frequency: 60, reduction: 12 }, wind: { mode: 'Automatic', ...WIND_DEFAULTS, lowEndEnabled: 0, lowEndScope: WIND_SHELF_SCOPE_WHOLE, lowEndFrequency: 55, lowEndQ: .4, lowEndGain: 2 }, noise: { strength: 50 },
+    hum: { mode: 'Static', frequency: 60, reduction: 12 }, wind: { mode: 'Automatic', ...WIND_DEFAULTS, compensationAttackMs: WIND_COMPENSATION_TIMING.attack.defaultMs, compensationReleaseMs: WIND_COMPENSATION_TIMING.release.defaultMs, lowEndEnabled: 0, lowEndScope: WIND_SHELF_SCOPE_WHOLE, lowEndFrequency: 55, lowEndQ: .4, lowEndGain: 2 }, noise: { strength: 50 },
     'click-pop': { mode: 'Automatic', strength: 75 },
     'spectral-repair': { start: 0, end: .5, low: 1000, high: 5000, mode: 'Attenuate', strength: 75, context: .2, weighting: 50, fundamental: 100 },
     region: { start: 0, end: 0, amount: -8 }, ambient: { start: 0, end: 0, length: 1 },
@@ -86,11 +86,22 @@ export const normalizeWindModule = (module: EditModule): EditModule => {
   if (module.params.mode === 'Automatic' &&
     module.params.cutoff === undefined && module.params.q === undefined &&
     ['Low', 'Medium', 'High'].includes(String(module.params.detection)) &&
-    ['Low', 'Medium', 'High'].includes(String(module.params.removal))) return name === module.name ? module : { ...module, name };
+    ['Low', 'Medium', 'High'].includes(String(module.params.removal))) {
+    const timing = windCompensationTiming(module.params);
+    const params = {
+      ...module.params,
+      compensationAttackMs: timing.attackMs,
+      compensationReleaseMs: timing.releaseMs,
+    };
+    return name === module.name && params.compensationAttackMs === module.params.compensationAttackMs &&
+      params.compensationReleaseMs === module.params.compensationReleaseMs ? module : { ...module, name, params };
+  }
   return { ...module, name, params: {
     mode: 'Automatic',
     detection: windLevel(module.params.detection),
     removal: windLevel(module.params.removal),
+    compensationAttackMs: WIND_COMPENSATION_TIMING.attack.defaultMs,
+    compensationReleaseMs: WIND_COMPENSATION_TIMING.release.defaultMs,
   } };
 };
 
@@ -302,7 +313,8 @@ export function applyModule(input: ChannelData, module: EditModule, sampleRate: 
       output.forEach((channel) => processBiquad(channel, coefficients));
     } else {
       new WindProcessor(sampleRate, output.length, windLevel(p.detection), windLevel(p.removal),
-        context.onWindChange && ((frame, active) => context.onWindChange!(frameOffset + frame, active)))
+        context.onWindChange && ((frame, active) => context.onWindChange!(frameOffset + frame, active)),
+        0, windCompensationTiming(p))
         .process(output, followsWind ? applyShelfAtFrame : undefined);
     }
     if (lowEndShelfEnabled(p) && !followsWind) {

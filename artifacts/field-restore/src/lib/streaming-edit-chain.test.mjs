@@ -259,7 +259,10 @@ test('file-backed detected-wind compensation export and restored playback match 
     });
   });
   const wind = makeModule('wind', {
-    params: { lowEndEnabled: 1, lowEndScope: 'Detected wind only', lowEndGain: 8 },
+    params: {
+      lowEndEnabled: 1, lowEndScope: 'Detected wind only', lowEndGain: 8,
+      compensationAttackMs: 95, compensationReleaseMs: 520,
+    },
   });
   const processingModules = makeProcessingChain([wind]);
   const memory = renderChain(input, processingModules, rate);

@@ -1,6 +1,6 @@
 import type { ChannelData } from './audio';
 import { automaticDcBlockerPole, analyzeInitialHum, fadeGainAtFrame, isFixedLowRumble, lowEndShelfCoefficients, lowEndShelfEnabled, lowEndShelfFollowsWind, type EditModule } from './edit-chain';
-import { WindProcessor, windLevel, type WindSnapshot } from './wind-reduction';
+import { WindProcessor, windCompensationTiming, windLevel, type WindSnapshot } from './wind-reduction';
 import { HumProcessor, humPrefixFrames, type HumSnapshot } from './hum-removal';
 import { NoiseReductionProcessor, noiseProfileFromParams, type NoiseReductionSnapshot } from './noise-reduction';
 import { ClickPopProcessor, type ClickPopSnapshot } from './click-pop-removal';
@@ -200,7 +200,8 @@ export class StreamingEditChain {
       target.wind = saved.wind
         ? new WindProcessor(this.sampleRate, this.modules[index].type === 'wind' ? saved.wind.channels.length : 0,
           windLevel(this.modules[index].params.detection), windLevel(this.modules[index].params.removal),
-          (frame, active) => this.onWindChange?.(this.modules[index].id, frame, active))
+          (frame, active) => this.onWindChange?.(this.modules[index].id, frame, active), 0,
+          windCompensationTiming(this.modules[index].params))
         : undefined;
       if (saved.wind) target.wind?.restore(saved.wind);
       target.noise = saved.noise
@@ -291,7 +292,8 @@ export class StreamingEditChain {
           }));
         } else {
           state.wind ??= new WindProcessor(this.sampleRate, output.length, windLevel(p.detection), windLevel(p.removal),
-            (frame, active) => this.onWindChange?.(module.id, frame, active), startFrame);
+            (frame, active) => this.onWindChange?.(module.id, frame, active), startFrame,
+            windCompensationTiming(p));
           state.wind.process(output, followsWind ? (frame, amount) => {
             for (let c = 0; c < output.length; c++) {
               const channel = output[c];

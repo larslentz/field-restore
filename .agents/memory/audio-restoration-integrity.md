@@ -74,3 +74,9 @@ Automatic click/pop cleanup in a same-length streaming pipeline cannot know at a
 **Why:** A fixed-duration hold can mute a genuine sustained onset and create a second audible edge when released; quieter clicks also disappear from detection if the threshold is tied to a loudness floor.
 
 **How to apply:** Prefer bounded, gradually decaying correction with a threshold informed by local variation, disclose that sharp wanted impacts may soften, and check the pop tail and abrupt-onset release as well as the first corrected sample.
+
+Detected-wind low-end compensation has its own attack/release envelope; do not retime Wind Removal's separate high-pass crossfade when tuning the compensation fade. Include the compensation envelope in streaming snapshots so restored loops resume with the same timing.
+
+**Why:** Listeners need to tune how the compensating shelf follows wind without unintentionally changing the reducer's existing sound or making memory, streaming, and looped playback disagree.
+
+**How to apply:** Keep detector targets shared, response envelopes independent, and settings sourced from the edit module in every rendering route.

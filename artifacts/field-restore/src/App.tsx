@@ -4,7 +4,7 @@ import { Activity, ArrowDown, ArrowUp, Check, ChevronDown, CircleHelp, Download,
 import { createDemoAudio, downloadBlob, encodeWav, parseWav, type AudioSource } from '@/lib/audio';
 import { decodeChannels, loadProject, projectFromSource, saveProject } from '@/lib/persistence';
 import { AUTOMATIC_DC_REMOVAL, humOpeningReadout, isFixedLowRumble, isLegacyWind, lowEndShelfEnabled, lowEndShelfFollowsWind, makeDefaultChain, makeLowRumbleRemoval, makeModule, makeProcessingChain, makeRestorationReport, MODULE_LABELS, toggleEditableModules, withFadeRange, withoutLegacyDcModules, type EditModule, type HumScanState } from '@/lib/edit-chain';
-import { WIND_SHELF_SCOPE_DETECTED, WIND_SHELF_SCOPE_WHOLE } from '@/lib/wind-reduction';
+import { WIND_COMPENSATION_TIMING, WIND_SHELF_SCOPE_DETECTED, WIND_SHELF_SCOPE_WHOLE, windCompensationTiming } from '@/lib/wind-reduction';
 import { analyzeLoudness, type LoudnessStats } from '@/lib/loudness';
 import { createPlaybackRangePlan, playbackPositionAtElapsed } from '@/lib/playback-range';
 import type { SpectrogramData } from '@/lib/spectrogram';
@@ -2838,7 +2838,15 @@ function ModuleCard({ module, humReadout, liveFrequencies, windActive, windHisto
             {numberInput('lowEndQ', 'Q', .1, 2, .01)}
             {numberInput('lowEndGain', 'Gain', -12, 12, .1, ' dB')}
           </div>
-           <p className="text-[11px] leading-relaxed text-muted-foreground" data-testid={`bring-back-low-end-usage-note-${module.id}`}>Only use this filter if you previously used the {isFixedLowRumble(module) ? 'Low Rumble Removal' : 'Wind Removal'} filter. This one attempts to bring back a bit of low end to smooth and compensate for what was removed with {isFixedLowRumble(module) ? 'Low Rumble Removal' : 'Wind Removal'}. {isFixedLowRumble(module) ? 'Adjust values to somewhat match the removed filter, or adjust to taste.' : lowEndShelfFollowsWind(p) ? 'Detected-wind mode follows the detector’s smoothed attack and release, leaving other passages unchanged.' : 'Whole-recording mode keeps the shelf active throughout, as before.'}</p>
+           {!isFixedLowRumble(module) && lowEndShelfEnabled(p) && lowEndShelfFollowsWind(p) && <div className="space-y-2 border-t border-border pt-3" data-testid={`wind-compensation-timing-${module.id}`}>
+             <div className="text-[11px] font-semibold">Detected-wind fade timing</div>
+             <div className="grid grid-cols-2 gap-3">
+               <RangeControl label="Attack" value={windCompensationTiming(p).attackMs} min={WIND_COMPENSATION_TIMING.attack.minMs} max={WIND_COMPENSATION_TIMING.attack.maxMs} step={5} suffix=" ms" resetValue={WIND_COMPENSATION_TIMING.attack.defaultMs} onChange={(value) => updateParams(module.id, 'compensationAttackMs', value)} testId={`range-wind-compensation-attack-${module.id}`} />
+               <RangeControl label="Release" value={windCompensationTiming(p).releaseMs} min={WIND_COMPENSATION_TIMING.release.minMs} max={WIND_COMPENSATION_TIMING.release.maxMs} step={10} suffix=" ms" resetValue={WIND_COMPENSATION_TIMING.release.defaultMs} onChange={(value) => updateParams(module.id, 'compensationReleaseMs', value)} testId={`range-wind-compensation-release-${module.id}`} />
+             </div>
+             <p className="text-[10px] leading-relaxed text-muted-foreground">These fades affect detected-wind low-end compensation only. Wind Removal’s own response keeps its existing timing. Double-click a control to restore its default.</p>
+           </div>}
+            <p className="text-[11px] leading-relaxed text-muted-foreground" data-testid={`bring-back-low-end-usage-note-${module.id}`}>Only use this filter if you previously used the {isFixedLowRumble(module) ? 'Low Rumble Removal' : 'Wind Removal'} filter. This one attempts to bring back a bit of low end to smooth and compensate for what was removed with {isFixedLowRumble(module) ? 'Low Rumble Removal' : 'Wind Removal'}. {isFixedLowRumble(module) ? 'Adjust values to somewhat match the removed filter, or adjust to taste.' : lowEndShelfFollowsWind(p) ? 'Detected-wind mode follows the detector with the adjustable fade timing above, leaving other passages unchanged.' : 'Whole-recording mode keeps the shelf active throughout, as before.'}</p>
         </div>}
         {(module.type === 'eq' || isFixedLowRumble(module) || (module.type === 'wind' && lowEndShelfEnabled(p))) && <EqCurve module={module} sampleRate={sampleRate} />}
       {module.type === 'region' && <div className="grid grid-cols-3 gap-2">{numberInput('start', 'Start', 0, 60, .1, ' s')}{numberInput('end', 'End', 0, 60, .1, ' s')}{numberInput('amount', 'Attenuate', -24, 0, .5, ' dB')}</div>}

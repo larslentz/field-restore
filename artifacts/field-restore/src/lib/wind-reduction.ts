@@ -2,11 +2,36 @@ import type { ChannelData } from './audio';
 
 export type WindLevel = 'Low' | 'Medium' | 'High';
 export const WIND_DEFAULTS = { detection: 'Medium', removal: 'Medium' } as const;
+export const WIND_COMPENSATION_TIMING = {
+  attack: { defaultMs: 25, minMs: 5, maxMs: 250 },
+  release: { defaultMs: 180, minMs: 20, maxMs: 1000 },
+} as const;
 export const WIND_SHELF_SCOPE_WHOLE = 'Whole recording' as const;
 export const WIND_SHELF_SCOPE_DETECTED = 'Detected wind only' as const;
 
 export function windLevel(value: unknown): WindLevel {
   return value === 'Low' || value === 'High' ? value : 'Medium';
+}
+
+export interface WindCompensationTiming {
+  attackMs: number;
+  releaseMs: number;
+}
+
+export function windCompensationTiming(params: {
+  compensationAttackMs?: unknown;
+  compensationReleaseMs?: unknown;
+}): WindCompensationTiming {
+  const timing = (value: unknown, limits: typeof WIND_COMPENSATION_TIMING.attack | typeof WIND_COMPENSATION_TIMING.release) => {
+    const numeric = value === undefined || value === null || value === '' ? Number.NaN : Number(value);
+    return Number.isFinite(numeric)
+      ? Math.min(limits.maxMs, Math.max(limits.minMs, numeric))
+      : limits.defaultMs;
+  };
+  return {
+    attackMs: timing(params.compensationAttackMs, WIND_COMPENSATION_TIMING.attack),
+    releaseMs: timing(params.compensationReleaseMs, WIND_COMPENSATION_TIMING.release),
+  };
 }
 
 interface ChannelState {
@@ -29,6 +54,7 @@ export interface WindSnapshot {
   frame: number;
   target: number;
   wet: number;
+  compensationWet: number;
   active: boolean;
   confirmed: boolean;
 }
@@ -49,12 +75,18 @@ export class WindProcessor {
   private readonly wideAlpha: number;
   private readonly attack: number;
   private readonly release: number;
+  private readonly compensationAttack: number;
+  private readonly compensationRelease: number;
   private readonly maxWet: number;
   private readonly coefficients: { b0: number; b1: number; b2: number; a1: number; a2: number };
 
   constructor(private readonly sampleRate: number, private readonly channelCount: number,
     private readonly detection: WindLevel, private readonly removal: WindLevel,
-    private readonly onChange?: (frame: number, active: boolean) => void, initialFrame = 0) {
+    private readonly onChange?: (frame: number, active: boolean) => void, initialFrame = 0,
+    compensationTiming: WindCompensationTiming = {
+      attackMs: WIND_COMPENSATION_TIMING.attack.defaultMs,
+      releaseMs: WIND_COMPENSATION_TIMING.release.defaultMs,
+    }) {
     this.window = Math.max(512, Math.round(sampleRate * .1));
     const pole = (hz: number) => 1 - Math.exp(-2 * Math.PI * hz / sampleRate);
     this.slowAlpha = pole(18);
@@ -63,6 +95,8 @@ export class WindProcessor {
     this.wideAlpha = pole(1100);
     this.attack = 1 - Math.exp(-1 / (.025 * sampleRate));
     this.release = 1 - Math.exp(-1 / (.18 * sampleRate));
+    this.compensationAttack = 1 - Math.exp(-1 / (compensationTiming.attackMs / 1000 * sampleRate));
+    this.compensationRelease = 1 - Math.exp(-1 / (compensationTiming.releaseMs / 1000 * sampleRate));
     this.maxWet = removal === 'Low' ? .38 : removal === 'High' ? .96 : .72;
     const omega = 2 * Math.PI * Math.min(140, sampleRate * .2) / sampleRate;
     const cos = Math.cos(omega);
@@ -79,7 +113,7 @@ export class WindProcessor {
     return {
       channels: Array.from({ length: this.channelCount }, newChannel),
       lowEnergy: 0, upperEnergy: 0, midEnergy: 0, count: 0,
-      frame, target: 0, wet: 0, active: false, confirmed: false,
+      frame, target: 0, wet: 0, compensationWet: 0, active: false, confirmed: false,
     };
   }
 
@@ -153,6 +187,8 @@ export class WindProcessor {
         }
       }
       s.wet += (s.target - s.wet) * (s.target > s.wet ? this.attack : this.release);
+      s.compensationWet += (s.target - s.compensationWet) *
+        (s.target > s.compensationWet ? this.compensationAttack : this.compensationRelease);
       for (let c = 0; c < channels.length; c++) {
         const f = s.channels[c];
         const sample = channels[c][i];
@@ -160,7 +196,7 @@ export class WindProcessor {
         f.x2 = f.x1; f.x1 = sample; f.y2 = f.y1; f.y1 = filtered;
         channels[c][i] = sample + s.wet * (filtered - sample);
       }
-      onWindEnvelope?.(i, s.wet / this.maxWet);
+      onWindEnvelope?.(i, s.compensationWet / this.maxWet);
     }
   }
 }

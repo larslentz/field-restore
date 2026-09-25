@@ -3,7 +3,7 @@ import test from 'node:test';
 import { isFixedLowRumble, isLegacyWind, makeDefaultChain, makeLowRumbleRemoval, makeModule, renderChain, withoutLegacyDcModules } from './edit-chain.ts';
 import { parseChainPresets } from './chain-presets.ts';
 import { createStreamingEditChain } from './streaming-edit-chain.ts';
-import { WindProcessor } from './wind-reduction.ts';
+import { WIND_COMPENSATION_TIMING, WindProcessor, windCompensationTiming } from './wind-reduction.ts';
 
 const sampleRate = 24000;
 const count = sampleRate * 4;
@@ -76,6 +76,44 @@ test('the wind envelope used for compensation ramps and releases smoothly', () =
   assert.ok(largestStep <= .002, `envelope step ${largestStep} should not create an abrupt shelf edge`);
 });
 
+test('adjustable compensation fades do not change wind removal and default to its current timing', () => {
+  const input = sampleInput();
+  const render = (timing) => {
+    const envelope = [];
+    const events = [];
+    const output = [new Float32Array(input)];
+    new WindProcessor(sampleRate, 1, 'Medium', 'Medium',
+      (frame, active) => events.push({ frame, active }), 0, timing)
+      .process(output, (_frame, amount) => envelope.push(amount));
+    return { output: output[0], envelope, events };
+  };
+  const defaults = render(undefined);
+  const explicitDefaults = render({
+    attackMs: WIND_COMPENSATION_TIMING.attack.defaultMs,
+    releaseMs: WIND_COMPENSATION_TIMING.release.defaultMs,
+  });
+  const slower = render({ attackMs: 100, releaseMs: 500 });
+
+  assert.deepEqual(defaults.output, explicitDefaults.output);
+  assert.deepEqual(defaults.envelope, explicitDefaults.envelope);
+  assert.deepEqual(defaults.output, slower.output, 'timing controls must not alter the wind reducer crossfade');
+  assert.deepEqual(defaults.events, slower.events, 'timing controls must not alter detector decisions');
+
+  const activeFrame = defaults.events.find(({ active }) => active)?.frame;
+  const releaseFrame = defaults.events.find(({ active, frame }) => !active && frame > activeFrame)?.frame;
+  assert.ok(activeFrame !== undefined && releaseFrame !== undefined);
+  const attackProbe = activeFrame + Math.round(sampleRate * .025);
+  const releaseProbe = releaseFrame + Math.round(sampleRate * .1);
+  assert.ok(slower.envelope[attackProbe] < defaults.envelope[attackProbe],
+    'a slower attack should delay the compensation fade-in');
+  assert.ok(slower.envelope[releaseProbe] > defaults.envelope[releaseProbe],
+    'a slower release should extend the compensation fade-out');
+
+  assert.deepEqual(windCompensationTiming({}), { attackMs: 25, releaseMs: 180 });
+  assert.deepEqual(windCompensationTiming({ compensationAttackMs: 1, compensationReleaseMs: 2000 }),
+    { attackMs: 5, releaseMs: 1000 });
+});
+
 test('persistent broadband rumble is reduced, while a single wanted bass tone is spared', () => {
   const persistent = sampleInput(0, count);
   const events = [];
@@ -137,6 +175,8 @@ test('low-end compensation can follow the smoothed wind envelope without changin
       lowEndEnabled: 1,
       lowEndScope: 'Detected wind only',
       lowEndGain: 8,
+      compensationAttackMs: 95,
+      compensationReleaseMs: 520,
     },
   };
   const unboosted = renderChain([input], [base], sampleRate)[0];
@@ -199,7 +239,10 @@ test('legacy projects and presets convert Wind / Rumble but retain fixed Low Rum
   const normalized = withoutLegacyDcModules([oldWind, renamedWind, oldLow, renamedLow]);
   assert.ok(isLegacyWind(oldWind));
   assert.deepEqual(normalized.slice(0, 2).map((module) => module.params),
-    Array(2).fill({ mode: 'Automatic', detection: 'Medium', removal: 'Medium' }));
+    Array(2).fill({
+      mode: 'Automatic', detection: 'Medium', removal: 'Medium',
+      compensationAttackMs: 25, compensationReleaseMs: 180,
+    }));
   assert.equal(makeModule('wind').name, 'Wind Removal');
   assert.equal(normalized[0].name, 'Wind Removal');
   assert.equal(normalized[1].name, 'Gust cleanup');
