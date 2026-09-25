@@ -19,7 +19,7 @@ const scope = self as DedicatedWorkerGlobalScope;
 scope.onmessage = (event: MessageEvent<Request>) => {
   try {
     const { original, current, sampleRate, kept, selection } = event.data;
-    const empty: LoudnessStats = { truePeakDbtp: -Infinity, integratedLufs: -Infinity, loudnessRangeLu: NaN, maxShortTermLufs: -Infinity };
+    const empty: LoudnessStats = { truePeakDbtp: -Infinity, integratedLufs: -Infinity, loudnessRangeLu: NaN, maxShortTermLufs: -Infinity, plrLu: NaN, lbpr: { valueDb: NaN, channels: [] } };
     const result: MemoryLoudnessResult = {
       original: analyzeLoudness(original, sampleRate),
       current: analyzeLoudness(current, sampleRate, kept[0], kept[1]),

@@ -1,5 +1,6 @@
 import { readAudioFrames, type AudioMetadata } from './source-audio';
 import type { LoudnessStats } from './loudness';
+import { createLbprAccumulator, peakToLoudnessRatio } from './signal-ratios';
 
 export interface LargeAnalysisProgress {
   completed: number;
@@ -95,6 +96,7 @@ export async function analyzeLargeLoudness(
   const shelfFilter = shelf(rate); const highFilter = highPass(rate);
   const shelfStates = Array.from({ length: metadata.channels }, state);
   const highStates = Array.from({ length: metadata.channels }, state);
+  const lbpr = createLbprAccumulator(metadata.channels, rate);
   let shortSum = 0; let momentarySum = 0; let frame = 0; let peak = 0;
   let previous: number[][] = Array.from({ length: metadata.channels }, () => []);
 
@@ -127,11 +129,13 @@ export async function analyzeLargeLoudness(
       let frameEnergy = 0;
       for (let c = 0; c < metadata.channels; c += 1) {
         const sample = channels[c]?.[i] ?? 0;
+        lbpr.addSample(c, sample);
         const filtered = biquad(biquad(sample, shelfFilter, shelfStates[c]), highFilter, highStates[c]);
         frameEnergy += filtered * filtered;
         const p = previous[c]; p.push(sample);
         if (p.length >= 4) { truePeak(p[p.length - 4], p[p.length - 3], p[p.length - 2], p[p.length - 1]); p.shift(); }
       }
+      lbpr.finishFrame();
       const ringIndex = frame % shortWindow;
       const oldShort = frame >= shortWindow ? rolling[ringIndex] : 0;
       const oldMoment = frame >= momentaryWindow ? rolling[(frame - momentaryWindow) % shortWindow] : 0;
@@ -176,8 +180,10 @@ export async function analyzeLargeLoudness(
   const low = histogramPercentile(shortBins, percentileGate, 0.1);
   const high = histogramPercentile(shortBins, percentileGate, 0.95);
   if (!shortBins.some(Boolean)) maxShort = lufs(shortSum / Math.max(1, frame));
-  const result: LargeAnalysisResult = { truePeakDbtp: peak ? 20 * Math.log10(peak) : SILENCE, integratedLufs,
+  const truePeakDbtp = peak ? 20 * Math.log10(peak) : SILENCE;
+  const result: LargeAnalysisResult = { truePeakDbtp, integratedLufs,
     loudnessRangeLu: shortCount > 1 && Number.isFinite(low) && Number.isFinite(high) ? Math.max(0, high - low) : NaN, maxShortTermLufs: maxShort,
+    plrLu: peakToLoudnessRatio(truePeakDbtp, integratedLufs), lbpr: lbpr.result(),
     progress: { completed: frame, total, fraction: total ? frame / total : 1 } };
   options.onProgress?.(result.progress);
   return result;

@@ -22,6 +22,7 @@ import { recordHumHistory, visibleHumHistory, type HumHistorySegment, type Visib
 import { recordWindHistory, windActivityAt, windActivityAtSorted, type WindHistorySegment } from '@/lib/wind-history';
 import { preparePresetModules, readChainPresets, saveChainPreset, type ChainPreset } from '@/lib/chain-presets';
 import { EqCurve } from '@/components/EqCurve';
+import { LbprStat, PlrStat } from '@/components/SignalRatios';
 import { anchoredFrequencyViewMin, anchoredLevelScaleCeiling, anchoredTimeViewStart, frequencyScaleTicks, levelScaleTicks } from '@/lib/spectrogram-scale';
 import { SPECTROGRAM_DATA_HEIGHT, SPECTROGRAM_FFT_SIZE } from '@/lib/spectrogram-resolution';
 import { DEFAULT_SPECTROGRAM_PALETTE, SPECTROGRAM_PALETTES, spectrogramColor, spectrogramColorCss, spectrogramLegendStops, type SpectrogramPaletteId } from '@/lib/spectrogram-palette';
@@ -65,7 +66,7 @@ const SPECTROGRAM_MIN_LEVEL_SPAN_DB = 10;
 const SPECTROGRAM_MAX_LEVEL_SPAN_DB = 180;
 const SPECTROGRAM_DISPLAY_HEIGHT = 110;
 const HUM_MARKER_COLORS = ['#d8ed55', '#75d7ef', '#ffaf78', '#d7a7fa'];
-const EMPTY_STATS: LoudnessStats = { truePeakDbtp: -Infinity, integratedLufs: -Infinity, loudnessRangeLu: NaN, maxShortTermLufs: -Infinity };
+const EMPTY_STATS: LoudnessStats = { truePeakDbtp: -Infinity, integratedLufs: -Infinity, loudnessRangeLu: NaN, maxShortTermLufs: -Infinity, plrLu: NaN, lbpr: { valueDb: NaN, channels: [] } };
 const EMPTY_SPECTROGRAM = { width: 480, height: 110, values: new Float32Array(480 * 110) };
 
 const EMPTY_CHANNELS: Float32Array[] = [];
@@ -2521,7 +2522,7 @@ function App() {
                             : <div className="stat-grid"><div className="stat-cell text-[11px] text-muted-foreground">No selection · full track playback</div></div>}
                        </div>
                      </div>
-                     <div className="signal-stats-note"><Info size={12} />Local BS.1770-style estimates with 4× true-peak interpolation; not certified meter readings.</div>
+                     <div className="signal-stats-note"><Info size={12} />Local BS.1770-style estimates with 4× true-peak interpolation; LBPR is a DR14-style estimate using sample peaks and includes the final partial block. Not certified meter readings.</div>
                    </section>
                   <section className="transport" aria-label="Audio transport">
                     <button type="button" className="icon-btn !bg-[#d8ed55] !text-[#18231f] !rounded-full" onClick={play} aria-label={isPlaying ? 'Pause playback' : 'Play playback'} data-testid="button-play">{isPlaying ? <Pause size={16} fill="currentColor" /> : <Play size={16} fill="currentColor" />}</button>
@@ -2659,7 +2660,14 @@ function HumSpectrogramOverlay({ modules, segments, sampleRate, onSeek }: {
 }
 
 function StatsGrid({ stats }: { stats: LoudnessStats }) {
-  return <div className="stat-grid"><div className="stat-cell"><div className="stat-value">{formatLevel(stats.truePeakDbtp, 'dBTP')}</div><div className="stat-label">True peak estimate</div></div><div className="stat-cell"><div className="stat-value">{formatLevel(stats.integratedLufs, 'LUFS')}</div><div className="stat-label">Integrated loudness</div></div><div className="stat-cell"><div className="stat-value">{formatLra(stats.loudnessRangeLu)}</div><div className="stat-label">Loudness range (LRA)</div></div><div className="stat-cell"><div className="stat-value">{formatLevel(stats.maxShortTermLufs, 'LUFS')}</div><div className="stat-label">Max short-term</div></div></div>;
+  return <div className="stat-grid">
+    <div className="stat-cell"><div className="stat-value">{formatLevel(stats.truePeakDbtp, 'dBTP')}</div><div className="stat-label">True peak estimate</div></div>
+    <div className="stat-cell"><div className="stat-value">{formatLevel(stats.integratedLufs, 'LUFS')}</div><div className="stat-label">Integrated loudness</div></div>
+    <div className="stat-cell"><div className="stat-value">{formatLra(stats.loudnessRangeLu)}</div><div className="stat-label">Loudness range (LRA)</div></div>
+    <div className="stat-cell"><div className="stat-value">{formatLevel(stats.maxShortTermLufs, 'LUFS')}</div><div className="stat-label">Max short-term</div></div>
+    <PlrStat stats={stats} label="Peak-to-loudness ratio (PLR)" />
+    <LbprStat stats={stats} label="Loud-Block Peak-to-RMS (LBPR)" />
+  </div>;
 }
 
 function RangeControl({ label, value, min, max, step, suffix, onChange, resetValue, wheelStep, testId }: { label: string; value: number; min: number; max: number; step: number; suffix: string; onChange: (value: number) => void; resetValue?: number; wheelStep?: number; testId?: string }) {
@@ -2929,7 +2937,7 @@ function AnalyzePanel({ originalStats, currentStats, selectionOriginalStats, sel
       <section className="panel">
         <div className="panel-header"><div className="section-title">Interpretation notes</div></div>
         <div className="panel-body grid md:grid-cols-3 gap-3 text-[12px]">
-          <div className="border-l-2 border-[#d8ed55] pl-3"><strong>Loudness context</strong><p className="text-muted-foreground mt-1 leading-relaxed">Use integrated loudness for the overall program and loudness range (LRA) for long-term variation. LRA needs at least two valid 3-second readings; shorter or silent ranges show N/A. Preserve headroom for archival work.</p></div>
+          <div className="border-l-2 border-[#d8ed55] pl-3"><strong>Loudness context</strong><p className="text-muted-foreground mt-1 leading-relaxed">Use integrated loudness for the overall program and loudness range (LRA) for long-term variation. LRA needs at least two valid 3-second readings; shorter or silent ranges show N/A. PLR is estimated true peak minus integrated loudness. LBPR uses sample peaks and the loudest 20% of non-silent, non-overlapping 3-second RMS blocks; it includes a final partial block and is a DR14-style estimate, not official TT DR. Preserve headroom for archival work.</p></div>
           <div className="border-l-2 border-[#ff8a4c] pl-3"><strong>Chain impact</strong><p className="text-muted-foreground mt-1 leading-relaxed">{modules.filter((module) => module.enabled).length} enabled modules are rendered in order. Bypassed modules remain editable.</p></div>
           <div className="border-l-2 border-[#91a69d] pl-3"><strong>Known boundary</strong><p className="text-muted-foreground mt-1 leading-relaxed">These browser-local readings follow BS.1770-style weighting and gating but are not a substitute for a calibrated compliance meter.</p></div>
         </div>
@@ -2951,6 +2959,10 @@ function SignalComparison({ title, original, current }: { title: string; origina
         <div className="stat-cell"><div className="stat-value">{formatLra(current.loudnessRangeLu)}</div><div className="stat-label">Current loudness range (LRA)</div></div>
         <div className="stat-cell"><div className="stat-value">{formatLevel(original.maxShortTermLufs, 'LUFS')}</div><div className="stat-label">Original max short-term</div></div>
         <div className="stat-cell"><div className="stat-value">{formatLevel(current.maxShortTermLufs, 'LUFS')}</div><div className="stat-label">Current max short-term</div></div>
+        <PlrStat stats={original} label="Original peak-to-loudness ratio (PLR)" />
+        <PlrStat stats={current} label="Current peak-to-loudness ratio (PLR)" />
+        <LbprStat stats={original} label="Original Loud-Block Peak-to-RMS (LBPR)" />
+        <LbprStat stats={current} label="Current Loud-Block Peak-to-RMS (LBPR)" />
       </div>
     </div>
   );

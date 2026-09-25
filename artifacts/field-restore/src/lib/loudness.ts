@@ -1,8 +1,12 @@
+import { createLbprAccumulator, peakToLoudnessRatio, type LbprResult } from './signal-ratios';
+
 export interface LoudnessStats {
   truePeakDbtp: number;
   integratedLufs: number;
   loudnessRangeLu: number;
   maxShortTermLufs: number;
+  plrLu: number;
+  lbpr: LbprResult;
 }
 
 interface BiquadCoefficients {
@@ -139,6 +143,7 @@ export function analyzeLoudness(
   const highPass = highPassCoefficients(sampleRate);
   const shelfStates = channels.map(() => emptyState());
   const highPassStates = channels.map(() => emptyState());
+  const lbpr = createLbprAccumulator(channels.length, sampleRate);
   const momentaryEnergies: number[] = [];
   const shortTermEnergies: number[] = [];
   let momentarySum = 0;
@@ -148,10 +153,12 @@ export function analyzeLoudness(
     let frameEnergy = 0;
     for (let channelIndex = 0; channelIndex < channels.length; channelIndex += 1) {
       const input = channels[channelIndex][from + offset] ?? 0;
+      lbpr.addSample(channelIndex, input);
       const shelved = processBiquad(input, shelf, shelfStates[channelIndex]);
       const weighted = processBiquad(shelved, highPass, highPassStates[channelIndex]);
       frameEnergy += weighted * weighted;
     }
+    lbpr.finishFrame();
 
     const ringIndex = offset % shortTermWindow;
     const outgoingShort = offset >= shortTermWindow ? ring[ringIndex] : 0;
@@ -183,10 +190,13 @@ export function analyzeLoudness(
     ? Math.max(0, percentile(gatedShortTerm, 0.95) - percentile(gatedShortTerm, 0.1))
     : NaN;
 
+  const truePeakDbtp = estimateTruePeak(channels, from, to);
   return {
-    truePeakDbtp: estimateTruePeak(channels, from, to),
+    truePeakDbtp,
     integratedLufs,
     loudnessRangeLu,
     maxShortTermLufs: shortTermLoudness.length ? Math.max(...shortTermLoudness) : energyToLufs(shortTermSum / frameCount),
+    plrLu: peakToLoudnessRatio(truePeakDbtp, integratedLufs),
+    lbpr: lbpr.result(),
   };
 }

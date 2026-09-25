@@ -6,6 +6,7 @@ import { audioRange, fingerprintAudio, parseAudioMetadata, readAudioFrames } fro
 import { encodeWav, parseWav } from './audio.ts';
 import { openVerifiedFileHandle } from './file-access.ts';
 import { analyzeLargeLoudness } from './large-analysis.ts';
+import { analyzeLoudness } from './loudness.ts';
 import { calculateFileSpectrogram } from './large-spectrogram.ts';
 
 const source = () => new File([Buffer.from(FLAC_SINE_BASE64, 'base64')], 'tone.flac', { type: 'audio/flac' });
@@ -51,7 +52,12 @@ test('file-backed FLAC analysis and spectrogram can read decoded ranges', async 
   const file = source();
   const metadata = await parseFlacMetadata(file);
   const analysis = await analyzeLargeLoudness(file, metadata);
-  assert.ok(analysis);
+  const decoded = await decodeFlac(file, metadata);
+  const inMemory = analyzeLoudness(decoded.channels, metadata.sampleRate);
+  assert.ok(Math.abs(analysis.plrLu - inMemory.plrLu) < 0.5);
+  assert.ok(Math.abs(analysis.lbpr.valueDb - inMemory.lbpr.valueDb) < 1e-6);
+  assert.deepEqual(analysis.lbpr.channels.map((channel) => channel.samplePeakDbfs),
+    inMemory.lbpr.channels.map((channel) => channel.samplePeakDbfs));
   const spectrogram = await calculateFileSpectrogram(file, audioRange(metadata, 256, 4096), {
     width: 12, height: 32, durationSeconds: 4096 / metadata.sampleRate,
   });
