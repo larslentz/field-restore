@@ -15,18 +15,22 @@ function biquadResponseDb(coefficients: ReturnType<typeof highPass>, sampleRate:
   return 20 * Math.log10(Math.max(1e-8, numerator / denominator));
 }
 
-/** The linear, steady-state response of an individual edit (before output clipping). */
-export function moduleFrequencyResponseDb(module: EditModule, sampleRate: number, frequency: number): number {
+/** The configured low-end shelf response, including when the shelf is switched off. */
+export function lowEndShelfFrequencyResponseDb(module: EditModule, sampleRate: number, frequency: number): number {
+  if (module.type !== 'wind') return 0;
+  return biquadResponseDb(lowEndShelfCoefficients(module.params, sampleRate), sampleRate, frequency);
+}
+
+/** The edit's static response without its embedded low-end shelf. */
+export function moduleCoreFrequencyResponseDb(module: EditModule, sampleRate: number, frequency: number): number {
   const p = module.params;
-  const lowEnd = module.type === 'wind' && lowEndShelfEnabled(p)
-    ? biquadResponseDb(lowEndShelfCoefficients(p, sampleRate), sampleRate, frequency) : 0;
   if (isFixedLowRumble(module)) {
     return biquadResponseDb(
       highPass(sampleRate, Math.max(20, Number(p.cutoff) || 100), Math.max(0.1, Number(p.q) || 0.7)),
       sampleRate, frequency,
-    ) + lowEnd;
+    );
   }
-  if (module.type === 'wind') return lowEnd; // Only the low shelf is static; wind reduction depends on recording and time.
+  if (module.type === 'wind') return 0; // Automatic wind reduction varies with the recording and time.
   if (module.type !== 'eq') return 0;
   if (p.mode === 'low-shelf') {
     return biquadResponseDb(
@@ -49,4 +53,11 @@ export function moduleFrequencyResponseDb(module: EditModule, sampleRate: number
     upperGain + (lowGain - upperGain) * lowReal,
     (lowGain - upperGain) * lowImag,
   )));
+}
+
+/** The linear, steady-state response of an individual edit (before output clipping). */
+export function moduleFrequencyResponseDb(module: EditModule, sampleRate: number, frequency: number): number {
+  const lowEnd = module.type === 'wind' && lowEndShelfEnabled(module.params)
+    ? lowEndShelfFrequencyResponseDb(module, sampleRate, frequency) : 0;
+  return moduleCoreFrequencyResponseDb(module, sampleRate, frequency) + lowEnd;
 }

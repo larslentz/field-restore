@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { makeLowRumbleRemoval, makeModule } from './edit-chain.ts';
-import { moduleFrequencyResponseDb } from './frequency-response.ts';
+import { lowEndShelfFrequencyResponseDb, moduleCoreFrequencyResponseDb, moduleFrequencyResponseDb } from './frequency-response.ts';
 
 const response = (module, hz) => moduleFrequencyResponseDb(module, 48000, hz);
+const coreResponse = (module, hz) => moduleCoreFrequencyResponseDb(module, 48000, hz);
+const shelfResponse = (module, hz) => lowEndShelfFrequencyResponseDb(module, 48000, hz);
 
 test('high-pass curve follows cutoff and Q settings', () => {
   const filter = makeLowRumbleRemoval();
@@ -29,11 +31,35 @@ test('automatic wind reduction does not claim a static frequency response', () =
 test('low-rumble curve includes the enabled low-end shelf and excludes it when off', () => {
   const filter = makeLowRumbleRemoval();
   const boosted = response(filter, 25);
+  const highPass = coreResponse(filter, 25);
+  const shelf = shelfResponse(filter, 25);
+  assert.ok(Math.abs(boosted - highPass - shelf) < 1e-8);
   filter.params.lowEndEnabled = 0;
   assert.ok(boosted > response(filter, 25) + 1);
+  assert.equal(coreResponse(filter, 25), highPass);
+  assert.equal(shelfResponse(filter, 25), shelf); // Off still shows the configured profile.
   filter.params.lowEndEnabled = 1;
   filter.params.lowEndGain = 6;
   assert.ok(response(filter, 25) > boosted + 2.7);
+  assert.equal(coreResponse(filter, 25), highPass);
+  assert.ok(shelfResponse(filter, 25) > shelf + 2.7);
+  const adjustedShelf = shelfResponse(filter, 25);
+  filter.params.cutoff = 120;
+  assert.notEqual(coreResponse(filter, 25), highPass);
+  assert.equal(shelfResponse(filter, 25), adjustedShelf);
+});
+
+test('wind removal has no fixed core response; its independent shelf follows its configured settings', () => {
+  const wind = makeModule('wind');
+  const shelf = shelfResponse(wind, 25);
+  assert.equal(coreResponse(wind, 25), 0);
+  assert.ok(shelf > 1);
+  assert.equal(response(wind, 25), 0);
+  wind.params.lowEndEnabled = 1;
+  assert.ok(Math.abs(response(wind, 25) - shelf) < 1e-8);
+  wind.params.lowEndFrequency = 160;
+  assert.notEqual(shelfResponse(wind, 80), shelfResponse(makeModule('wind'), 80));
+  assert.equal(coreResponse(wind, 80), 0);
 });
 
 test('low shelf curve follows gain and frequency', () => {

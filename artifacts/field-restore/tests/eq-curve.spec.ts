@@ -28,6 +28,27 @@ test('both removal items offer independent low-end shelves with honest response 
       await expect(range).toHaveAttribute('max', max);
       await expect(range).toHaveAttribute('step', step);
     }
+    const shelfCurve = card.getByTestId(`eq-curve-low-end-${id}`);
+    await expect(shelfCurve).toBeVisible();
+    if (!initiallyEnabled) await expect(shelfCurve).toContainText('Off · not applied');
+    const shelfFollowsControls = await card.evaluate((element, moduleId) => {
+      const controls = element.querySelector(`[data-testid="low-end-controls-${moduleId}"]`);
+      return controls?.nextElementSibling?.getAttribute('data-testid') === `eq-curve-low-end-${moduleId}`;
+    }, id);
+    expect(shelfFollowsControls).toBe(true);
+
+    const removalCurve = name === 'Low Rumble Removal' ? card.getByTestId(`eq-curve-${id}`) : null;
+    if (removalCurve) {
+      await expect(removalCurve).toContainText('Frequency response · Low Rumble Removal');
+      const removalPrecedesShelf = await card.evaluate((element, moduleId) => {
+        const curve = element.querySelector(`[data-testid="eq-curve-${moduleId}"]`);
+        const controls = element.querySelector(`[data-testid="low-end-controls-${moduleId}"]`);
+        return Boolean(curve && controls && (curve.compareDocumentPosition(controls) & Node.DOCUMENT_POSITION_FOLLOWING));
+      }, id);
+      expect(removalPrecedesShelf).toBe(true);
+    } else {
+      await expect(card.getByTestId(`eq-curve-${id}`)).toHaveCount(0);
+    }
     if (!initiallyEnabled) await toggle.check();
     if (name === 'Wind Removal') {
       const scope = card.getByTestId(`select-low-end-scope-${id}`);
@@ -49,19 +70,22 @@ test('both removal items offer independent low-end shelves with honest response 
       await expect(attack).toHaveValue('105');
       await expect(release).toHaveValue('520');
     }
-    const curve = card.getByTestId(`eq-curve-${id}`);
-    await expect(curve).toBeVisible();
-    const initialPath = await curve.getByTestId('eq-response-path').getAttribute('d');
+    const initialShelfPath = await shelfCurve.getByTestId('eq-response-path').getAttribute('d');
+    const initialRemovalPath = removalCurve && await removalCurve.getByTestId('eq-response-path').getAttribute('d');
     await card.getByTestId('range-wind-lowEndGain').fill('8');
-    await expect.poll(() => curve.getByTestId('eq-response-path').getAttribute('d')).not.toBe(initialPath);
-    if (name === 'Wind Removal') await expect(curve).toContainText('wind reduction not shown');
-    await toggle.uncheck();
+    await expect.poll(() => shelfCurve.getByTestId('eq-response-path').getAttribute('d')).not.toBe(initialShelfPath);
+    if (removalCurve) await expect(removalCurve.getByTestId('eq-response-path')).toHaveAttribute('d', initialRemovalPath!);
     if (name === 'Wind Removal') {
-      await expect(curve).toHaveCount(0);
-      await expect(card.getByTestId(`wind-compensation-timing-${id}`)).toHaveCount(0);
+      await expect(shelfCurve).toContainText('wind reduction varies over time and is not shown');
+      await expect(shelfCurve).toContainText('Detected wind only');
+      await expect(shelfCurve).toContainText('shelf follows detected wind');
     }
+    await toggle.uncheck();
+    await expect(shelfCurve).toContainText('Off · not applied');
+    if (name === 'Wind Removal') await expect(card.getByTestId(`wind-compensation-timing-${id}`)).toHaveCount(0);
     await card.getByTestId(`button-bypass-${id}`).click();
-    if (name === 'Low Rumble Removal') await expect(curve).toContainText('Bypassed · not applied');
+    await expect(shelfCurve).toContainText('Bypassed · not applied');
+    if (removalCurve) await expect(removalCurve).toContainText('Bypassed · not applied');
     await page.getByTestId('button-close-chain').click();
   }
 
@@ -69,4 +93,17 @@ test('both removal items offer independent low-end shelves with honest response 
   await page.getByTestId('button-open-chain').click();
   await page.getByRole('dialog', { name: 'Edit chain' }).getByRole('button', { name: 'Add module' }).click();
   await expect(page.locator('.drawer-module-menu').getByRole('button', { name: 'Bring Back the Low End' })).toHaveCount(0);
+  await page.getByRole('dialog', { name: 'Edit chain' }).getByRole('button', { name: 'Add module' }).click();
+  for (const name of ['Low Rumble Removal', 'Wind Removal']) {
+    await page.locator('.chain-drawer-mobile-list').getByRole('button', { name: new RegExp(name) }).click();
+    const card = page.locator('.chain-drawer-body [data-testid^="card-module-"]');
+    const id = (await card.getAttribute('data-testid'))!.replace('card-module-', '');
+    await expect(card.getByTestId(`eq-curve-low-end-${id}`)).toBeVisible();
+    if (name === 'Low Rumble Removal') await expect(card.getByTestId(`eq-curve-${id}`)).toBeVisible();
+    const plotsFitViewport = await card.locator('.eq-curve').evaluateAll((plots) => plots.every((plot) => {
+      const { left, right } = plot.getBoundingClientRect();
+      return left >= 0 && right <= window.innerWidth + 1;
+    }));
+    expect(plotsFitViewport).toBe(true);
+  }
 });
