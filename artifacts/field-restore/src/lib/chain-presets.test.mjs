@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseChainPresets, readChainPresets, saveChainPreset } from './chain-presets.ts';
-import { makeModule } from './edit-chain.ts';
+import { parseChainPresets, preparePresetModules, readChainPresets, saveChainPreset } from './chain-presets.ts';
+import { makeModule, renderChain } from './edit-chain.ts';
+import { createStreamingEditChain } from './streaming-edit-chain.ts';
 
 function memoryStorage() {
   const values = new Map();
@@ -34,4 +35,18 @@ test('duplicate names and corrupt stored data never overwrite saved presets', ()
   assert.deepEqual(parseChainPresets(null), []);
   assert.throws(() => parseChainPresets('{"oops":true}'), /could not be read/);
   assert.throws(() => parseChainPresets('{broken'), /could not be read/);
+});
+
+test('older presets containing Region Attenuation still load and process in memory and chunks', () => {
+  const region = makeModule('region', { params: { start: .25, end: .75, amount: -6 } });
+  const preset = parseChainPresets(JSON.stringify([{ name: 'Older cleanup', modules: [region] }]))[0];
+  const modules = preparePresetModules(preset, null).modules;
+  assert.deepEqual(modules, [region]);
+  const input = [new Float32Array(100).fill(.5)];
+  const memory = renderChain(input, modules, 100);
+  const streamed = createStreamingEditChain(modules, 100, 100).process(input, 0);
+  assert.deepEqual(streamed, memory);
+  assert.equal(memory[0][0], .5);
+  assert.ok(memory[0][50] < .3);
+  assert.equal(memory[0][99], .5);
 });
