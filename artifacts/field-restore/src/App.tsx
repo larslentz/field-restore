@@ -19,6 +19,7 @@ import { prepareSpectralRepairsInWorker } from '@/lib/worker-spectral-prep';
 import { measureNoiseProfile, NOISE_PROFILE_BANDS, NOISE_SAMPLE_MAX_SECONDS, NOISE_SAMPLE_MIN_SECONDS } from '@/lib/noise-reduction';
 import { humAnalysisWindowSize, humPrefixFrames } from '@/lib/hum-removal';
 import { recordHumHistory, visibleHumHistory, type HumHistorySegment, type VisibleHumSegment } from '@/lib/hum-history';
+import { recordWindHistory, windActivityAt, windActivityAtSorted, type WindHistorySegment } from '@/lib/wind-history';
 import { preparePresetModules, readChainPresets, saveChainPreset, type ChainPreset } from '@/lib/chain-presets';
 import { EqCurve } from '@/components/EqCurve';
 import { anchoredFrequencyViewMin, anchoredLevelScaleCeiling, anchoredTimeViewStart, frequencyScaleTicks, levelScaleTicks } from '@/lib/spectrogram-scale';
@@ -133,11 +134,15 @@ function App() {
   const [liveHum, setLiveHum] = useState<LiveHum | null>(null);
   const [liveWind, setLiveWind] = useState<{ source: AudioSource; chain: EditModule[]; events: Array<{ moduleId: string; frame: number; active: boolean }> } | null>(null);
   const [humHistory, setHumHistory] = useState<{ source: AudioSource; chain: EditModule[]; segments: HumHistorySegment[] } | null>(null);
+  const [windHistory, setWindHistory] = useState<{ source: AudioSource; chain: EditModule[]; segments: WindHistorySegment[] } | null>(null);
   const [fileRepairs, setFileRepairs] = useState<{ source: AudioSource; chain: EditModule[]; marks: RepairMark[] } | null>(null);
   const [selectedRepair, setSelectedRepair] = useState<RepairMark | null>(null);
   const humHistoryRef = useRef<HumHistorySegment[]>([]);
   const humHistoryOwnerRef = useRef<{ source: AudioSource; chain: EditModule[] } | null>(null);
   const lastHistoryPublishRef = useRef(0);
+  const windHistoryRef = useRef<WindHistorySegment[]>([]);
+  const windHistoryOwnerRef = useRef<{ source: AudioSource; chain: EditModule[] } | null>(null);
+  const lastWindHistoryPublishRef = useRef(0);
   const [loop, setLoop] = useState(false);
   const [rate, setRate] = useState(1);
   const [monitor, setMonitor] = useState<MonitorMode>('current');
@@ -429,6 +434,9 @@ function App() {
     humHistoryRef.current = [];
     humHistoryOwnerRef.current = null;
     setHumHistory(null);
+    windHistoryRef.current = [];
+    windHistoryOwnerRef.current = null;
+    setWindHistory(null);
     setLiveHum(null);
     setLiveWind(null);
     setFileRepairs(null);
@@ -453,7 +461,27 @@ function App() {
   const flushHumHistory = useCallback(() => {
     if (humHistoryOwnerRef.current) setHumHistory({ ...humHistoryOwnerRef.current, segments: humHistoryRef.current });
   }, []);
+  const recordHeardWind = useCallback((moduleId: string, frame: number, active: boolean, sampleRate: number, startNewVisit = false) => {
+    const previous = windHistoryRef.current;
+    const next = recordWindHistory(previous, moduleId, frame, active, sampleRate, startNewVisit);
+    if (next === previous) return;
+    windHistoryRef.current = next;
+    windHistoryOwnerRef.current = { source, chain: processingModules };
+    const previousVisit = previous.findLast((segment) => segment.moduleId === moduleId);
+    const nextVisit = next.findLast((segment) => segment.moduleId === moduleId);
+    const newVisit = !previousVisit || !nextVisit || previousVisit.startFrame !== nextVisit.startFrame ||
+      previousVisit.active !== nextVisit.active;
+    const now = performance.now();
+    if (newVisit || now - lastWindHistoryPublishRef.current > 250) {
+      setWindHistory({ source, chain: processingModules, segments: next });
+      lastWindHistoryPublishRef.current = now;
+    }
+  }, [source, processingModules]);
+  const flushWindHistory = useCallback(() => {
+    if (windHistoryOwnerRef.current) setWindHistory({ ...windHistoryOwnerRef.current, segments: windHistoryRef.current });
+  }, []);
   const historySegments = humHistory?.source === source && humHistory.chain === processingModules ? humHistory.segments : [];
+  const windHistorySegments = windHistory?.source === source && windHistory.chain === processingModules ? windHistory.segments : [];
   const [fileHumScan, setFileHumScan] = useState<{
     source: LargeSource; chain: EditModule[]; frequencies: number[][]; error: boolean;
   } | null>(null);
@@ -511,8 +539,11 @@ function App() {
     const events = largeSource
       ? (liveWind?.source === source && liveWind.chain === processingModules ? liveWind.events : [])
       : memoryRender?.windEvents ?? [];
-    return [...events].reverse().find((entry) => entry.moduleId === moduleId && entry.frame <= playHead * source.sampleRate)?.active ?? false;
+    return largeSource
+      ? windActivityAt(events, moduleId, playHead * source.sampleRate)
+      : windActivityAtSorted(events, moduleId, playHead * source.sampleRate);
   };
+  const windHistoryFor = (moduleId: string) => windHistorySegments.filter((segment) => segment.moduleId === moduleId);
   const duration = source.duration;
   const trimStart = trim?.[0] ?? 0;
   const trimEnd = trim?.[1] ?? duration;
@@ -930,6 +961,7 @@ function App() {
     pendingMemoryPlaybackRef.current = false;
     setLiveHum(null);
     flushHumHistory();
+    flushWindHistory();
     scheduledNodesRef.current.forEach((node) => {
       node.onended = null;
       try { node.stop(); } catch { /* already stopped */ }
@@ -945,7 +977,7 @@ function App() {
     if (animationRef.current) cancelAnimationFrame(animationRef.current);
     animationRef.current = null;
     setIsPlaying(false);
-  }, [flushHumHistory]);
+  }, [flushHumHistory, flushWindHistory]);
   const clearSelection = () => {
     stopPlayback();
     if (zoom > 1) setTimeViewCenter(viewStart + viewDuration / 2);
@@ -996,12 +1028,20 @@ function App() {
         setIsPlaying(false);
         setLiveHum(null);
         flushHumHistory();
+        flushWindHistory();
         audioSourceRef.current = null;
       }
     };
     node.start(0, plan.bufferStartOffset);
     audioSourceRef.current = node; setIsPlaying(true);
     setLiveHum(null);
+    const windModules = monitor === 'current' ? processingModules.filter((module) =>
+      module.enabled && module.type === 'wind' && !isFixedLowRumble(module)) : [];
+    const memoryWindEvents = memoryRender?.windEvents ?? [];
+    const heardWindActivity = new Map<string, boolean>();
+    const windVisitsStarted = new Set<string>();
+    let windEventIndex = 0;
+    let previousWindFrame = -1;
     const tick = () => {
       if (audioSourceRef.current !== node) return;
       const elapsed = (context.currentTime - startedAt) * rate;
@@ -1010,6 +1050,22 @@ function App() {
       setPlayHead(position);
       if (monitor === 'current' && context.state === 'running' && context.currentTime > startedAt) {
         const frame = Math.floor(position * source.sampleRate);
+        if (frame < previousWindFrame) {
+          windEventIndex = 0;
+          heardWindActivity.clear();
+        }
+        while (windEventIndex < memoryWindEvents.length && memoryWindEvents[windEventIndex].frame <= frame) {
+          const event = memoryWindEvents[windEventIndex++];
+          heardWindActivity.set(event.moduleId, event.active);
+        }
+        previousWindFrame = frame;
+        windModules.forEach((module) => {
+          const active = heardWindActivity.get(module.id);
+          if (active !== undefined) {
+            recordHeardWind(module.id, frame, active, source.sampleRate, !windVisitsStarted.has(module.id));
+            windVisitsStarted.add(module.id);
+          }
+        });
         const frequencies: Record<string, number[]> = {};
         processingModules.forEach((module, index) => {
           if (module.enabled && module.type === 'hum' && module.params.mode !== 'Static' && Number(module.params.reduction) > 0)
@@ -1028,7 +1084,7 @@ function App() {
       animationRef.current = requestAnimationFrame(tick);
     };
     animationRef.current = requestAnimationFrame(tick);
-  }, [duration, flushHumHistory, loop, memoryHumFrequencies, memoryRender, monitor, processingModules, rate, recordHeardHum, source]);
+  }, [duration, flushHumHistory, flushWindHistory, loop, memoryHumFrequencies, memoryRender, monitor, processingModules, rate, recordHeardHum, recordHeardWind, source]);
 
   const startLargePlayback = useCallback(async (startPosition: number) => {
     if (!largeSource) return;
@@ -1078,16 +1134,21 @@ function App() {
     let chunkEvents: HumEvent[] | null = null;
     let chunkRepairs: RepairMark[] | null = null;
     const windEvents: Array<{ moduleId: string; frame: number; active: boolean }> = [];
+    const recordWindEvent = (moduleId: string, frame: number, active: boolean) => {
+      windEvents.push({ moduleId, frame, active });
+      if (windEvents.length > 512) windEvents.splice(0, windEvents.length - 512);
+      setLiveWind({ source, chain: processingModules, events: [...windEvents] });
+    };
     const processor = createStreamingEditChain(processingModules, metadata.sampleRate, metadata.frameCount, warmStart,
       initialHumFrequencies, (moduleId, frame, frequencies) => chunkEvents?.push({ moduleId, frame, frequencies }),
-      (moduleId, frame, active) => {
-        windEvents.push({ moduleId, frame, active });
-        if (windEvents.length > 512) windEvents.splice(0, windEvents.length - 512);
-        setLiveWind({ source, chain: processingModules, events: [...windEvents] });
-       },
+      recordWindEvent,
        (moduleId, frame) => {
          if (chunkRepairs) chunkRepairs = addRepairMark(chunkRepairs, { moduleId, frame }, metadata.sampleRate);
         }, spectralPatches);
+    const seedWindActivity = (frame: number) => {
+      Object.entries(processor.trackedWindActivity()).forEach(([moduleId, active]) =>
+        recordWindEvent(moduleId, frame, active));
+    };
     const loopStateFrame = loop ? loopStartFrame : nextFrame;
     if (monitor === 'current' && warmStart < loopStateFrame) {
       try {
@@ -1115,7 +1176,9 @@ function App() {
       }
     }
     if (playbackSessionRef.current !== session) return;
+    seedWindActivity(nextFrame);
     const pending: Array<{ at: number; frame: number; moduleId: string; frequencies: number[] }> = [];
+    const windVisitsStarted = new Set<string>();
     let audible = processor.trackedHumFrequencies();
     setLiveHum({ source, chain: processingModules, frequencies: audible });
     setIsPlaying(true);
@@ -1129,6 +1192,7 @@ function App() {
             if (!loop) break;
             nextFrame = loopStartFrame;
             processor.restore(loopState);
+            seedWindActivity(loopStartFrame);
             pending.push(...Object.entries(processor.trackedHumFrequencies()).map(([moduleId, frequencies]) =>
               ({ at: scheduledAt, frame: loopStartFrame, moduleId, frequencies })));
           }
@@ -1179,6 +1243,7 @@ function App() {
               setIsPlaying(false);
               setLiveHum(null);
               flushHumHistory();
+              flushWindHistory();
               setOperationStatus('');
               scheduledNodesRef.current = [];
             };
@@ -1202,21 +1267,30 @@ function App() {
       playHeadRef.current = position;
       setPlayHead(position);
       if (monitor === 'current' && context.currentTime >= startedAt) {
-        let changed = false;
-        while (pending.length && pending[0].at <= context.currentTime) {
-          const event = pending.shift()!;
-          audible = { ...audible, [event.moduleId]: event.frequencies };
-          recordHeardHum(event.moduleId, event.frame, event.frequencies, metadata.sampleRate);
-          changed = true;
-        }
-        if (changed) setLiveHum({ source, chain: processingModules, frequencies: audible });
-        Object.entries(audible).forEach(([moduleId, frequencies]) =>
-          recordHeardHum(moduleId, Math.floor(position * metadata.sampleRate), frequencies, metadata.sampleRate));
+         const frame = Math.floor(position * metadata.sampleRate);
+         processingModules.forEach((module) => {
+           if (!module.enabled || module.type !== 'wind' || isFixedLowRumble(module)) return;
+           const active = windActivityAt(windEvents, module.id, frame);
+           if (active !== null) {
+             recordHeardWind(module.id, frame, active, metadata.sampleRate, !windVisitsStarted.has(module.id));
+             windVisitsStarted.add(module.id);
+           }
+         });
+         let changed = false;
+         while (pending.length && pending[0].at <= context.currentTime) {
+           const event = pending.shift()!;
+           audible = { ...audible, [event.moduleId]: event.frequencies };
+           recordHeardHum(event.moduleId, event.frame, event.frequencies, metadata.sampleRate);
+           changed = true;
+         }
+         if (changed) setLiveHum({ source, chain: processingModules, frequencies: audible });
+         Object.entries(audible).forEach(([moduleId, frequencies]) =>
+           recordHeardHum(moduleId, frame, frequencies, metadata.sampleRate));
       }
       animationRef.current = requestAnimationFrame(tick);
     };
     animationRef.current = requestAnimationFrame(tick);
-  }, [duration, flushHumHistory, getSpectralPatches, largeSource, loop, monitor, processingModules, rate, recordHeardHum, source, stopPlayback]);
+  }, [duration, flushHumHistory, flushWindHistory, getSpectralPatches, largeSource, loop, monitor, processingModules, rate, recordHeardHum, recordHeardWind, source, stopPlayback]);
 
   useEffect(() => {
     playHeadRef.current = playHead;
@@ -2520,7 +2594,7 @@ function App() {
              <div className="relative"><button type="button" className="quiet-btn w-full" onClick={() => setModuleMenu(!moduleMenu)}><Plus size={13} /> Add module</button>{moduleMenu && <div className="drawer-module-menu">{MODULE_TYPES.map((type) => <button type="button" key={type} onClick={() => addModule(type)}>{moduleOptionLabel(type)}</button>)}</div>}</div>
           </div>
           <div className="chain-drawer-body">
-             {automaticDcSelected ? <AutomaticDcCard /> : selectedModule ? <ModuleCard module={selectedModule} humReadout={selectedModule.type === 'hum' ? humReadoutFor(selectedModule) : undefined} liveFrequencies={liveHumFrequencies?.[selectedModule.id]} windActive={windActivityFor(selectedModule.id)} sampleRate={source.sampleRate} index={modules.findIndex((module) => module.id === selectedModule.id)} total={modules.length} collapsed={false} updateModule={updateModule} updateParams={updateParams} captureNoiseSample={captureNoiseSample} selectionLength={selectionEnd - selectionStart} deleteModule={deleteModule} duplicateModule={duplicateModule} moveModule={moveModule} /> : <div className="chain-drawer-full-list"><AutomaticDcCard />{modules.map((module, index) => <ModuleCard key={module.id} module={module} humReadout={module.type === 'hum' ? humReadoutFor(module) : undefined} liveFrequencies={liveHumFrequencies?.[module.id]} windActive={windActivityFor(module.id)} sampleRate={source.sampleRate} index={index} total={modules.length} collapsed={false} updateModule={updateModule} updateParams={updateParams} captureNoiseSample={captureNoiseSample} selectionLength={selectionEnd - selectionStart} deleteModule={deleteModule} duplicateModule={duplicateModule} moveModule={moveModule} />)}{modules.length === 0 && <div className="empty-state">No additional edits yet.</div>}</div>}
+              {automaticDcSelected ? <AutomaticDcCard /> : selectedModule ? <ModuleCard module={selectedModule} humReadout={selectedModule.type === 'hum' ? humReadoutFor(selectedModule) : undefined} liveFrequencies={liveHumFrequencies?.[selectedModule.id]} windActive={windActivityFor(selectedModule.id)} windHistory={windHistoryFor(selectedModule.id)} sampleRate={source.sampleRate} duration={duration} index={modules.findIndex((module) => module.id === selectedModule.id)} total={modules.length} collapsed={false} updateModule={updateModule} updateParams={updateParams} captureNoiseSample={captureNoiseSample} selectionLength={selectionEnd - selectionStart} deleteModule={deleteModule} duplicateModule={duplicateModule} moveModule={moveModule} /> : <div className="chain-drawer-full-list"><AutomaticDcCard />{modules.map((module, index) => <ModuleCard key={module.id} module={module} humReadout={module.type === 'hum' ? humReadoutFor(module) : undefined} liveFrequencies={liveHumFrequencies?.[module.id]} windActive={windActivityFor(module.id)} windHistory={windHistoryFor(module.id)} sampleRate={source.sampleRate} duration={duration} index={index} total={modules.length} collapsed={false} updateModule={updateModule} updateParams={updateParams} captureNoiseSample={captureNoiseSample} selectionLength={selectionEnd - selectionStart} deleteModule={deleteModule} duplicateModule={duplicateModule} moveModule={moveModule} />)}{modules.length === 0 && <div className="empty-state">No additional edits yet.</div>}</div>}
           </div>
           <div className="chain-drawer-footer">processing is local · original stays untouched</div>
         </aside>
@@ -2657,7 +2731,39 @@ function HumHistoryView({ modules, segments, sampleRate, duration, onSeek }: {
   </section>;
 }
 
-function ModuleCard({ module, humReadout, liveFrequencies, windActive, sampleRate, index, total, collapsed, updateModule, updateParams, captureNoiseSample, selectionLength, deleteModule, duplicateModule, moveModule }: { module: EditModule; humReadout?: ReturnType<typeof humOpeningReadout>; liveFrequencies?: number[]; windActive?: boolean | null; sampleRate: number; index: number; total: number; collapsed: boolean; updateModule: (id: string, patch: Partial<EditModule>) => void; updateParams: (id: string, key: string, value: number | string) => void; captureNoiseSample: (id: string) => Promise<void>; selectionLength: number; deleteModule: (id: string) => void; duplicateModule: (module: EditModule) => void; moveModule: (index: number, direction: -1 | 1) => void }) {
+function WindHistoryTimeline({ moduleId, moduleName, segments, sampleRate, duration }: {
+  moduleId: string; moduleName: string; segments: WindHistorySegment[]; sampleRate: number; duration: number;
+}) {
+  const safeDuration = Math.max(duration, .001);
+  return <div className="rounded-md border border-border px-2.5 py-2 space-y-1" data-testid={`wind-history-${moduleId}`}>
+    <div className="text-[10px] font-semibold">Playback history · heard positions only</div>
+    <p className="text-[10px] leading-relaxed text-muted-foreground">
+      Recent processed playback in this tab. Bright marks mean the detector confirmed wind reduction; gray marks mean it was idle. Unmarked areas have no retained confirmation.
+    </p>
+    <div className="relative h-2 rounded bg-white/10 overflow-hidden" role="img"
+      aria-label={`${moduleName} recent processed playback history. Bright spans show confirmed wind reduction; gray spans show confirmed idle detection; unmarked spans are unconfirmed.`}
+      data-testid={`wind-history-track-${moduleId}`}>
+      {segments.map((segment, index) => {
+        const start = Math.max(0, Math.min(duration, segment.startFrame / sampleRate));
+        const end = Math.max(start, Math.min(duration, segment.endFrame / sampleRate));
+        const left = Math.min(100, start / safeDuration * 100);
+        const width = Math.max(.15, Math.min(100 - left, (end - start) / safeDuration * 100));
+        return <span key={`${segment.startFrame}-${segment.endFrame}-${index}`}
+          className="absolute top-0 h-full"
+          style={{ left: `${left}%`, width: `${width}%`, background: segment.active ? '#d8ed55' : '#718096' }}
+          title={`${formatTime(start, true)}–${formatTime(end, true)} · ${segment.active ? 'wind reduction active' : 'detector idle'}`}
+          aria-hidden="true" />;
+      })}
+    </div>
+    <div className="flex gap-3 text-[10px] text-muted-foreground">
+      <span><i className="inline-block w-2 h-2 rounded-sm mr-1 bg-[#d8ed55]" />Reduction active</span>
+      <span><i className="inline-block w-2 h-2 rounded-sm mr-1 bg-[#718096]" />Detector idle</span>
+    </div>
+    {!segments.length && <p className="text-[10px] text-muted-foreground">Play the edited recording to build a local history.</p>}
+  </div>;
+}
+
+function ModuleCard({ module, humReadout, liveFrequencies, windActive, windHistory, sampleRate, duration, index, total, collapsed, updateModule, updateParams, captureNoiseSample, selectionLength, deleteModule, duplicateModule, moveModule }: { module: EditModule; humReadout?: ReturnType<typeof humOpeningReadout>; liveFrequencies?: number[]; windActive?: boolean | null; windHistory: WindHistorySegment[]; sampleRate: number; duration: number; index: number; total: number; collapsed: boolean; updateModule: (id: string, patch: Partial<EditModule>) => void; updateParams: (id: string, key: string, value: number | string) => void; captureNoiseSample: (id: string) => Promise<void>; selectionLength: number; deleteModule: (id: string) => void; duplicateModule: (module: EditModule) => void; moveModule: (index: number, direction: -1 | 1) => void }) {
   const p = module.params;
   const numberInput = (key: string, label: string, min: number, max: number, step: number, suffix = '', options?: { resetValue?: number; wheelStep?: number }) => <RangeControl label={label} value={Number(p[key])} min={min} max={max} step={step} suffix={suffix} resetValue={options?.resetValue} wheelStep={options?.wheelStep} onChange={(value) => updateParams(module.id, key, value)} testId={`range-${module.type}-${key}`} />;
   const spectralBoundInput = (key: 'start' | 'end' | 'low' | 'high', label: string, max: number, step: number) => <label><span className="field-label">{label} {key === 'start' || key === 'end' ? '(s)' : '(Hz)'}</span><input key={`${module.id}-${key}-${p[key]}`} className="input-field font-mono-value" type="number" min={0} max={max} step={step} defaultValue={Number(p[key])} onBlur={(event) => {
@@ -2718,8 +2824,9 @@ function ModuleCard({ module, humReadout, liveFrequencies, windActive, sampleRat
                </select></label>)}
            </div>
            <p role="status" className="text-[11px] leading-relaxed" data-testid={`wind-activity-${module.id}`}>
-             {!module.enabled ? 'Bypassed · no wind reduction applied.' : windActive === null || windActive === undefined ? 'Automatic detection ready · play the edited recording to check when reduction is active.' : windActive ? 'Now playing · low-frequency interference detected; reduction active.' : 'Now playing · no interference confirmed here; reduction idle.'}
+              {!module.enabled ? 'Bypassed · no wind reduction applied.' : windActive === null || windActive === undefined ? 'Play edited audio to check this position; the timeline below keeps recent confirmed observations.' : windActive ? 'Now playing · low-frequency interference detected; reduction active.' : 'Now playing · no interference confirmed here; reduction idle.'}
            </p>
+            {module.enabled && <WindHistoryTimeline moduleId={module.id} moduleName={module.name} segments={windHistory} sampleRate={sampleRate} duration={duration} />}
             <p className="text-[11px] leading-relaxed text-muted-foreground" data-testid="wind-rumble-usage-note">This item is far from perfect and you can end up removing sounds you want to keep, so be careful using it. Some wind noise overloads the microphones so much that it simply cannot be removed with a filter of this type or by any means. Remember that some wind noise is not so bad because it can simulate what your ears hear when out in the wind, which is realistic and generally accepted and sometimes desired.</p>
            <p className="text-[10px] leading-relaxed text-muted-foreground">Automatic detection is approximate. Wanted bass or low calls may be reduced; some wind may remain. Older saved wind edits now use automatic settings and may sound different. Compare with bypass before exporting.</p>
          </div>)}

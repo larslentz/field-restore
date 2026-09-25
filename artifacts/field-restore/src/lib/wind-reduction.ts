@@ -30,6 +30,7 @@ export interface WindSnapshot {
   target: number;
   wet: number;
   active: boolean;
+  confirmed: boolean;
 }
 
 const newChannel = (): ChannelState => ({
@@ -78,7 +79,7 @@ export class WindProcessor {
     return {
       channels: Array.from({ length: this.channelCount }, newChannel),
       lowEnergy: 0, upperEnergy: 0, midEnergy: 0, count: 0,
-      frame, target: 0, wet: 0, active: false,
+      frame, target: 0, wet: 0, active: false, confirmed: false,
     };
   }
 
@@ -86,6 +87,7 @@ export class WindProcessor {
   snapshot(): WindSnapshot { return structuredClone(this.state); }
   restore(snapshot: WindSnapshot) { this.state = structuredClone(snapshot); }
   isActive() { return this.state.active; }
+  confirmedActivity(): boolean | null { return this.state.confirmed ? this.state.active : null; }
 
   process(channels: ChannelData, onWindEnvelope?: (frame: number, amount: number) => void) {
     const s = this.state;
@@ -139,8 +141,9 @@ export class WindProcessor {
         const detected = !tonal && low + upper > Math.max(floor, mid * threshold)
           && Math.min(low, upper) > Math.max(floor * .12, Math.max(low, upper) * .12);
         s.target = detected ? this.maxWet : 0;
-        if (detected !== s.active) {
+        if (detected !== s.active || !s.confirmed) {
           s.active = detected;
+          s.confirmed = true;
           this.onChange?.(s.frame, detected);
         }
         s.lowEnergy = 0; s.upperEnergy = 0; s.midEnergy = 0; s.count = 0;

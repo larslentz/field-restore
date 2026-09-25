@@ -53,6 +53,19 @@ test('wind bursts engage only where detected, spare quiet passages and wanted up
   assert.ok(Math.abs(rms(output, sampleRate / 2, sampleRate) - rms(input, sampleRate / 2, sampleRate)) < 1e-5);
 });
 
+test('the first completed detector window confirms idle as well as active wind', () => {
+  const module = wind();
+  const events = [];
+  const processor = createStreamingEditChain([module], sampleRate, 2400, 0, [], undefined,
+    (moduleId, frame, active) => events.push({ moduleId, frame, active }));
+  const cleanTone = Float32Array.from({ length: 2400 }, (_, i) => .05 * Math.sin(2 * Math.PI * 530 * i / sampleRate));
+
+  assert.deepEqual(processor.trackedWindActivity(), {});
+  processor.process([cleanTone], 0);
+  assert.deepEqual(events, [{ moduleId: module.id, frame: 2400, active: false }]);
+  assert.deepEqual(processor.trackedWindActivity(), { [module.id]: false });
+});
+
 test('the wind envelope used for compensation ramps and releases smoothly', () => {
   const envelope = [];
   new WindProcessor(sampleRate, 1, 'Medium', 'Medium')

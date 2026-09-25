@@ -153,6 +153,15 @@ export class StreamingEditChain {
         : []));
   }
 
+  /** Confirmed detector state only; null states have not completed a detector window. */
+  trackedWindActivity(): Record<string, boolean> {
+    return Object.fromEntries(this.modules.flatMap((module, index) => {
+      if (!module.enabled || module.type !== 'wind' || isFixedLowRumble(module)) return [];
+      const active = this.state[index].wind?.confirmedActivity();
+      return active === null || active === undefined ? [] : [[module.id, active]];
+    }));
+  }
+
   snapshot(): StreamingEditChainSnapshot {
     return {
       nextFrame: this.nextFrame,
