@@ -2420,8 +2420,8 @@ function App() {
                </button>
              </div>
            )}
-          <div className="workspace-grid">
-             <div className={`min-w-0 ${activeTab === 'edit' ? 'space-y-2' : 'space-y-4'}`}>
+           <div className="workspace-grid">
+              <div className={`min-w-0 ${activeTab === 'edit' ? 'edit-workspace' : 'space-y-4'}`}>
               {activeTab === 'project' ? (
                  <ProjectPanel title={title} notes={notes} setTitle={setTitle} setNotes={setNotes} source={source} sourceChannelCount={sourceChannelCount} save={() => void save()} openSettings={(event) => openModal(event, 'settings')} />
               ) : activeTab === 'analyze' ? (
@@ -2446,9 +2446,9 @@ function App() {
                         <div className="flex items-center gap-1"><button type="button" className="icon-btn" onClick={() => { setTimeViewCenter(viewStart + viewDuration / 2); setZoom(Math.max(1, zoom / 1.8)); }} aria-label="Zoom out" data-testid="button-zoom-out"><ZoomOut size={15} /></button><span className="font-mono-value text-[10px] text-muted-foreground w-12 text-center">{zoom.toFixed(1)}×</span><button type="button" className="icon-btn" onClick={() => { setTimeViewCenter(viewStart + viewDuration / 2); setZoom(Math.min(16, zoom * 1.8)); }} aria-label="Zoom in" data-testid="button-zoom-in"><ZoomIn size={15} /></button><button type="button" className="quiet-btn ml-2 !py-[5px]" onClick={() => { setZoom(1); setTimeViewCenter(null); }} data-testid="button-fit">Fit</button></div>
                       </div>
                     </div>
-                    <div className="panel-body !pt-3">
+                     <div className="panel-body !pt-3">
                       <div className="waveform-wrap">
-                        <canvas ref={canvasRef} className={`waveform-canvas ${spectralSelectionMode ? 'spectral-selecting' : ''}`} onPointerDown={onCanvasPointerDown} onPointerMove={onCanvasPointerMove} onPointerUp={onCanvasPointerUp} onPointerCancel={onCanvasPointerUp} onDoubleClick={(event) => { event.preventDefault(); if (spectralSelectionMode) { setSpectralSelection(null); setSpectralError(''); } else if (hasSelection) clearSelection(); }} aria-label={`${spectrogramSource === 'original' ? 'Original recording' : 'Edited signal'} interactive spectrogram from ${spectrogramMinFrequency / 1000} to ${spectrogramMaxFrequency / 1000} kilohertz with ${spectrogramFloorDb} to ${spectrogramCeilingDb} decibel scale, time from ${formatTime(viewStart)} to ${formatTime(viewStart + viewDuration)}`} data-testid="canvas-spectrogram" data-request-id={spectrogramRequestId} data-result-id={spectrogramResultId} />
+                         <canvas ref={canvasRef} className={`waveform-canvas ${spectralSelectionMode ? 'spectral-selecting' : ''}`} onPointerDown={onCanvasPointerDown} onPointerMove={onCanvasPointerMove} onPointerUp={onCanvasPointerUp} onPointerCancel={onCanvasPointerUp} onDoubleClick={(event) => { event.preventDefault(); if (spectralSelectionMode) { setSpectralSelection(null); setSpectralError(''); } else if (hasSelection) clearSelection(); }} aria-label={`${spectrogramSource === 'original' ? 'Original recording' : 'Edited signal'} interactive spectrogram from ${spectrogramMinFrequency / 1000} to ${spectrogramMaxFrequency / 1000} kilohertz with ${spectrogramFloorDb.toFixed(6)} to ${spectrogramCeilingDb.toFixed(6)} decibel scale, time from ${formatTime(viewStart)} to ${formatTime(viewStart + viewDuration)}`} data-testid="canvas-spectrogram" data-request-id={spectrogramRequestId} data-result-id={spectrogramResultId} />
                         {spectrogramSource === 'current' && visibleRepairs.length > 0 && <div className="repair-marker-rail" aria-label="Detected click and pop repairs on the time axis">
                           {visibleRepairs.map((mark) => {
                             const time = mark.frame / source.sampleRate;
@@ -2481,41 +2481,33 @@ function App() {
                           })}
                         </div>}
                       </div>
-                      {!largeSource && (spectrograms.error
-                        ? <p role="alert" className="text-[11px] text-red-700 mt-2">Spectrogram unavailable: {spectrograms.error}</p>
-                        : spectrograms.loading && <p role="status" className="text-[11px] text-muted-foreground mt-2">Preparing spectrogram…</p>)}
-                      <div className="trim-summary" data-testid="trim-summary">
+                       <div className="spectrogram-footer">
+                        <div className="spectrogram-meta scrollbar-thin">
+                         {!largeSource && (spectrograms.error
+                           ? <p role="alert" className="text-[11px] text-red-700 mt-2">Spectrogram unavailable: {spectrograms.error}</p>
+                           : spectrograms.loading && <p role="status" className="text-[11px] text-muted-foreground mt-2">Preparing spectrogram…</p>)}
+                         <div className="trim-summary" data-testid="trim-summary">
                         <span><strong>Edited range</strong> {formatTime(trimStart, true)} – {formatTime(trimEnd, true)} <span className="text-muted-foreground">({formatTime(trimEnd - trimStart, true)} kept)</span></span>
                         <span className="text-muted-foreground">Drag START and END on the edited spectrogram. Original stays untouched.</span>
                         {trim && (trimStart > 0 || trimEnd < duration) && <button type="button" className="quiet-btn !py-1 !px-2 !text-[10px]" onClick={() => { stopPlayback(); restoreTrim(null, duration); setSavedStatus('Unsaved local changes'); }} data-testid="button-reset-trim">Reset trim</button>}
-                      </div>
-                      {processingModules.some((module) => module.enabled && module.type === 'click-pop' && Number(module.params.strength) > 0) &&
-                        <div className="repair-summary" data-testid="repair-summary">
-                          <span><strong>Click & pop repairs</strong> · {repairMarks.length} marked {largeSource ? 'during buffered edited playback' : 'in the edited render'}{repairMarks.length >= MAX_REPAIR_MARKS ? ` · latest ${MAX_REPAIR_MARKS} retained` : ''}. Marks sit on the time axis; select one to audition a short range.</span>
-                          {selectedRepair && <span className="repair-compare" data-testid="repair-compare">
-                            {formatTime(selectedRepair.frame / source.sampleRate, true)} ·
-                            <button type="button" className={monitor === 'current' ? 'active' : ''} onClick={() => { monitorRef.current = 'current'; setMonitor('current'); }} aria-pressed={monitor === 'current'}>Edited</button>
-                            <button type="button" className={monitor === 'original' ? 'active' : ''} onClick={() => { monitorRef.current = 'original'; setMonitor('original'); }} aria-pressed={monitor === 'original'}>Original</button>
-                            <button type="button" onClick={play}>{isPlaying ? 'Pause' : 'Play'} comparison</button>
-                          </span>}
-                        </div>}
-                      {spectrogramSource === 'current' && historySegments.length > 0 && <div className="hum-overlay-note" data-testid="hum-overlay-note">
-                        <span><strong>Hum Removal playback history.</strong> Colored solid lines show where a hum filter was confirmed during playback; gray dashed lines mean no filter was confirmed. Dots mark heard positions you can select to seek. Unmarked gaps have no retained confirmation.</span>
-                        <div className="hum-overlay-legend">{processingModules.filter((module) => historySegments.some((segment) => segment.moduleId === module.id)).map((module, index) =>
-                          <span key={module.id}><i style={{ background: HUM_MARKER_COLORS[index % HUM_MARKER_COLORS.length] }} />{module.name}</span>)}</div>
-                      </div>}
-                       <div className="flex flex-wrap items-center justify-between gap-3 mt-2">
-                        <div className="flex items-center gap-2 text-[11px] text-muted-foreground"><span className="inline-block w-3 h-3 rounded-sm ring-1 ring-black/20" style={{ background: spectrogramColorCss(0.08, spectrogramPalette) }} /> low energy <span className="inline-block w-3 h-3 rounded-sm ml-2 ring-1 ring-black/20" style={{ background: spectrogramColorCss(0.92, spectrogramPalette) }} /> high energy <span className="inline-block w-3 h-3 rounded-sm bg-[#ff8a4c] ml-2" /> playhead</div>
+                         </div>
+                         <div className="flex flex-wrap items-center justify-end gap-3 mt-2">
                         <div className="flex items-center gap-2">
                           <div className="font-mono-value text-[11px]" data-testid="text-selection-time">{hasSelection ? <>{formatTime(selectionStart, true)} — {formatTime(selectionEnd, true)} <span className="text-muted-foreground">({(selectionEnd - selectionStart).toFixed(3)} s selected)</span></> : 'No selection · full track'}</div>
                           {hasSelection && <button type="button" className="quiet-btn !py-1 !px-2 !text-[10px]" onClick={clearSelection} title="Clear selection and return playback to the start" data-testid="button-clear-selection"><X size={12} /> Clear selection</button>}
                         </div>
-                      </div>
-                      {(spectralSelectionMode || spectralSelection || spectralError) && <div className="spectral-action-strip">
-                        <div className="spectral-action-copy"><strong>Spectral repair · 10 seconds max</strong><span data-testid="text-spectral-selection" aria-live="polite">{spectralSelection ? `${formatTime(spectralSelection.start, true)}–${formatTime(spectralSelection.end, true)} · ${Math.round(spectralSelection.low)}–${Math.round(spectralSelection.high)} Hz` : 'Drag diagonally inside either channel to draw a time-and-frequency rectangle, then click Add. Time-only selection does not count.'}</span></div>
+                         </div>
+                        </div>
+                        <div className="spectrogram-action-slot scrollbar-thin">
+                         {(spectralSelectionMode || spectralSelection || spectralError) && <div className="spectral-action-strip">
+                         <div className="spectral-action-copy"><strong>Spectral repair · 10 seconds max</strong>{spectralError && <p role="alert" data-testid="status-spectral-error" className="spectral-error">{spectralError}</p>}<span data-testid="text-spectral-selection" aria-live="polite">{spectralSelection ? `${formatTime(spectralSelection.start, true)}–${formatTime(spectralSelection.end, true)} · ${Math.round(spectralSelection.low)}–${Math.round(spectralSelection.high)} Hz` : 'Drag diagonally inside either channel to draw a time-and-frequency rectangle, then click Add. Time-only selection does not count.'}</span></div>
                         <button type="button" className="primary-btn" onClick={(event) => addSpectralRepair(spectralSelection, event.currentTarget)} data-testid="button-add-spectral-repair"><Plus size={13} /> Add Spectral Repair</button>
-                        {spectralError && <p role="alert" data-testid="status-spectral-error" className="spectral-error">{spectralError}</p>}
-                      </div>}
+                         </div>}
+                         {!(spectralSelectionMode || spectralSelection || spectralError) && <div className="spectrogram-legend text-[11px] text-muted-foreground">
+                           <span className="inline-block w-3 h-3 rounded-sm ring-1 ring-black/20" style={{ background: spectrogramColorCss(0.08, spectrogramPalette) }} /> low energy <span className="inline-block w-3 h-3 rounded-sm ml-2 ring-1 ring-black/20" style={{ background: spectrogramColorCss(0.92, spectrogramPalette) }} /> high energy <span className="inline-block w-3 h-3 rounded-sm bg-[#ff8a4c] ml-2" /> playhead
+                         </div>}
+                        </div>
+                       </div>
                     </div>
                   </section>
                    <section className="panel signal-stats-bar" data-testid="panel-signal-statistics" data-request-id={analysisRequestId} data-result-id={analysisResultId}>
@@ -2523,21 +2515,35 @@ function App() {
                        <div className="flex items-center gap-2"><Gauge size={15} color="hsl(var(--primary))" /><div className="section-title">Signal statistics</div></div>
                        <div className="flex flex-wrap gap-1"><span className="chip" data-testid="label-statistics-source">{displayedSourceLabel}</span><span className="chip">estimate</span></div>
                      </div>
-                     <div className="signal-stats-groups">
-                       <div className="signal-stats-group">
-                         <div className="signal-stats-label">{spectrogramSource === 'current' ? `Edited / kept range · ${formatTime(committedTrimEnd - committedTrimStart)}` : `${displayedSourceLabel} / full file · ${formatTime(duration)}`}</div>
-                         {statisticsPending ? <div className="signal-stats-pending">{statisticsUnavailableLabel}</div> : <StatsGrid stats={displayedStats} />}
-                       </div>
-                       <div className="signal-stats-group">
-                         <div className="signal-stats-label">{hasSelection ? spectrogramSource === 'current' ? `Edited / selection within kept range · ${formatTime(Math.max(0, Math.min(selectionEnd, committedTrimEnd) - Math.max(selectionStart, committedTrimStart)))}` : `${displayedSourceLabel} / selection · ${formatTime(selectionEnd - selectionStart)}` : 'No selection'}</div>
-                          {hasSelection ? spectrogramSource === 'current' && Math.min(selectionEnd, committedTrimEnd) <= Math.max(selectionStart, committedTrimStart)
-                            ? <div className="signal-stats-pending">Selection is outside the edited range</div>
-                            : statisticsPending ? <div className="signal-stats-pending">{statisticsUnavailableLabel}</div> : <StatsGrid stats={displayedSelectionStats} />
-                            : <div className="stat-grid"><div className="stat-cell text-[11px] text-muted-foreground">No selection · full track playback</div></div>}
-                       </div>
+                      <div className="signal-stats-group">
+                        <div className="signal-stats-label">{hasSelection
+                          ? spectrogramSource === 'current'
+                            ? `Edited / selection within kept range · ${formatTime(Math.max(0, Math.min(selectionEnd, committedTrimEnd) - Math.max(selectionStart, committedTrimStart)))}`
+                            : `Original / selection · ${formatTime(selectionEnd - selectionStart)}`
+                          : spectrogramSource === 'current' ? `Edited / kept range · ${formatTime(committedTrimEnd - committedTrimStart)}` : `Original / full file · ${formatTime(duration)}`}</div>
+                        {hasSelection && spectrogramSource === 'current' && Math.min(selectionEnd, committedTrimEnd) <= Math.max(selectionStart, committedTrimStart)
+                          ? <div className="signal-stats-pending">Selection is outside the edited range</div>
+                          : statisticsPending ? <div className="signal-stats-pending">{statisticsUnavailableLabel}</div>
+                            : <StatsGrid stats={hasSelection ? displayedSelectionStats : displayedStats} />}
                      </div>
                       <div className="signal-stats-note"><Info size={12} />Local BS.1770-style estimates with 4× true-peak interpolation. Not certified meter readings.</div>
                    </section>
+                    <div className="edit-secondary scrollbar-thin" aria-label="Edit details" data-testid="edit-secondary">
+                    {processingModules.some((module) => module.enabled && module.type === 'click-pop' && Number(module.params.strength) > 0) &&
+                      <div className="repair-summary" data-testid="repair-summary">
+                        <span><strong>Click & pop repairs</strong> · {repairMarks.length} marked {largeSource ? 'during buffered edited playback' : 'in the edited render'}{repairMarks.length >= MAX_REPAIR_MARKS ? ` · latest ${MAX_REPAIR_MARKS} retained` : ''}. Marks sit on the time axis; select one to audition a short range.</span>
+                        {selectedRepair && <span className="repair-compare" data-testid="repair-compare">
+                          {formatTime(selectedRepair.frame / source.sampleRate, true)} ·
+                          <button type="button" className={monitor === 'current' ? 'active' : ''} onClick={() => { monitorRef.current = 'current'; setMonitor('current'); }} aria-pressed={monitor === 'current'}>Edited</button>
+                          <button type="button" className={monitor === 'original' ? 'active' : ''} onClick={() => { monitorRef.current = 'original'; setMonitor('original'); }} aria-pressed={monitor === 'original'}>Original</button>
+                          <button type="button" onClick={play}>{isPlaying ? 'Pause' : 'Play'} comparison</button>
+                        </span>}
+                      </div>}
+                    {spectrogramSource === 'current' && historySegments.length > 0 && <div className="hum-overlay-note" data-testid="hum-overlay-note">
+                      <span><strong>Hum Removal playback history.</strong> Colored solid lines show where a hum filter was confirmed during playback; gray dashed lines mean no filter was confirmed. Dots mark heard positions you can select to seek. Unmarked gaps have no retained confirmation.</span>
+                      <div className="hum-overlay-legend">{processingModules.filter((module) => historySegments.some((segment) => segment.moduleId === module.id)).map((module, index) =>
+                        <span key={module.id}><i style={{ background: HUM_MARKER_COLORS[index % HUM_MARKER_COLORS.length] }} />{module.name}</span>)}</div>
+                    </div>}
                    {isPlaying && monitor === 'current' && modules.some((module) =>
                      module.enabled && module.type === 'hum' && module.params.mode !== 'Static' && Number(module.params.reduction) > 0) &&
                      <div className="text-[11px] text-muted-foreground px-2 py-1" role="status" data-testid="live-hum-transport">
@@ -2550,6 +2556,7 @@ function App() {
                    {historySegments.length > 0 && <HumHistoryView
                      modules={processingModules} segments={historySegments} sampleRate={source.sampleRate}
                      duration={duration} onSeek={seekTo} />}
+                    </div>
                 </>
               )}
             </div>
