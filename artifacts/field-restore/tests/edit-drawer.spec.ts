@@ -36,7 +36,7 @@ test('the edit drawer keeps module controls, summaries, bypass, reorder, and com
   await expect(humRow).toHaveClass(/bypassed/);
   await expect(card.locator('.module-summary')).toHaveText('Bypassed');
   await expect(card.getByTestId(`hum-scan-${humId}`)).toContainText('bypassed');
-  await expect(page.getByTestId('button-open-full-chain')).toContainText('6/7 editable enabled');
+  await expect(page.getByTestId('button-open-full-chain')).toContainText('5/6 editable enabled');
 
   const moduleNames = () => sidebarRows.locator('.sidebar-chain-copy strong').allTextContents();
   const orderBeforeMove = await moduleNames();

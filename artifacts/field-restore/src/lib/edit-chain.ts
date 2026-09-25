@@ -25,7 +25,7 @@ let idCounter = 1;
 export const makeModule = (type: ModuleType, options?: { name?: string; params?: Record<string, number | string> }): EditModule => {
   const defaults: Record<ModuleType, Record<string, number | string>> = {
     gain: { db: -2 }, fade: { in: 7, out: 7, inEnabled: 1, outEnabled: 1 }, eq: { mode: 'three-band', low: 0, mid: 0, high: -1, frequency: 55, q: 0.4, gain: 0 }, dc: { mode: 'Auto', amount: 0 },
-    hum: { mode: 'Static', frequency: 60, reduction: 12 }, wind: { mode: 'Automatic', ...WIND_DEFAULTS }, noise: { strength: 50 },
+    hum: { mode: 'Static', frequency: 60, reduction: 12 }, wind: { mode: 'Automatic', ...WIND_DEFAULTS, lowEndEnabled: 0, lowEndFrequency: 55, lowEndQ: .4, lowEndGain: 2 }, noise: { strength: 50 },
     'click-pop': { mode: 'Automatic', strength: 75 },
     'spectral-repair': { start: 0, end: .5, low: 1000, high: 5000, mode: 'Attenuate', strength: 75, context: .2, weighting: 50, fundamental: 100 },
     region: { start: 0, end: 0, amount: -8 }, ambient: { start: 0, end: 0, length: 1 },
@@ -41,18 +41,14 @@ export const makeModule = (type: ModuleType, options?: { name?: string; params?:
 
 export const makeLowRumbleRemoval = (): EditModule => {
   const module = makeModule('wind', { name: 'Low Rumble Removal' });
-  return { ...module, params: { mode: 'Fixed low rumble', cutoff: 55.5, q: 0.38 } };
+  return { ...module, params: { mode: 'Fixed low rumble', cutoff: 55.5, q: 0.38, lowEndEnabled: 1, lowEndFrequency: 55, lowEndQ: .4, lowEndGain: 2 } };
 };
-
-export const makeBringBackLowEnd = (): EditModule =>
-  makeModule('eq', { name: 'Bring Back the Low End', params: { mode: 'low-shelf', frequency: 55, q: 0.4, gain: 2 } });
 
 export const makeDefaultChain = (): EditModule[] => [
   makeModule('gain', { name: 'Gain', params: { db: 0 } }),
   makeLowRumbleRemoval(),
   makeModule('hum', { name: 'Hum Removal', params: { mode: 'Adaptive', frequency: 60, reduction: 12 } }),
   makeModule('wind'),
-  makeBringBackLowEnd(),
   makeModule('fade'),
   makeModule('gain', { name: 'Gain', params: { db: 0 } }),
 ];
@@ -71,6 +67,11 @@ export const isFixedLowRumble = (module: EditModule) => module.type === 'wind' &
     (module.params.mode === undefined && (module.name === 'Low Rumble Removal' ||
       (!DEFAULT_WIND_NAMES.has(module.name) &&
         Number(module.params.cutoff) === 55.5 && Number(module.params.q) === .38))));
+
+export const lowEndShelfEnabled = (params: EditModule['params']) => Number(params.lowEndEnabled) === 1;
+export const lowEndShelfCoefficients = (params: EditModule['params'], sampleRate: number) =>
+  lowShelf(sampleRate, Math.max(20, Number(params.lowEndFrequency) || 55),
+    Math.max(.1, Number(params.lowEndQ) || .4), Number(params.lowEndGain) || 0);
 
 export const isLegacyWind = (module: EditModule) =>
   module.type === 'wind' && !isFixedLowRumble(module) && module.params.mode !== 'Automatic';
@@ -284,6 +285,10 @@ export function applyModule(input: ChannelData, module: EditModule, sampleRate: 
     } else {
       new WindProcessor(sampleRate, output.length, windLevel(p.detection), windLevel(p.removal),
         context.onWindChange && ((frame, active) => context.onWindChange!(frameOffset + frame, active))).process(output);
+    }
+    if (lowEndShelfEnabled(p)) {
+      const coefficients = lowEndShelfCoefficients(p, sampleRate);
+      output.forEach((channel) => processBiquad(channel, coefficients));
     }
   } else if (module.type === 'noise') {
     new NoiseReductionProcessor(sampleRate, output.length, Number(p.strength), noiseProfileFromParams(p)).process(output);

@@ -1,5 +1,5 @@
 import { moduleFrequencyResponseDb } from '@/lib/frequency-response';
-import type { EditModule } from '@/lib/edit-chain';
+import { isFixedLowRumble, lowEndShelfEnabled, type EditModule } from '@/lib/edit-chain';
 
 const WIDTH = 440;
 const HEIGHT = 174;
@@ -11,7 +11,7 @@ const BOTTOM = 26;
 export function EqCurve({ module, sampleRate }: { module: EditModule; sampleRate: number }) {
   const maxFrequency = Math.min(20000, sampleRate / 2 * 0.99);
   if (maxFrequency <= 20) return null;
-  const highPass = module.type === 'wind';
+  const highPass = isFixedLowRumble(module);
   const ceiling = highPass ? 12 : 18;
   const floor = highPass ? -48 : -18;
   const x = (frequency: number) => LEFT + Math.log(frequency / 20) / Math.log(maxFrequency / 20) * (WIDTH - LEFT - RIGHT);
@@ -22,14 +22,18 @@ export function EqCurve({ module, sampleRate }: { module: EditModule; sampleRate
   }).join(' ');
   const levels = highPass ? [0, -12, -24, -36, -48] : [12, 0, -12];
   const ticks = [20, 100, 1000, 10000, 20000].filter((frequency) => frequency <= maxFrequency);
+  const shelfDescription = lowEndShelfEnabled(module.params)
+    ? ` Low-end shelf, ${module.params.lowEndGain} decibels at ${module.params.lowEndFrequency} hertz, Q ${module.params.lowEndQ}.` : '';
   const description = highPass
-    ? `High-pass response, cutoff ${module.params.cutoff} hertz, Q ${module.params.q}`
+    ? `High-pass response, cutoff ${module.params.cutoff} hertz, Q ${module.params.q}.${shelfDescription}`
+    : module.type === 'wind'
+      ? `Low-end shelf response only.${shelfDescription} Automatic wind reduction changes with the recording and is not shown.`
     : module.params.mode === 'low-shelf'
       ? `Low-shelf response, ${module.params.gain} decibels at ${module.params.frequency} hertz, Q ${module.params.q}`
       : `Three-band response, low ${module.params.low}, mid ${module.params.mid}, high ${module.params.high} decibels`;
 
   return <figure className={`eq-curve ${module.enabled ? '' : 'bypassed'}`} data-testid={`eq-curve-${module.id}`}>
-    <figcaption className="eq-curve-heading"><span>Frequency response · this module</span><span>{module.enabled ? 'Applied' : 'Bypassed · not applied'}</span></figcaption>
+    <figcaption className="eq-curve-heading"><span>{module.type === 'wind' && !highPass ? 'Low-end shelf response · wind reduction not shown' : 'Frequency response · this module'}</span><span>{module.enabled ? 'Applied' : 'Bypassed · not applied'}</span></figcaption>
     <svg viewBox={`0 0 ${WIDTH} ${HEIGHT}`} className="eq-curve-plot" role="img" aria-label={`${description}. ${module.enabled ? 'Applied to the edit chain.' : 'Bypassed, so this curve is not applied.'}`}>
       {levels.map((level) => <g key={level}>
         <line x1={LEFT} x2={WIDTH - RIGHT} y1={y(level)} y2={y(level)} className={level === 0 ? 'eq-curve-zero' : 'eq-curve-grid'} />

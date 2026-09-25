@@ -7,6 +7,7 @@ const response = (module, hz) => moduleFrequencyResponseDb(module, 48000, hz);
 
 test('high-pass curve follows cutoff and Q settings', () => {
   const filter = makeLowRumbleRemoval();
+  filter.params.lowEndEnabled = 0;
   filter.params.cutoff = 100;
   filter.params.q = .7;
   assert.ok(response(filter, 25) < -20);
@@ -17,7 +18,22 @@ test('high-pass curve follows cutoff and Q settings', () => {
 });
 
 test('automatic wind reduction does not claim a static frequency response', () => {
-  assert.equal(response(makeModule('wind'), 25), 0);
+  const wind = makeModule('wind');
+  assert.equal(response(wind, 25), 0);
+  wind.params.lowEndEnabled = 1;
+  assert.ok(response(wind, 25) > 1);
+  wind.params.lowEndGain = -6;
+  assert.ok(response(wind, 25) < -4);
+});
+
+test('low-rumble curve includes the enabled low-end shelf and excludes it when off', () => {
+  const filter = makeLowRumbleRemoval();
+  const boosted = response(filter, 25);
+  filter.params.lowEndEnabled = 0;
+  assert.ok(boosted > response(filter, 25) + 1);
+  filter.params.lowEndEnabled = 1;
+  filter.params.lowEndGain = 6;
+  assert.ok(response(filter, 25) > boosted + 2.7);
 });
 
 test('low shelf curve follows gain and frequency', () => {

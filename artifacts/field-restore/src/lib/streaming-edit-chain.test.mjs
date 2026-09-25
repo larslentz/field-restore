@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { analyzeInitialHum, humOpeningReadout, makeModule, makeProcessingChain, renderChain, withFadeRange } from './edit-chain.ts';
+import { analyzeInitialHum, humOpeningReadout, makeLowRumbleRemoval, makeModule, makeProcessingChain, renderChain, withFadeRange } from './edit-chain.ts';
 import { analyzeFileInitialHum, createStreamingEditChain } from './streaming-edit-chain.ts';
 import { humAnalysisWindowSize } from './hum-removal.ts';
 import { generateFloat32WavHeader, parseWavMetadata } from './large-wav.ts';
@@ -53,6 +53,42 @@ test('in-memory and file-backed routes produce equivalent restored audio', () =>
     greatestDifference <= 1e-6,
     `expected route outputs within tolerance, greatest difference was ${greatestDifference}`,
   );
+});
+
+test('each removal item applies its own low-end shelf consistently across memory, streamed chunks, and snapshots', () => {
+  const frames = 8192;
+  const input = [
+    Float32Array.from({ length: frames }, (_, i) => .18 * Math.sin(2 * Math.PI * 42 * i / sampleRate)),
+    Float32Array.from({ length: frames }, (_, i) => .12 * Math.sin(2 * Math.PI * 62 * i / sampleRate)),
+  ];
+  for (const parent of [makeLowRumbleRemoval(), makeModule('wind')]) {
+    const enabled = { ...parent, params: { ...parent.params, lowEndEnabled: 1, lowEndGain: 6, lowEndFrequency: 90 } };
+    const off = { ...enabled, params: { ...enabled.params, lowEndEnabled: 0 } };
+    const bypassed = { ...enabled, enabled: false };
+    const memoryOn = renderChain(input, [enabled], sampleRate);
+    const memoryOff = renderChain(input, [off], sampleRate);
+    assert.ok(memoryOn[0].some((value, i) => Math.abs(value - memoryOff[0][i]) > 1e-4),
+      `${parent.name} shelf must affect the processed signal`);
+    assert.deepEqual(renderChain(input, [bypassed], sampleRate), input);
+    for (const edit of [enabled, off, bypassed]) {
+      const expected = renderChain(input, [edit], sampleRate);
+      const processor = createStreamingEditChain([edit], sampleRate, frames);
+      const actual = input.map(() => new Float32Array(frames));
+      let snapshot;
+      for (let start = 0; start < frames; start += 257) {
+        if (start === 257) snapshot = processor.snapshot();
+        const end = Math.min(frames, start + 257);
+        const output = processor.process(input.map((channel) => channel.slice(start, end)), start);
+        output.forEach((channel, index) => actual[index].set(channel, start));
+      }
+      const difference = Math.max(...actual.map((channel, c) =>
+        channel.reduce((largest, value, i) => Math.max(largest, Math.abs(value - expected[c][i])), 0)));
+      assert.ok(difference < 1e-5, `${parent.name} ${edit.enabled ? edit.params.lowEndEnabled : 'bypassed'} route difference ${difference}`);
+      processor.restore(snapshot);
+      assert.deepEqual(processor.process(input.map((channel) => channel.slice(257, 514)), 257),
+        actual.map((channel) => channel.slice(257, 514)));
+    }
+  }
 });
 
 test('in-memory and streamed fades follow edited Start and End markers, including across chunks', () => {

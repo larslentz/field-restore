@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  makeBringBackLowEnd,
   makeDefaultChain,
   makeLowRumbleRemoval,
   makeModule,
@@ -36,22 +35,27 @@ test('new low rumble removal matches the default preset with an independent ID',
   const addedModule = makeLowRumbleRemoval();
   assert.ok(presetModule);
   assert.equal(addedModule.type, 'wind');
-  assert.deepEqual(addedModule.params, { mode: 'Fixed low rumble', cutoff: 55.5, q: 0.38 });
+  assert.deepEqual(addedModule.params, { mode: 'Fixed low rumble', cutoff: 55.5, q: 0.38, lowEndEnabled: 1, lowEndFrequency: 55, lowEndQ: .4, lowEndGain: 2 });
   assert.deepEqual(addedModule.params, presetModule.params);
   assert.notEqual(addedModule.id, presetModule.id);
 });
 
-test('new bring back the low end matches the default low-shelf preset with an independent ID', () => {
-  const presetModule = makeDefaultChain().find((module) => module.name === 'Bring Back the Low End');
-  const addedModule = makeBringBackLowEnd();
-  assert.ok(presetModule);
-  assert.equal(addedModule.type, 'eq');
-  assert.equal(addedModule.params.mode, 'low-shelf');
-  assert.equal(addedModule.params.frequency, 55);
-  assert.equal(addedModule.params.q, 0.4);
-  assert.equal(addedModule.params.gain, 2);
-  assert.deepEqual(addedModule.params, presetModule.params);
-  assert.notEqual(addedModule.id, presetModule.id);
+test('wind and low rumble have separate low-end settings without a standalone edit', () => {
+  const defaults = makeDefaultChain();
+  assert.equal(defaults.some((module) => module.name === 'Bring Back the Low End'), false);
+  const wind = defaults.find((module) => module.name === 'Wind Removal');
+  const lowRumble = defaults.find((module) => module.name === 'Low Rumble Removal');
+  assert.equal(wind.params.lowEndEnabled, 0);
+  assert.equal(lowRumble.params.lowEndEnabled, 1);
+  assert.deepEqual(
+    ['lowEndFrequency', 'lowEndQ', 'lowEndGain'].map((key) => wind.params[key]),
+    [55, .4, 2],
+  );
+  assert.deepEqual(
+    ['lowEndFrequency', 'lowEndQ', 'lowEndGain'].map((key) => lowRumble.params[key]),
+    [55, .4, 2],
+  );
+  assert.notEqual(wind.params, lowRumble.params);
 });
 
 test('default chain and add menu create one fade with independent sides', () => {

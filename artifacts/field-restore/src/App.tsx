@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { Activity, ArrowDown, ArrowUp, Check, ChevronDown, CircleHelp, Download, ExternalLink, FileAudio, FolderOpen, Gauge, GripVertical, Info, Keyboard, Layers3, LoaderCircle, Menu, PanelRightOpen, Pause, Play, Plus, Redo2, RotateCcw, Save, Settings, Square, Trash2, Undo2, Waves, X, ZoomIn, ZoomOut } from 'lucide-react';
 import { createDemoAudio, downloadBlob, encodeWav, parseWav, type AudioSource } from '@/lib/audio';
 import { decodeChannels, loadProject, projectFromSource, saveProject } from '@/lib/persistence';
-import { AUTOMATIC_DC_REMOVAL, humOpeningReadout, isFixedLowRumble, isLegacyWind, makeBringBackLowEnd, makeDefaultChain, makeLowRumbleRemoval, makeModule, makeProcessingChain, makeRestorationReport, MODULE_LABELS, toggleEditableModules, withFadeRange, withoutLegacyDcModules, type EditModule, type HumScanState } from '@/lib/edit-chain';
+import { AUTOMATIC_DC_REMOVAL, humOpeningReadout, isFixedLowRumble, isLegacyWind, lowEndShelfEnabled, makeDefaultChain, makeLowRumbleRemoval, makeModule, makeProcessingChain, makeRestorationReport, MODULE_LABELS, toggleEditableModules, withFadeRange, withoutLegacyDcModules, type EditModule, type HumScanState } from '@/lib/edit-chain';
 import { analyzeLoudness, type LoudnessStats } from '@/lib/loudness';
 import { createPlaybackRangePlan, playbackPositionAtElapsed } from '@/lib/playback-range';
 import type { SpectrogramData } from '@/lib/spectrogram';
@@ -49,9 +49,9 @@ type SpectrogramView = {
   error?: string;
 };
 
-const MODULE_TYPES = ['gain', 'fade', 'low-rumble', 'hum', 'wind', 'noise', 'click-pop', 'spectral-repair', 'bring-back-low-end'] as const;
+const MODULE_TYPES = ['gain', 'fade', 'low-rumble', 'hum', 'wind', 'noise', 'click-pop', 'spectral-repair'] as const;
 type AddModuleType = typeof MODULE_TYPES[number];
-const moduleOptionLabel = (type: AddModuleType) => type === 'low-rumble' ? 'Low Rumble Removal' : type === 'bring-back-low-end' ? 'Bring Back the Low End' : MODULE_LABELS[type];
+const moduleOptionLabel = (type: AddModuleType) => type === 'low-rumble' ? 'Low Rumble Removal' : MODULE_LABELS[type];
 const SPECTROGRAM_LEFT = 48;
 const SPECTROGRAM_RIGHT = 72;
 const SPECTROGRAM_BOTTOM = 42;
@@ -104,7 +104,7 @@ function moduleSummary(module: EditModule, humReadout?: ReturnType<typeof humOpe
   return module.type === 'gain' ? `${p.db} dB`
     : module.type === 'spectral-repair' ? `${p.mode} · ${Number(p.start).toFixed(2)}–${Number(p.end).toFixed(2)} s · ${Math.round(Number(p.low))}–${Math.round(Number(p.high))} Hz`
     : module.type === 'hum' ? humReadout?.summary ?? `${p.mode} · ${p.frequency} Hz`
-      : module.type === 'wind' ? (isFixedLowRumble(module) ? `HPF ${p.cutoff} Hz` : `Auto · ${p.detection ?? 'Medium'} detection · ${p.removal ?? 'Medium'} removal`)
+      : module.type === 'wind' ? `${isFixedLowRumble(module) ? `HPF ${p.cutoff} Hz` : `Auto · ${p.detection ?? 'Medium'} detection · ${p.removal ?? 'Medium'} removal`} · ${lowEndShelfEnabled(p) ? `Low end ${Number(p.lowEndGain) >= 0 ? '+' : ''}${p.lowEndGain} dB` : 'Low end off'}`
         : module.type === 'noise' ? `${p.mode === 'Sample' ? 'Noise-only sample' : 'Auto'} · ${p.strength ?? 50}% strength`
         : module.type === 'click-pop' ? `Automatic · ${p.strength ?? 50}% strength`
         : module.type === 'eq' && p.mode === 'low-shelf' ? `${p.gain} dB · ${p.frequency} Hz`
@@ -1401,7 +1401,7 @@ function App() {
       requestAnimationFrame(() => canvasRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }));
       return;
     }
-    const module = type === 'low-rumble' ? makeLowRumbleRemoval() : type === 'bring-back-low-end' ? makeBringBackLowEnd() : makeModule(type);
+    const module = type === 'low-rumble' ? makeLowRumbleRemoval() : makeModule(type);
     commitModules([...modules, module]);
     setModuleMenu(false);
   };
@@ -2722,7 +2722,16 @@ function ModuleCard({ module, humReadout, liveFrequencies, windActive, sampleRat
             <p className="text-[11px] leading-relaxed text-muted-foreground" data-testid="wind-rumble-usage-note">This item is far from perfect and you can end up removing sounds you want to keep, so be careful using it. Some wind noise overloads the microphones so much that it simply cannot be removed with a filter of this type or by any means. Remember that some wind noise is not so bad because it can simulate what your ears hear when out in the wind, which is realistic and generally accepted and sometimes desired.</p>
            <p className="text-[10px] leading-relaxed text-muted-foreground">Automatic detection is approximate. Wanted bass or low calls may be reduced; some wind may remain. Older saved wind edits now use automatic settings and may sound different. Compare with bypass before exporting.</p>
          </div>)}
-       {(module.type === 'eq' || isFixedLowRumble(module)) && <EqCurve module={module} sampleRate={sampleRate} />}
+        {module.type === 'wind' && <div className="rounded-md border border-border p-3 space-y-3" data-testid={`low-end-controls-${module.id}`}>
+          <label className="flex items-center gap-2 text-xs font-semibold"><input type="checkbox" checked={lowEndShelfEnabled(p)} onChange={(event) => updateParams(module.id, 'lowEndEnabled', event.target.checked ? 1 : 0)} data-testid={`toggle-low-end-${module.id}`} /> Bring Back the Low End</label>
+          <div className="grid grid-cols-3 gap-2">
+            {numberInput('lowEndFrequency', 'Low shelf', 20, 240, .5, ' Hz')}
+            {numberInput('lowEndQ', 'Q', .1, 2, .01)}
+            {numberInput('lowEndGain', 'Gain', -12, 12, .1, ' dB')}
+          </div>
+          <p className="text-[11px] leading-relaxed text-muted-foreground" data-testid={`bring-back-low-end-usage-note-${module.id}`}>Only use this filter if you previously used the {isFixedLowRumble(module) ? 'Low Rumble Removal' : 'Wind Removal'} filter. This one attempts to bring back a bit of low end to smooth and compensate for what was removed with {isFixedLowRumble(module) ? 'Low Rumble Removal' : 'Wind Removal'}. Adjust values to somewhat match what was used in the {isFixedLowRumble(module) ? 'Low Rumble Removal' : 'Wind Removal'} filter, or adjust to taste.</p>
+        </div>}
+        {(module.type === 'eq' || isFixedLowRumble(module) || (module.type === 'wind' && lowEndShelfEnabled(p))) && <EqCurve module={module} sampleRate={sampleRate} />}
       {module.type === 'region' && <div className="grid grid-cols-3 gap-2">{numberInput('start', 'Start', 0, 60, .1, ' s')}{numberInput('end', 'End', 0, 60, .1, ' s')}{numberInput('amount', 'Attenuate', -24, 0, .5, ' dB')}</div>}
       {module.type === 'spectral-repair' && <div className="spectral-module-settings">
         <p className="spectral-module-note">One rectangle, restored independently in each channel. The original recording remains untouched.</p>

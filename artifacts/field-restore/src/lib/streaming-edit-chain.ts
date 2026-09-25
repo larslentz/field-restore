@@ -1,5 +1,5 @@
 import type { ChannelData } from './audio';
-import { automaticDcBlockerPole, analyzeInitialHum, fadeGainAtFrame, isFixedLowRumble, type EditModule } from './edit-chain';
+import { automaticDcBlockerPole, analyzeInitialHum, fadeGainAtFrame, isFixedLowRumble, lowEndShelfCoefficients, lowEndShelfEnabled, type EditModule } from './edit-chain';
 import { WindProcessor, windLevel, type WindSnapshot } from './wind-reduction';
 import { HumProcessor, humPrefixFrames, type HumSnapshot } from './hum-removal';
 import { NoiseReductionProcessor, noiseProfileFromParams, type NoiseReductionSnapshot } from './noise-reduction';
@@ -21,6 +21,7 @@ interface FilterState {
 
 interface ModuleState {
   filters: FilterState[];
+  shelfFilters: FilterState[];
   low: number[];
   dcX: number[];
   dcY: number[];
@@ -113,6 +114,7 @@ export class StreamingEditChain {
     this.initialHumFrequencies = initialHumFrequencies;
     this.state = modules.map(() => ({
       filters: [],
+      shelfFilters: [],
       low: [],
       dcX: [],
       dcY: [],
@@ -129,6 +131,7 @@ export class StreamingEditChain {
   reset(startFrame = 0) {
     this.state.forEach((state) => {
       state.filters = [];
+      state.shelfFilters = [];
       state.low = [];
       state.dcX = [];
       state.dcY = [];
@@ -155,6 +158,7 @@ export class StreamingEditChain {
       nextFrame: this.nextFrame,
       state: this.state.map((state) => ({
         filters: state.filters.map((filter) => ({ ...filter })),
+        shelfFilters: state.shelfFilters.map((filter) => ({ ...filter })),
         low: [...state.low],
         dcX: [...state.dcX],
         dcY: [...state.dcY],
@@ -173,6 +177,7 @@ export class StreamingEditChain {
       const target = this.state[index];
       if (!target) return;
       target.filters = saved.filters.map((filter) => ({ ...filter }));
+      target.shelfFilters = saved.shelfFilters.map((filter) => ({ ...filter }));
       target.low = [...saved.low];
       target.dcX = [...saved.dcX];
       target.dcY = [...saved.dcY];
@@ -209,6 +214,7 @@ export class StreamingEditChain {
     const length = output[0]?.length ?? 0;
     const ensure = (state: ModuleState, count: number) => {
       while (state.filters.length < count) state.filters.push({ x1: 0, x2: 0, y1: 0, y2: 0 });
+      while (state.shelfFilters.length < count) state.shelfFilters.push({ x1: 0, x2: 0, y1: 0, y2: 0 });
       while (state.low.length < count) state.low.push(0);
       while (state.dcX.length < count) state.dcX.push(0);
       while (state.dcY.length < count) state.dcY.push(0);
@@ -276,6 +282,16 @@ export class StreamingEditChain {
           state.wind ??= new WindProcessor(this.sampleRate, output.length, windLevel(p.detection), windLevel(p.removal),
             (frame, active) => this.onWindChange?.(module.id, frame, active), startFrame);
           state.wind.process(output);
+        }
+        if (lowEndShelfEnabled(p)) {
+          const coefficients = lowEndShelfCoefficients(p, this.sampleRate);
+          output.forEach((channel, c) => channel.forEach((sample, i) => {
+            const f = state.shelfFilters[c];
+            const value = coefficients.b0 * sample + coefficients.b1 * f.x1 + coefficients.b2 * f.x2
+              - coefficients.a1 * f.y1 - coefficients.a2 * f.y2;
+            f.x2 = f.x1; f.x1 = sample; f.y2 = f.y1; f.y1 = value;
+            channel[i] = finite(value);
+          }));
         }
       } else if (module.type === 'noise') {
         state.noise ??= new NoiseReductionProcessor(this.sampleRate, output.length, Number(p.strength), noiseProfileFromParams(p));
