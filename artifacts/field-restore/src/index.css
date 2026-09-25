@@ -296,6 +296,14 @@
 .spectrogram-source-toggle button { padding: 5px 8px; border-radius: 4px; color: hsl(var(--muted-foreground)); font-size: 10px; font-weight: 700; }
 .spectrogram-source-toggle button.active { color: hsl(var(--foreground)); background: hsl(var(--card)); box-shadow: var(--shadow-subtle); }
 .waveform-wrap { position: relative; width: 100%; overflow: hidden; border: 1px solid hsl(var(--border)); border-radius: 6px; background: #17242c; }
+.repair-marker-rail { position: absolute; left: 48px; right: 72px; bottom: 4px; height: 16px; pointer-events: none; }
+.repair-marker { position: absolute; top: 0; width: 8px; height: 15px; transform: translateX(-50%); border: 1px solid #17242c; border-radius: 2px; background: #ffaf78; box-shadow: 0 0 0 1px #ffaf78; pointer-events: auto; cursor: pointer; }
+.repair-marker:hover, .repair-marker:focus-visible, .repair-marker.selected { background: #fff; box-shadow: 0 0 0 2px #ffaf78; outline: none; }
+.repair-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; margin-top: 7px; font-size: 10px; color: hsl(var(--muted-foreground)); }
+.repair-summary strong { color: hsl(var(--foreground)); }
+.repair-compare { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 5px; }
+.repair-compare button { padding: 2px 7px; border: 1px solid hsl(var(--border)); border-radius: 3px; color: hsl(var(--foreground)); }
+.repair-compare button.active { border-color: #ffaf78; color: #cf652e; }
 .hum-spectrogram-overlay { position: absolute; top: 0; bottom: 42px; left: 48px; right: 72px; z-index: 2; pointer-events: none; overflow: hidden; }
 .hum-spectrogram-label { position: absolute; top: 5px; right: 5px; padding: 3px 6px; border: 1px solid rgba(216,237,85,.48); border-radius: 3px; background: rgba(23,36,44,.9); color: #e7f6ae; font: 700 9px var(--app-font-mono); white-space: nowrap; }
 .hum-spectrogram-visit { position: absolute; left: 0; right: 0; height: 15px; }

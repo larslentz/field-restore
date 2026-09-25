@@ -227,6 +227,7 @@ export interface RenderContext {
   initialHumFrequencies?: number[];
   onHumChange?: (frame: number, frequencies: number[]) => void;
   onWindChange?: (frame: number, active: boolean) => void;
+  onClickRepair?: (frame: number) => void;
 }
 
 export function applyModule(input: ChannelData, module: EditModule, sampleRate: number, context: RenderContext = {}): ChannelData {
@@ -290,7 +291,8 @@ export function applyModule(input: ChannelData, module: EditModule, sampleRate: 
   } else if (module.type === 'noise') {
     new NoiseReductionProcessor(sampleRate, output.length, Number(p.strength), noiseProfileFromParams(p)).process(output);
   } else if (module.type === 'click-pop') {
-    new ClickPopProcessor(p, sampleRate, output.length).process(output);
+    new ClickPopProcessor(p, sampleRate, output.length,
+      context.onClickRepair && ((frame) => context.onClickRepair!(frameOffset + frame))).process(output);
   } else if (module.type === 'region') {
     const start = Math.max(0, Math.floor(Math.max(0, Number(p.start)) * sampleRate) - frameOffset);
     const end = Math.min(length, Math.floor(Math.max(Number(p.end), Number(p.start)) * sampleRate) - frameOffset);
@@ -358,10 +360,12 @@ export function humOpeningReadout(module: EditModule, state: HumScanState, frequ
 
 export function renderChain(original: ChannelData, modules: EditModule[], sampleRate: number, context: RenderContext = {}, initialSeeds?: number[][],
   onHumChange?: (moduleId: string, frame: number, frequencies: number[]) => void,
-  onWindChange?: (moduleId: string, frame: number, active: boolean) => void) {
+  onWindChange?: (moduleId: string, frame: number, active: boolean) => void,
+  onClickRepair?: (moduleId: string, frame: number) => void) {
   const seeds = context.frameOffset ? [] : initialSeeds ?? analyzeInitialHum(original, modules, sampleRate, context.totalFrames ?? original[0]?.length ?? 0);
   return modules.reduce((audio, module, index) => applyModule(audio, module, sampleRate,
     { ...context, initialHumFrequencies: seeds[index],
       onHumChange: onHumChange && ((frame, frequencies) => onHumChange(module.id, frame, frequencies)),
-      onWindChange: onWindChange && ((frame, active) => onWindChange(module.id, frame, active)) }), cloneChannels(original));
+       onWindChange: onWindChange && ((frame, active) => onWindChange(module.id, frame, active)),
+       onClickRepair: onClickRepair && ((frame) => onClickRepair(module.id, frame)) }), cloneChannels(original));
 }

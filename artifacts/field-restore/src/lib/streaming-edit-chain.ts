@@ -97,6 +97,7 @@ export class StreamingEditChain {
     initialHumFrequencies: number[][] = [],
     private readonly onHumChange?: (moduleId: string, frame: number, frequencies: number[]) => void,
     private readonly onWindChange?: (moduleId: string, frame: number, active: boolean) => void,
+    private readonly onClickRepair?: (moduleId: string, frame: number) => void,
   ) {
     this.modules = modules;
     this.sampleRate = sampleRate;
@@ -187,7 +188,8 @@ export class StreamingEditChain {
         : undefined;
       if (saved.noise) target.noise?.restore(saved.noise);
       target.clickPop = saved.clickPop
-        ? new ClickPopProcessor(this.modules[index].params, this.sampleRate, saved.clickPop.lastRaw.length)
+        ? new ClickPopProcessor(this.modules[index].params, this.sampleRate, saved.clickPop.lastRaw.length,
+          (frame) => this.onClickRepair?.(this.modules[index].id, frame))
         : undefined;
       if (saved.clickPop) target.clickPop?.restore(saved.clickPop);
     });
@@ -272,8 +274,9 @@ export class StreamingEditChain {
         state.noise ??= new NoiseReductionProcessor(this.sampleRate, output.length, Number(p.strength), noiseProfileFromParams(p));
         state.noise.process(output);
       } else if (module.type === 'click-pop') {
-        state.clickPop ??= new ClickPopProcessor(p, this.sampleRate, output.length);
-        state.clickPop.process(output);
+        state.clickPop ??= new ClickPopProcessor(p, this.sampleRate, output.length,
+          (frame) => this.onClickRepair?.(module.id, frame));
+        state.clickPop.process(output, startFrame);
       } else if (module.type === 'region') {
         const start = Math.max(0, Math.floor(Math.max(0, Number(p.start)) * this.sampleRate));
         const end = Math.floor(Math.max(Number(p.end), Number(p.start)) * this.sampleRate);
@@ -308,7 +311,8 @@ export const createStreamingEditChain = (
   modules: EditModule[], sampleRate: number, totalFrames: number, initialFrame = 0, initialHumFrequencies: number[][] = [],
   onHumChange?: (moduleId: string, frame: number, frequencies: number[]) => void,
   onWindChange?: (moduleId: string, frame: number, active: boolean) => void,
-) => new StreamingEditChain(modules, sampleRate, totalFrames, initialFrame, initialHumFrequencies, onHumChange, onWindChange);
+  onClickRepair?: (moduleId: string, frame: number) => void,
+) => new StreamingEditChain(modules, sampleRate, totalFrames, initialFrame, initialHumFrequencies, onHumChange, onWindChange, onClickRepair);
 
 /** Reads at most two detector windows from a file; never decodes the whole take. */
 export async function analyzeFileInitialHum(file: Blob, metadata: AudioMetadata, modules: EditModule[], signal?: AbortSignal) {

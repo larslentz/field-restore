@@ -23,7 +23,8 @@ export class ClickPopProcessor {
   private readonly decay: number;
   private readonly warmupFrames: number;
 
-  constructor(params: Record<string, number | string>, sampleRate: number, channels: number) {
+  constructor(params: Record<string, number | string>, sampleRate: number, channels: number,
+    private readonly onRepair?: (frame: number) => void) {
     const requested = Number(params.strength ?? 75);
     this.strength = Number.isFinite(requested) ? Math.max(0, Math.min(1, requested / 100)) : 0;
     this.maxAge = Math.max(8, Math.ceil(sampleRate * .016));
@@ -67,7 +68,7 @@ export class ClickPopProcessor {
     };
   }
 
-  process(channels: ChannelData) {
+  process(channels: ChannelData, startFrame = 0) {
     if (!channels.length || this.strength === 0) return;
     const state = this.state;
     for (let frame = 0; frame < channels[0].length; frame++) {
@@ -85,6 +86,7 @@ export class ClickPopProcessor {
           state.previousEstimate[channel] = first;
           state.typicalJump[channel] = Math.abs(following - next);
           channels[channel][frame] = raw + (first - raw) * this.strength;
+          if (initialClick) this.onRepair?.(startFrame + frame);
           continue;
         }
         const previous = state.lastRaw[channel];
@@ -97,6 +99,7 @@ export class ClickPopProcessor {
           jump > threshold && curvature > threshold && Math.abs(raw - estimate) > threshold) {
           state.age[channel] = 1;
           state.correction[channel] = raw - estimate;
+          this.onRepair?.(startFrame + frame);
         }
         let value = raw;
         let cleanEstimate = raw;

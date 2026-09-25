@@ -5,6 +5,8 @@ import { makeModule, makeProcessingChain, renderChain } from './edit-chain.ts';
 import { createStreamingEditChain } from './streaming-edit-chain.ts';
 import { parseWavMetadata, readFrames, writeFloat32WavChunks } from './large-wav.ts';
 import { parseChainPresets, preparePresetModules } from './chain-presets.ts';
+import { renderMemoryAudio } from './memory-render.ts';
+import { addRepairMark, MAX_REPAIR_MARKS } from './repair-markers.ts';
 
 const rate = 48000;
 const frames = rate;
@@ -121,4 +123,41 @@ test('repair of a decaying pop has no new edge at its tail; an abrupt wanted ons
     assert.ok(Math.abs(output[i] - output[i - 1]) < .01,
       `repair must not introduce a second hard edge at frame ${i}`);
   }
+});
+
+test('repair marks match the actual changed frames across memory, chunks, seeks, and export', () => {
+  const { dirty } = recording();
+  const chain = makeProcessingChain([makeModule('click-pop')]);
+  const memory = renderMemoryAudio(dirty, chain, rate);
+  assert.deepEqual(memory.repairs.map(({ frame }) => frame), [clickAt, popAt]);
+  assert.ok(memory.repairs.every((mark) => chain.some((module) => module.id === mark.moduleId)));
+  const marks = [];
+  const stream = createStreamingEditChain(chain, rate, frames, 0, [], undefined, undefined,
+    (moduleId, frame) => marks.push({ moduleId, frame }));
+  for (let start = 0; start < frames; start += 4093)
+    stream.process(dirty.map((channel) => channel.slice(start, start + 4093)), start);
+  assert.deepEqual(marks.reduce((kept, mark) => addRepairMark(kept, mark, rate), []), memory.repairs);
+  const seek = createStreamingEditChain(chain, rate, frames, popAt - 4093, [], undefined, undefined,
+    (moduleId, frame) => marks.push({ moduleId, frame }));
+  seek.process(dirty.map((channel) => channel.slice(popAt - 4093, popAt)), popAt - 4093);
+  const snapshot = seek.snapshot();
+  seek.process(dirty.map((channel) => channel.slice(popAt, popAt + 4093)), popAt);
+  seek.restore(snapshot);
+  seek.process(dirty.map((channel) => channel.slice(popAt, popAt + 4093)), popAt);
+  assert.deepEqual(marks.slice(-2).map(({ frame }) => frame), [popAt, popAt]);
+  const exportMarks = [];
+  const exporter = createStreamingEditChain(chain, rate, frames, 0, [], undefined, undefined,
+    (moduleId, frame) => exportMarks.push({ moduleId, frame }));
+  for (let start = 0; start < frames; start += 8192)
+    exporter.process(dirty.map((channel) => channel.slice(start, start + 8192)), start);
+  assert.deepEqual(exportMarks.reduce((kept, mark) => addRepairMark(kept, mark, rate), []), memory.repairs);
+});
+
+test('repair marker retention merges channel duplicates and remains bounded', () => {
+  let marks = [];
+  for (let frame = 0; frame < (MAX_REPAIR_MARKS + 20) * rate; frame += rate)
+    marks = addRepairMark(marks, { moduleId: 'a', frame }, rate);
+  assert.equal(marks.length, MAX_REPAIR_MARKS);
+  assert.equal(marks.at(-1).frame, (MAX_REPAIR_MARKS + 19) * rate);
+  assert.equal(addRepairMark(marks, { moduleId: 'a', frame: marks.at(-1).frame + 1 }, rate), marks);
 });

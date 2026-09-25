@@ -26,6 +26,7 @@ import { startMemoryRender, type MemoryRenderJob } from '@/lib/worker-memory-ren
 import type { MemoryRenderResult } from '@/lib/memory-render';
 import type { MemoryLoudnessResult } from '@/lib/memory-loudness.worker';
 import { useMemorySpectrogram } from '@/lib/use-memory-spectrogram';
+import { addRepairMark, MAX_REPAIR_MARKS, type RepairMark } from '@/lib/repair-markers';
 import type { LargeAnalysisResult } from '@/lib/large-analysis';
 import './index.css';
 
@@ -133,6 +134,8 @@ function App() {
   const [liveHum, setLiveHum] = useState<LiveHum | null>(null);
   const [liveWind, setLiveWind] = useState<{ source: AudioSource; chain: EditModule[]; events: Array<{ moduleId: string; frame: number; active: boolean }> } | null>(null);
   const [humHistory, setHumHistory] = useState<{ source: AudioSource; chain: EditModule[]; segments: HumHistorySegment[] } | null>(null);
+  const [fileRepairs, setFileRepairs] = useState<{ source: AudioSource; chain: EditModule[]; marks: RepairMark[] } | null>(null);
+  const [selectedRepair, setSelectedRepair] = useState<RepairMark | null>(null);
   const humHistoryRef = useRef<HumHistorySegment[]>([]);
   const humHistoryOwnerRef = useRef<{ source: AudioSource; chain: EditModule[] } | null>(null);
   const lastHistoryPublishRef = useRef(0);
@@ -407,6 +410,8 @@ function App() {
     setHumHistory(null);
     setLiveHum(null);
     setLiveWind(null);
+    setFileRepairs(null);
+    setSelectedRepair(null);
   }, [source, processingModules]);
   const recordHeardHum = useCallback((moduleId: string, frame: number, frequencies: number[], sampleRate: number) => {
     const previous = humHistoryRef.current;
@@ -445,6 +450,9 @@ function App() {
   const memoryRender = memoryResult?.source === source && memoryResult.chain === processingModules && !largeSource
     ? memoryResult.result : null;
   const memoryHumFrequencies = memoryRender?.frequencies ?? EMPTY_FREQUENCIES;
+  const repairMarks = largeSource
+    ? fileRepairs?.source === source && fileRepairs.chain === processingModules ? fileRepairs.marks : []
+    : memoryRender?.repairs ?? [];
   useEffect(() => {
     if (!largeSource || !processingModules.some((module) =>
       module.enabled && module.type === 'hum' && module.params.mode !== 'Static' && Number(module.params.reduction) > 0)) return;
@@ -497,6 +505,9 @@ function App() {
     () => visibleHumHistory(historySegments, source.sampleRate, viewStart, viewDuration),
     [historySegments, source.sampleRate, viewStart, viewDuration],
   );
+  const visibleRepairs = repairMarks.filter((mark) => mark.frame / source.sampleRate >= viewStart &&
+    mark.frame / source.sampleRate <= viewStart + viewDuration &&
+    mark.frame / source.sampleRate >= committedTrimStart && mark.frame / source.sampleRate <= committedTrimEnd);
   useEffect(() => {
     if (largeSource || !memoryRender) return;
     // Debounce selection drags to avoid copying the same recording into many superseded workers.
@@ -1027,6 +1038,7 @@ function App() {
     }
     if (playbackSessionRef.current !== session) return;
     let chunkEvents: HumEvent[] | null = null;
+    let chunkRepairs: RepairMark[] | null = null;
     const windEvents: Array<{ moduleId: string; frame: number; active: boolean }> = [];
     const processor = createStreamingEditChain(processingModules, metadata.sampleRate, metadata.frameCount, warmStart,
       initialHumFrequencies, (moduleId, frame, frequencies) => chunkEvents?.push({ moduleId, frame, frequencies }),
@@ -1034,7 +1046,10 @@ function App() {
         windEvents.push({ moduleId, frame, active });
         if (windEvents.length > 512) windEvents.splice(0, windEvents.length - 512);
         setLiveWind({ source, chain: processingModules, events: [...windEvents] });
-      });
+       },
+       (moduleId, frame) => {
+         if (chunkRepairs) chunkRepairs = addRepairMark(chunkRepairs, { moduleId, frame }, metadata.sampleRate);
+       });
     const loopStateFrame = loop ? loopStartFrame : nextFrame;
     if (monitor === 'current' && warmStart < loopStateFrame) {
       try {
@@ -1085,7 +1100,17 @@ function App() {
           if (playbackSessionRef.current !== session) return;
           if (monitor === 'current') {
             chunkEvents = [];
+             chunkRepairs = [];
             channels = processor.process(channels, readStart);
+             if (chunkRepairs.length && playbackSessionRef.current === session) {
+               const found = chunkRepairs;
+               setFileRepairs((previous) => {
+                 let marks = previous?.source === source && previous.chain === processingModules ? previous.marks : [];
+                 for (const mark of found) marks = addRepairMark(marks, mark, metadata.sampleRate);
+                 return { source, chain: processingModules, marks };
+               });
+             }
+             chunkRepairs = null;
             pending.push(...chunkEvents.map((event) => ({
               at: scheduledAt + (event.frame - readStart) / metadata.sampleRate / rate,
               frame: event.frame, moduleId: event.moduleId, frequencies: event.frequencies,
@@ -1202,6 +1227,19 @@ function App() {
       startPlayback(channels, position);
     }
   }, [currentChannels, duration, isPlaying, largeSource, memoryRender, monitor, source.channels, startLargePlayback, startPlayback, stopPlayback]);
+
+  const chooseRepair = (mark: RepairMark) => {
+    const time = mark.frame / source.sampleRate;
+    stopPlayback();
+    setSelectedRepair(mark);
+    // A short audition range makes A/B work even when a different selection was active.
+    const start = Math.max(committedTrimStart, Math.min(committedTrimEnd - .02, time - .12));
+    const end = Math.min(committedTrimEnd, Math.max(time + .38, start + .02));
+    selectionRef.current = [start, end];
+    setSelection([start, end]);
+    seekTo(start);
+    setTimeViewCenter(time);
+  };
 
   const playbackChannels = monitor === 'original' ? source.channels : currentChannels;
   const streamingPlaybackChain = largeSource ? processingModules : null;
@@ -2181,6 +2219,17 @@ function App() {
                     <div className="panel-body !pt-3">
                       <div className="waveform-wrap">
                         <canvas ref={canvasRef} className="waveform-canvas" onPointerDown={onCanvasPointerDown} onPointerMove={onCanvasPointerMove} onPointerUp={onCanvasPointerUp} onPointerCancel={onCanvasPointerUp} onDoubleClick={(event) => { event.preventDefault(); if (hasSelection) clearSelection(); }} aria-label={`${spectrogramSource === 'original' ? 'Original recording' : 'Edited signal'} interactive spectrogram from ${spectrogramMinFrequency / 1000} to ${spectrogramMaxFrequency / 1000} kilohertz with ${spectrogramFloorDb} to ${spectrogramCeilingDb} decibel scale, time from ${formatTime(viewStart)} to ${formatTime(viewStart + viewDuration)}`} data-testid="canvas-spectrogram" data-request-id={spectrogramRequestId} data-result-id={spectrogramResultId} />
+                        {spectrogramSource === 'current' && visibleRepairs.length > 0 && <div className="repair-marker-rail" aria-label="Detected click and pop repairs on the time axis">
+                          {visibleRepairs.map((mark) => {
+                            const time = mark.frame / source.sampleRate;
+                            const module = processingModules.find((entry) => entry.id === mark.moduleId);
+                            return <button key={`${mark.moduleId}-${mark.frame}`} type="button" className={`repair-marker ${selectedRepair?.moduleId === mark.moduleId && selectedRepair.frame === mark.frame ? 'selected' : ''}`}
+                              style={{ left: `${(time - viewStart) / viewDuration * 100}%` }}
+                              title={`${module?.name ?? 'Click & Pop Removal'} repair at ${formatTime(time, true)}`}
+                              aria-label={`Audition ${module?.name ?? 'Click & Pop Removal'} repair at ${formatTime(time, true)}`}
+                              onClick={() => chooseRepair(mark)} data-testid="click-repair-marker" />;
+                          })}
+                        </div>}
                         <div className={`spectrogram-source-label ${spectrogramSource} ${spectrogramSource === 'current' && visibleHumSegments.length > 0 ? 'with-hum-history' : ''}`} data-testid="label-spectrogram-source">{spectrogramSource === 'original' ? 'Original recording' : 'Edited signal · chain applied'}</div>
                         {spectrogramSource === 'current' && visibleHumSegments.length > 0 && <HumSpectrogramOverlay
                           modules={processingModules} segments={visibleHumSegments} sampleRate={source.sampleRate} onSeek={seekTo} />}
@@ -2210,6 +2259,16 @@ function App() {
                         <span className="text-muted-foreground">Drag START and END on the edited spectrogram. Original stays untouched.</span>
                         {trim && (trimStart > 0 || trimEnd < duration) && <button type="button" className="quiet-btn !py-1 !px-2 !text-[10px]" onClick={() => { stopPlayback(); restoreTrim(null, duration); setSavedStatus('Unsaved local changes'); }} data-testid="button-reset-trim">Reset trim</button>}
                       </div>
+                      {processingModules.some((module) => module.enabled && module.type === 'click-pop' && Number(module.params.strength) > 0) &&
+                        <div className="repair-summary" data-testid="repair-summary">
+                          <span><strong>Click & pop repairs</strong> · {repairMarks.length} marked {largeSource ? 'during buffered edited playback' : 'in the edited render'}{repairMarks.length >= MAX_REPAIR_MARKS ? ` · latest ${MAX_REPAIR_MARKS} retained` : ''}. Marks sit on the time axis; select one to audition a short range.</span>
+                          {selectedRepair && <span className="repair-compare" data-testid="repair-compare">
+                            {formatTime(selectedRepair.frame / source.sampleRate, true)} ·
+                            <button type="button" className={monitor === 'current' ? 'active' : ''} onClick={() => { monitorRef.current = 'current'; setMonitor('current'); }} aria-pressed={monitor === 'current'}>Edited</button>
+                            <button type="button" className={monitor === 'original' ? 'active' : ''} onClick={() => { monitorRef.current = 'original'; setMonitor('original'); }} aria-pressed={monitor === 'original'}>Original</button>
+                            <button type="button" onClick={play}>{isPlaying ? 'Pause' : 'Play'} comparison</button>
+                          </span>}
+                        </div>}
                       {spectrogramSource === 'current' && historySegments.length > 0 && <div className="hum-overlay-note" data-testid="hum-overlay-note">
                         <span><strong>Hum Removal playback history.</strong> Colored solid lines show where a hum filter was confirmed during playback; gray dashed lines mean no filter was confirmed. Dots mark heard positions you can select to seek. Unmarked gaps have no retained confirmation.</span>
                         <div className="hum-overlay-legend">{processingModules.filter((module) => historySegments.some((segment) => segment.moduleId === module.id)).map((module, index) =>
