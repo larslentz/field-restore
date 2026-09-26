@@ -16,7 +16,7 @@ export interface EditModule {
 
 export const MODULE_LABELS: Record<ModuleType, string> = {
   gain: 'Gain', fade: 'Fade In/Out', eq: 'EQ', dc: 'DC Offset', hum: 'Hum Removal', wind: 'Wind Removal', noise: 'Noise Reduction',
-  'click-pop': 'Click & Pop Removal', 'spectral-repair': 'Spectral Repair', region: 'Region Attenuation', ambient: 'Ambient Patch',
+  'click-pop': 'Click & Pop Removal', 'spectral-repair': 'Short Sound Repair', region: 'Region Attenuation', ambient: 'Ambient Patch',
 };
 
 const DEFAULT_WIND_NAMES = new Set(['Wind / Rumble', 'Wind / Rumble Removal', MODULE_LABELS.wind]);
@@ -106,7 +106,12 @@ export const normalizeWindModule = (module: EditModule): EditModule => {
 };
 
 export const withoutLegacyDcModules = (modules: EditModule[]): EditModule[] =>
-  modules.filter((module) => module.type !== 'dc').map(normalizeWindModule);
+  modules.filter((module) => module.type !== 'dc').map((module) => {
+    const normalized = normalizeWindModule(module);
+    return normalized.type === 'spectral-repair' && normalized.name === 'Spectral Repair'
+      ? { ...normalized, name: MODULE_LABELS['spectral-repair'] }
+      : normalized;
+  });
 
 export const makeProcessingChain = (modules: EditModule[]): EditModule[] => [
   AUTOMATIC_DC_REMOVAL,
@@ -170,7 +175,7 @@ export function makeRestorationReport(input: RestorationReportInput) {
       'Adaptive Hum Removal attenuates detected sustained tones regardless of their source, including wanted held notes and calls; short or changing tones may not be detected.',
       'Automatic wind/rumble detection may miss interference or reduce wanted low sounds.',
       'Click & Pop Removal estimates isolated short discontinuities; it may miss longer defects or soften abrupt wanted impacts.',
-       'Spectral Repair estimates short time-frequency patches; pattern and harmonic suppression can also reduce wanted repeating sounds or harmonics. It cannot recover fully masked sound.',
+        'Short Sound Repair estimates short time-frequency patches; pattern and harmonic suppression can also reduce wanted repeating sounds or harmonics. It cannot recover fully masked sound.',
       'Edits are conservative sample-domain approximations in this browser build.',
       'Original source remains immutable; export reflects automatic DC correction and enabled modules.',
     ],

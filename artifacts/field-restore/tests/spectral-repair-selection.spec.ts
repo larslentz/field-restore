@@ -11,7 +11,7 @@ async function drawOnSpectrogram(page: Page, fromX: number, toX: number, fromY: 
   await page.mouse.up();
 }
 
-test('sidebar Spectral Repair choice enters rectangle mode, then adds an enabled edit with controls', async ({ page }) => {
+test('sidebar Short Sound Repair choice enters rectangle mode, then adds an enabled edit with controls', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto('/');
   await page.getByTestId('button-add-module').click();
@@ -28,7 +28,7 @@ test('sidebar Spectral Repair choice enters rectangle mode, then adds an enabled
   await expect(page.getByTestId('status-spectral-error')).toHaveCount(0);
   await page.getByTestId('button-add-spectral-repair').click();
 
-  const drawer = page.getByRole('dialog', { name: 'Edit Spectral Repair' });
+  const drawer = page.getByRole('dialog', { name: 'Edit Short Sound Repair' });
   await expect(drawer).toBeVisible();
   const card = drawer.locator('[data-testid^="card-module-spectral-repair"]');
   await expect(card).toBeVisible();
@@ -43,7 +43,7 @@ test('drawer add menu returns to spectrogram, and ordinary time selection stays 
   await page.getByTestId('button-open-chain').click();
   const drawer = page.getByRole('dialog', { name: 'Edit chain' });
   await drawer.getByRole('button', { name: 'Add module' }).click();
-  await drawer.locator('.drawer-module-menu').getByRole('button', { name: 'Spectral Repair' }).click();
+  await drawer.locator('.drawer-module-menu').getByRole('button', { name: 'Short Sound Repair' }).click();
   await expect(drawer).toBeHidden();
   await expect(page.getByTestId('button-spectral-selection-mode')).toHaveAttribute('aria-pressed', 'true');
   await drawOnSpectrogram(page, .3, .4, .62, .75);
@@ -88,7 +88,7 @@ test('the repair created from a rectangle changes exported audio compared with b
   await page.getByTestId('menu-module-spectral-repair').click();
   await drawOnSpectrogram(page, .35, .65, .25, .4);
   await page.getByTestId('button-add-spectral-repair').click();
-  const card = page.getByRole('dialog', { name: 'Edit Spectral Repair' })
+  const card = page.getByRole('dialog', { name: 'Edit Short Sound Repair' })
     .locator('[data-testid^="card-module-spectral-repair"]');
   const id = (await card.getAttribute('data-testid'))!.replace('card-module-', '');
   for (const [key, value] of [['start', '0.8'], ['end', '1.2'], ['low', '900'], ['high', '1150']] as const) {

@@ -20,7 +20,7 @@ export function prepareSpectralRepairsInWorker(
       return true;
     };
     const onAbort = () => {
-      if (finish()) reject(new DOMException('Spectral repair preparation was cancelled.', 'AbortError'));
+      if (finish()) reject(new DOMException('Short Sound Repair preparation was cancelled.', 'AbortError'));
     };
     signal?.addEventListener('abort', onAbort, { once: true });
     if (signal?.aborted) { onAbort(); return; }
@@ -30,7 +30,7 @@ export function prepareSpectralRepairsInWorker(
       else resolve(event.data.patches ?? {});
     };
     worker.onerror = (event) => {
-      if (finish()) reject(new Error(event.message || 'Spectral repair preparation failed.'));
+      if (finish()) reject(new Error(event.message || 'Short Sound Repair preparation failed.'));
     };
     worker.postMessage({ file, metadata, modules });
   });

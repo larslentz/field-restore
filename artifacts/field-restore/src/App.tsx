@@ -1471,7 +1471,7 @@ function App() {
   const addSpectralRepair = (bounds: SpectralBounds | null, opener?: HTMLButtonElement) => {
     if (!bounds || bounds.end <= bounds.start || bounds.high <= bounds.low) {
       setSpectralSelectionMode(true);
-      setSpectralError('Draw a rectangle across time and frequency inside either channel, then click Add Spectral Repair. A time-only selection is not enough (10 seconds maximum).');
+      setSpectralError('Draw a rectangle across time and frequency inside either channel, then click Add Short Sound Repair. A time-only selection is not enough (10 seconds maximum).');
       return;
     }
     if (bounds.end - bounds.start > 10) {
@@ -2524,8 +2524,8 @@ function App() {
                         </div>
                         <div className="spectrogram-action-slot scrollbar-thin">
                          {(spectralSelectionMode || spectralSelection || spectralError) && <div className="spectral-action-strip">
-                         <div className="spectral-action-copy"><strong>Spectral repair · 10 seconds max</strong>{spectralError && <p role="alert" data-testid="status-spectral-error" className="spectral-error">{spectralError}</p>}<span data-testid="text-spectral-selection" aria-live="polite">{spectralSelection ? `${formatTime(spectralSelection.start, true)}–${formatTime(spectralSelection.end, true)} · ${Math.round(spectralSelection.low)}–${Math.round(spectralSelection.high)} Hz` : 'Drag diagonally inside either channel to draw a time-and-frequency rectangle, then click Add. Time-only selection does not count.'}</span></div>
-                        <button type="button" className="primary-btn" onClick={(event) => addSpectralRepair(spectralSelection, event.currentTarget)} data-testid="button-add-spectral-repair"><Plus size={13} /> Add Spectral Repair</button>
+                         <div className="spectral-action-copy"><strong>Short Sound Repair · 10 seconds max</strong>{spectralError && <p role="alert" data-testid="status-spectral-error" className="spectral-error">{spectralError}</p>}<span data-testid="text-spectral-selection" aria-live="polite">{spectralSelection ? `${formatTime(spectralSelection.start, true)}–${formatTime(spectralSelection.end, true)} · ${Math.round(spectralSelection.low)}–${Math.round(spectralSelection.high)} Hz` : 'Drag diagonally inside either channel to draw a time-and-frequency rectangle, then click Add. Time-only selection does not count.'}</span></div>
+                         <button type="button" className="primary-btn" onClick={(event) => addSpectralRepair(spectralSelection, event.currentTarget)} data-testid="button-add-spectral-repair"><Plus size={13} /> Add Short Sound Repair</button>
                          </div>}
                          {!(spectralSelectionMode || spectralSelection || spectralError) && <div className="spectrogram-legend text-[11px] text-muted-foreground">
                            <span className="inline-block w-3 h-3 rounded-sm ring-1 ring-black/20" style={{ background: spectrogramColorCss(0.08, spectrogramPalette) }} /> low energy <span className="inline-block w-3 h-3 rounded-sm ml-2 ring-1 ring-black/20" style={{ background: spectrogramColorCss(0.92, spectrogramPalette) }} /> high energy <span className="inline-block w-3 h-3 rounded-sm bg-[#ff8a4c] ml-2" /> playhead

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { renderSpectralRepair } from './spectral-repair.ts';
-import { makeModule, renderChain } from './edit-chain.ts';
+import { makeModule, renderChain, withoutLegacyDcModules } from './edit-chain.ts';
 
 const rate = 16000;
 const params = {
@@ -14,6 +14,17 @@ const params = {
   context: 0.2,
   weighting: 50,
 };
+
+test('new and saved default repair names use Short Sound Repair without changing custom names', () => {
+  assert.equal(makeModule('spectral-repair').name, 'Short Sound Repair');
+  const original = makeModule('spectral-repair', { name: 'Spectral Repair' });
+  const custom = makeModule('spectral-repair', { name: 'My repair' });
+  const [renamed, unchanged] = withoutLegacyDcModules([original, custom]);
+  assert.equal(renamed.name, 'Short Sound Repair');
+  assert.equal(unchanged.name, 'My repair');
+  assert.equal(original.name, 'Spectral Repair');
+  assert.equal(renamed.type, original.type);
+});
 
 function signal({ stereo = false, continuousTarget = false } = {}) {
   const duration = 2;

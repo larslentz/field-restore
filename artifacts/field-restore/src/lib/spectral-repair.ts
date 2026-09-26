@@ -90,7 +90,7 @@ function validate(
   frameOffset: number,
 ) {
   if (!Array.isArray(input) || input.length === 0 || input.some((channel) => !(channel instanceof Float32Array))) {
-    throw new TypeError('Spectral repair requires one or more Float32Array channels.');
+    throw new TypeError('Short Sound Repair requires one or more Float32Array channels.');
   }
   if (!Number.isFinite(sampleRate) || sampleRate <= 0) throw new RangeError('Sample rate must be a positive finite number.');
   if (!Number.isSafeInteger(frameOffset) || frameOffset < 0) throw new RangeError('Frame offset must be a non-negative integer.');
@@ -105,7 +105,7 @@ function validate(
   // Older saved edits intentionally do not require this new control.
   const fundamental = mode === 'Harmonic Suppress' ? Number(params.fundamental ?? 100) : 0;
   if (![start, end, low, high, strength, context, weighting].every(Number.isFinite)) {
-    throw new RangeError('Spectral repair parameters must be finite numbers.');
+    throw new RangeError('Short Sound Repair parameters must be finite numbers.');
   }
   if (start < 0 || end <= start || end - start > 10) {
     throw new RangeError('Selection must be positive and no longer than 10 seconds.');
@@ -117,7 +117,7 @@ function validate(
   if (context < 0.02 || context > 1) throw new RangeError('Context must be between 0.02 and 1 second.');
   if (weighting < 0 || weighting > 100) throw new RangeError('Weighting must be between 0 and 100.');
   if (!['Attenuate', 'Replace', 'Pattern Suppress', 'Harmonic Suppress'].includes(mode)) {
-    throw new RangeError('Unknown spectral repair mode.');
+    throw new RangeError('Unknown Short Sound Repair mode.');
   }
   if (mode === 'Harmonic Suppress' && (!Number.isFinite(fundamental) || fundamental < 20 ||
     fundamental > sampleRate / 2)) throw new RangeError('Harmonic fundamental must be between 20 Hz and Nyquist.');

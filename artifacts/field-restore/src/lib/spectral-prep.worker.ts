@@ -9,6 +9,6 @@ self.onmessage = async (event: MessageEvent<{ file: File; metadata: AudioMetadat
     const buffers = Object.values(patches).flatMap((patch) => patch.channels.map((channel) => channel.buffer));
     self.postMessage({ patches }, { transfer: buffers });
   } catch (caught) {
-    self.postMessage({ error: caught instanceof Error ? caught.message : 'Unable to prepare Spectral Repair.' });
+    self.postMessage({ error: caught instanceof Error ? caught.message : 'Unable to prepare Short Sound Repair.' });
   }
 };

@@ -6,7 +6,7 @@ import { analyzeFileInitialHum, createStreamingEditChain, type SpectralRepairPat
 const BLOCK_FRAMES = 32768;
 
 function abort(signal?: AbortSignal) {
-  if (signal?.aborted) throw new DOMException('Spectral repair preparation was cancelled.', 'AbortError');
+  if (signal?.aborted) throw new DOMException('Short Sound Repair preparation was cancelled.', 'AbortError');
 }
 
 /** Only these edits are independent of preceding samples. In particular the
@@ -41,7 +41,7 @@ export async function prepareSpectralRepairs(
     if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end <= start ||
       end > metadata.frameCount || (end - start) / rate > 10.001 ||
       !Number.isFinite(context) || context < 0 || context > 1) {
-      throw new RangeError('Spectral Repair requires a valid selection of at most 10 seconds within the recording.');
+      throw new RangeError('Short Sound Repair requires a valid selection of at most 10 seconds within the recording.');
     }
     const padding = Math.ceil(context * rate) + 8192;
     const from = Math.max(0, start - padding);

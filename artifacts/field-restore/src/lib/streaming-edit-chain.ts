@@ -328,12 +328,12 @@ export class StreamingEditChain {
         const last = Math.min(this.totalFrames, Math.ceil(Number(p.end) * this.sampleRate));
         if (startFrame < last && startFrame + length > first && Number(p.strength) > 0) {
           const patch = this.spectralPatches[module.id];
-          if (!patch) throw new Error(`Spectral Repair "${module.name}" is not prepared for file-backed processing.`);
+          if (!patch) throw new Error(`Short Sound Repair "${module.name}" is not prepared for file-backed processing.`);
           const from = Math.max(startFrame, first);
           const until = Math.min(startFrame + length, last);
           if (from < patch.startFrame || until > patch.startFrame + (patch.channels[0]?.length ?? 0) ||
             patch.channels.length !== output.length) {
-            throw new Error('Prepared Spectral Repair does not cover this audio range.');
+            throw new Error('Prepared Short Sound Repair does not cover this audio range.');
           }
           output.forEach((channel, index) => channel.set(
             patch.channels[index].subarray(from - patch.startFrame, until - patch.startFrame),
