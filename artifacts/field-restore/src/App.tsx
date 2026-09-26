@@ -9,6 +9,7 @@ import { analyzeLoudness, type LoudnessStats } from '@/lib/loudness';
 import { createPlaybackRangePlan, playbackPositionAtElapsed } from '@/lib/playback-range';
 import type { SpectrogramData } from '@/lib/spectrogram';
 import { withLargeExportLeaveWarning, writeFloat32WavChunks } from '@/lib/large-wav';
+import { createBrowserWavDownload } from '@/lib/browser-wav-download';
 import { audioRange, fingerprintAudio, parseAudioMetadata, readAudioFrames, type AudioMetadata } from '@/lib/source-audio';
 import { decodeFlac } from '@/lib/flac';
 import { isVerifiedRelink, openVerifiedFileHandle } from '@/lib/file-access';
@@ -1721,19 +1722,19 @@ function App() {
 
   const exportAudio = async () => {
     const filenames = exportFilenames(title, source.name, descriptiveWords);
+    setError('');
+    let browserDownloadStarted = false;
     if (largeSource) {
       const picker = (window as typeof window & {
         showSaveFilePicker?: (options?: unknown) => Promise<FileSystemFileHandle>;
       }).showSaveFilePicker;
-      if (!picker) {
-        setError('Large-file export requires desktop Chrome or Edge with the file save picker.');
-        return;
-      }
       const controller = new AbortController();
       exportJobRef.current?.abort();
       exportJobRef.current = controller;
       try {
-        const handle = await picker({ suggestedName: filenames.wav, types: [{ description: 'WAV audio', accept: { 'audio/wav': ['.wav'] } }] });
+        const handle = picker
+          ? await picker({ suggestedName: filenames.wav, types: [{ description: 'WAV audio', accept: { 'audio/wav': ['.wav'] } }] })
+          : null;
         await withLargeExportLeaveWarning(async () => {
           const { file, metadata } = largeSource;
           const firstFrame = Math.floor(trimStart * metadata.sampleRate);
@@ -1748,7 +1749,10 @@ function App() {
             setOperationStatus('Preparing trimmed export');
             await warmFileProcessor(file, metadata, processor, warmStart, firstFrame, controller.signal);
           }
-          const writable = await handle.createWritable();
+          const writable = handle
+            ? await handle.createWritable()
+            : await createBrowserWavDownload(filenames.wav, controller.signal, () => controller.abort());
+          browserDownloadStarted = !handle;
           setOperationStatus('Exporting file-backed WAV');
           await writeFloat32WavChunks(writable, {
             channels: metadata.channels,
@@ -1809,7 +1813,7 @@ function App() {
       selection: [selectionStart, selectionEnd],
     });
     downloadBlob(new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' }), filenames.report);
-    setOperationStatus(''); setModal(null); setSavedStatus('WAV + report exported');
+    setOperationStatus(''); setModal(null); setSavedStatus(browserDownloadStarted ? 'WAV + report downloads started' : 'WAV + report exported');
   };
 
   const canvasPointToTime = (event: ReactPointerEvent<HTMLCanvasElement>) => {

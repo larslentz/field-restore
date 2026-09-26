@@ -202,8 +202,15 @@ function incompleteExportError(error: unknown) {
   return new Error(`Export incomplete: ${detail}`, { cause: error });
 }
 
+/** Accepts both the file picker and bounded browser-download destinations. */
+export interface WavDestination {
+  write(chunk: ArrayBuffer): Promise<void>;
+  close(): Promise<void>;
+  abort(reason?: unknown): Promise<void>;
+}
+
 /** Streams a file-backed WAV and aborts the destination unless every byte and close succeed. */
-export async function writeFloat32WavChunks(stream: FileSystemWritableFileStream, options: Float32ChunkWriterOptions): Promise<void> {
+export async function writeFloat32WavChunks(stream: WavDestination, options: Float32ChunkWriterOptions): Promise<void> {
   const { channels, sampleRate, frameCount, signal, onProgress } = options;
   const chunkFrames = Math.max(1, options.chunkFrames ?? Math.max(4096, Math.floor(sampleRate * 2)));
   try {
@@ -245,7 +252,7 @@ export async function writeFloat32WavChunks(stream: FileSystemWritableFileStream
   }
 }
 
-export async function writeFloat32Wav(stream: FileSystemWritableFileStream, source: Float32Array[], sampleRate: number, options: { signal?: AbortSignal; onProgress?: WavProgress; frameCount?: number | bigint } = {}) {
+export async function writeFloat32Wav(stream: WavDestination, source: Float32Array[], sampleRate: number, options: { signal?: AbortSignal; onProgress?: WavProgress; frameCount?: number | bigint } = {}) {
   const channels = source.length;
   const frameCount = options.frameCount ?? BigInt(source[0]?.length ?? 0);
   const header = generateFloat32WavHeader({ channels, sampleRate, frameCount });
