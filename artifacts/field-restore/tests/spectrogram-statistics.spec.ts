@@ -95,6 +95,53 @@ test('statistics can move beside the spectrogram and return without changing mea
   expect((await panel.boundingBox())!.y).toBeGreaterThan((await plot.boundingBox())!.y);
 });
 
+test('vertical rail hugs the sidebar and gives the recovered width to the plot on wide and tablet screens', async ({ page }) => {
+  await page.setViewportSize({ width: 2200, height: 800 });
+  await page.goto('/');
+  const panel = page.getByTestId('panel-signal-statistics');
+  const plot = page.getByTestId('canvas-spectrogram');
+  const switcher = page.getByTestId('button-statistics-orientation');
+  const horizontalPlotWidth = (await plot.boundingBox())!.width;
+  const horizontalPlotX = (await plot.boundingBox())!.x;
+  await switcher.click();
+
+  for (const viewport of [{ width: 2200, height: 800 }, { width: 900, height: 700 }]) {
+    await page.setViewportSize(viewport);
+    const sidebar = (await page.locator('.sidebar-shell').boundingBox())!;
+    const rail = (await panel.boundingBox())!;
+    const canvas = (await plot.boundingBox())!;
+    expect(rail.x - sidebar.x - sidebar.width).toBeGreaterThanOrEqual(10);
+    expect(rail.x - sidebar.x - sidebar.width).toBeLessThanOrEqual(20);
+    expect(rail.width).toBeGreaterThanOrEqual(160);
+    expect(rail.width).toBeLessThanOrEqual(172);
+    expect(canvas.x).toBeGreaterThan(rail.x + rail.width);
+    expect(canvas.width).toBeGreaterThan(200);
+    await expect(switcher).toBeInViewport();
+    const heading = (await panel.locator('.signal-stats-heading').boundingBox())!;
+    const tools = (await panel.locator('.signal-stats-tools').boundingBox())!;
+    expect(tools.x + tools.width).toBeLessThanOrEqual(rail.x + rail.width);
+    expect(tools.y + tools.height).toBeLessThanOrEqual(heading.y + heading.height);
+    await expect(panel.locator('.signal-stats-label')).toBeVisible();
+    const grid = panel.locator('.stat-grid');
+    const lbpr = panel.locator('.lbpr-cell');
+    await lbpr.scrollIntoViewIfNeeded();
+    await expect(lbpr.locator('.lbpr-channel')).toHaveCount(2);
+    const lbprBounds = (await lbpr.boundingBox())!;
+    const gridBounds = (await grid.boundingBox())!;
+    expect(lbprBounds.y + lbprBounds.height).toBeLessThanOrEqual(gridBounds.y + gridBounds.height + 1);
+    expect(lbprBounds.x + lbprBounds.width).toBeLessThanOrEqual(rail.x + rail.width + 1);
+    await expect(page.getByTestId('transport-dock')).toBeInViewport();
+    await page.getByTestId('button-spectral-selection-mode').click();
+    await expect(page.getByTestId('button-add-spectral-repair')).toBeInViewport();
+    await page.getByTestId('button-spectral-selection-mode').click();
+  }
+  await page.setViewportSize({ width: 2200, height: 800 });
+  expect((await plot.boundingBox())!.width).toBeGreaterThan(horizontalPlotWidth + 60);
+  await switcher.click();
+  expect((await plot.boundingBox())!.width).toBeCloseTo(horizontalPlotWidth, 0);
+  expect((await plot.boundingBox())!.x).toBeCloseTo(horizontalPlotX, 0);
+});
+
 test('narrow screens explain when the vertical layout falls back to a horizontal bar', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 640 });
   await page.goto('/');

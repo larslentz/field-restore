@@ -2423,7 +2423,7 @@ function App() {
                </button>
              </div>
            )}
-           <div className="workspace-grid">
+           <div className={`workspace-grid${activeTab === 'edit' && statisticsOrientation === 'vertical' ? ' workspace-grid-stats-vertical' : ''}`}>
                <div className={`min-w-0 ${activeTab === 'edit' ? `edit-workspace stats-${statisticsOrientation}` : 'space-y-4'}`}>
               {activeTab === 'project' ? (
                  <ProjectPanel title={title} notes={notes} setTitle={setTitle} setNotes={setNotes} source={source} sourceChannelCount={sourceChannelCount} save={() => void save()} openSettings={(event) => openModal(event, 'settings')} />
