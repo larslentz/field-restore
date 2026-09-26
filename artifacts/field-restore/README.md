@@ -33,6 +33,17 @@ The managed Replit workflow supplies the required `PORT` and `BASE_PATH` values.
 
 ## WAV support
 
+### Large browser-download regression
+
+The picker-free RF64 download test writes a file just over 4 GiB and is excluded from normal test runs. With at least 8 GiB free in the temporary directory, run:
+
+```sh
+cd artifacts/field-restore
+RF64_BROWSER_DOWNLOAD=1 pnpm exec playwright test tests/rf64-browser-download.spec.ts --browser chromium --workers 1
+```
+
+It waits for the browser to finish the download, then reads only the header and three short sample ranges from the saved file; Playwright removes the download when the test context closes.
+
 ### Import
 
 - RIFF/WAVE
