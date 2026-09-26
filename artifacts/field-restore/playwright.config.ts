@@ -7,6 +7,7 @@ export default defineConfig({
   use: {
     baseURL: process.env.PLAYWRIGHT_BASE_URL ?? 'http://127.0.0.1:4173',
     trace: 'retain-on-failure',
+    ...(process.env.BRAVE_PATH ? { launchOptions: { executablePath: process.env.BRAVE_PATH, headless: false } } : {}),
   },
   webServer: process.env.PLAYWRIGHT_BASE_URL
     ? undefined

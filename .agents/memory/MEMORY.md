@@ -11,3 +11,4 @@
 - [Fixed spectrogram at short heights](fixed-spectrogram-short-heights.md) — bound variable guidance separately from primary actions so an anchored footer cannot hide controls or consume the plot.
 - [Compact JSX editing](compact-jsx-editing.md) — expand dense one-line JSX before changing nested content; inline replacements can silently remove wrapper elements.
 - [Browser download completion](browser-download-completion.md) — picker-free downloads can confirm stream handoff, not that the browser saved the final file.
+- [Brave embedded preview exports](brave-embedded-preview-exports.md) — cross-site Replit iframes can deny service-worker registration even when a standalone tab permits it.

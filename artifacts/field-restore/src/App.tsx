@@ -10,6 +10,7 @@ import { createPlaybackRangePlan, playbackPositionAtElapsed } from '@/lib/playba
 import type { SpectrogramData } from '@/lib/spectrogram';
 import { withLargeExportLeaveWarning, writeFloat32WavChunks } from '@/lib/large-wav';
 import { createBrowserWavDownload } from '@/lib/browser-wav-download';
+import { openExportRelay, type ExportRelay } from '@/lib/export-relay';
 import { audioRange, fingerprintAudio, parseAudioMetadata, readAudioFrames, type AudioMetadata } from '@/lib/source-audio';
 import { decodeFlac } from '@/lib/flac';
 import { isVerifiedRelink, openVerifiedFileHandle } from '@/lib/file-access';
@@ -1724,6 +1725,7 @@ function App() {
     const filenames = exportFilenames(title, source.name, descriptiveWords);
     setError('');
     let browserDownloadStarted = false;
+    let relay: ExportRelay | null = null;
     if (largeSource) {
       const picker = (window as typeof window & {
         showSaveFilePicker?: (options?: unknown) => Promise<FileSystemFileHandle>;
@@ -1732,6 +1734,9 @@ function App() {
       exportJobRef.current?.abort();
       exportJobRef.current = controller;
       try {
+        // Embedded Brave cannot register a download service worker. Open a
+        // first-party tab while this click still has user activation.
+        if (window.self !== window.top && !picker) relay = openExportRelay();
         const handle = picker
           ? await picker({ suggestedName: filenames.wav, types: [{ description: 'WAV audio', accept: { 'audio/wav': ['.wav'] } }] })
           : null;
@@ -1751,7 +1756,9 @@ function App() {
           }
           const writable = handle
             ? await handle.createWritable()
-            : await createBrowserWavDownload(filenames.wav, controller.signal, () => controller.abort());
+            : relay
+              ? await relay.createDestination(filenames.wav, controller.signal, () => controller.abort())
+              : await createBrowserWavDownload(filenames.wav, controller.signal, () => controller.abort());
           browserDownloadStarted = !handle;
           setOperationStatus('Exporting file-backed WAV');
           await writeFloat32WavChunks(writable, {
@@ -1765,6 +1772,7 @@ function App() {
           });
         });
       } catch (caught) {
+        relay?.abort();
         const cancelledAtPicker = (caught as Error).name === 'AbortError';
         setError(cancelledAtPicker
           ? 'Export incomplete: no output file was created.'
@@ -1812,7 +1820,17 @@ function App() {
       modules,
       selection: [selectionStart, selectionEnd],
     });
-    downloadBlob(new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' }), filenames.report);
+    if (relay) {
+      try { await relay.downloadReport(JSON.stringify(report, null, 2), filenames.report); }
+      catch (caught) {
+        relay.abort();
+        setError(caught instanceof Error ? caught.message : 'Restoration report download could not start.');
+        setOperationStatus('');
+        return;
+      }
+    } else {
+      downloadBlob(new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' }), filenames.report);
+    }
     setOperationStatus(''); setModal(null); setSavedStatus(browserDownloadStarted ? 'WAV + report downloads started' : 'WAV + report exported');
   };
 
