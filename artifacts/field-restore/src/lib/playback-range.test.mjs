@@ -54,6 +54,16 @@ test('a click without a range seeks into the full recording', () => {
   assert.equal(plan.timelineEnd, 10);
 });
 
+test('an explicit seek after clearing a stale selection starts at the playhead, including within a trim', () => {
+  const staleSelection = createPlaybackRangePlan({ ...base, loop: false, selection: [0, 2], trim: [3, 9], startPosition: 6 });
+  assert.equal(staleSelection.emptySelection, true);
+  const sought = createPlaybackRangePlan({ ...base, loop: false, selection: [0, 0], trim: [3, 9], startPosition: 6 });
+  assert.equal(sought.emptySelection, false);
+  assert.equal(sought.timelineStart, 6);
+  assert.equal(sought.timelineStartFrame, 6000);
+  assert.equal(sought.bufferEndFrame, 9000);
+});
+
 test('seeking to a hum marker does not shorten a full-file loop', () => {
   const plan = createPlaybackRangePlan({ ...base, loop: true, selection: [6, 6], startPosition: 8.5 });
   assert.equal(plan.hasSelection, false);

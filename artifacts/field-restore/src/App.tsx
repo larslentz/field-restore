@@ -1355,6 +1355,16 @@ function App() {
     }
   }, [currentChannels, duration, isPlaying, largeSource, memoryRender, monitor, source.channels, startLargePlayback, startPlayback, stopPlayback]);
 
+  const seekToPlayhead = useCallback((time: number) => {
+    // A direct seek replaces an older playback range. Deliberate drag selections
+    // and repair auditions still use seekTo so their ranges remain active.
+    if (Math.abs(selectionRef.current[1] - selectionRef.current[0]) >= 0.01) {
+      selectionRef.current = [0, 0];
+      setSelection([0, 0]);
+    }
+    seekTo(time);
+  }, [seekTo]);
+
   const chooseRepair = (mark: RepairMark) => {
     const time = mark.frame / source.sampleRate;
     stopPlayback();
@@ -1897,7 +1907,7 @@ function App() {
     const time = canvasPointToTime(event);
     pointerDragRef.current = { start: time, current: time, startClientX: event.clientX, moved: false };
     event.currentTarget.setPointerCapture(event.pointerId);
-    seekTo(time);
+    seekToPlayhead(time);
   };
   const onCanvasPointerMove = (event: ReactPointerEvent<HTMLCanvasElement>) => {
     if (spectralDragRef.current) {
@@ -2004,7 +2014,7 @@ function App() {
     const selectionEndTime = Math.max(start, time);
     selectionRef.current = [selectionStartTime, selectionEndTime];
     setSelection([selectionStartTime, selectionEndTime]);
-    if (loop || selectionStartTime !== start) seekTo(selectionStartTime);
+    if (isPlaying || loop || selectionStartTime !== start) seekTo(selectionStartTime);
     pointerDragRef.current = null;
   };
   const onSpectrogramWheel = useCallback((event: WheelEvent) => {
@@ -2462,7 +2472,7 @@ function App() {
                     </div>
                      <div className="panel-body !pt-3">
                       <div className="waveform-wrap">
-                         <canvas ref={canvasRef} className={`waveform-canvas ${spectralSelectionMode ? 'spectral-selecting' : ''}`} onPointerDown={onCanvasPointerDown} onPointerMove={onCanvasPointerMove} onPointerUp={onCanvasPointerUp} onPointerCancel={onCanvasPointerUp} onDoubleClick={(event) => { event.preventDefault(); if (spectralSelectionMode) { setSpectralSelection(null); setSpectralError(''); } else if (hasSelection) clearSelection(); }} aria-label={`${spectrogramSource === 'original' ? 'Original recording' : 'Edited signal'} interactive spectrogram from ${spectrogramMinFrequency / 1000} to ${spectrogramMaxFrequency / 1000} kilohertz with ${spectrogramFloorDb.toFixed(6)} to ${spectrogramCeilingDb.toFixed(6)} decibel scale, time from ${formatTime(viewStart)} to ${formatTime(viewStart + viewDuration)}`} data-testid="canvas-spectrogram" data-request-id={spectrogramRequestId} data-result-id={spectrogramResultId} />
+                         <canvas ref={canvasRef} className={`waveform-canvas ${spectralSelectionMode ? 'spectral-selecting' : ''}`} onPointerDown={onCanvasPointerDown} onPointerMove={onCanvasPointerMove} onPointerUp={onCanvasPointerUp} onPointerCancel={onCanvasPointerUp} onDoubleClick={(event) => { event.preventDefault(); if (spectralSelectionMode) { setSpectralSelection(null); setSpectralError(''); } else clearSelection(); }} aria-label={`${spectrogramSource === 'original' ? 'Original recording' : 'Edited signal'} interactive spectrogram from ${spectrogramMinFrequency / 1000} to ${spectrogramMaxFrequency / 1000} kilohertz with ${spectrogramFloorDb.toFixed(6)} to ${spectrogramCeilingDb.toFixed(6)} decibel scale, time from ${formatTime(viewStart)} to ${formatTime(viewStart + viewDuration)}`} data-testid="canvas-spectrogram" data-request-id={spectrogramRequestId} data-result-id={spectrogramResultId} />
                         {spectrogramSource === 'current' && visibleRepairs.length > 0 && <div className="repair-marker-rail" aria-label="Detected click and pop repairs on the time axis">
                           {visibleRepairs.map((mark) => {
                             const time = mark.frame / source.sampleRate;
@@ -2476,7 +2486,7 @@ function App() {
                         </div>}
                         <div className={`spectrogram-source-label ${spectrogramSource} ${spectrogramSource === 'current' && visibleHumSegments.length > 0 ? 'with-hum-history' : ''}`} data-testid="label-spectrogram-source">{spectrogramSource === 'original' ? 'Original recording' : 'Edited signal · chain applied'}</div>
                         {spectrogramSource === 'current' && visibleHumSegments.length > 0 && <HumSpectrogramOverlay
-                          modules={processingModules} segments={visibleHumSegments} sampleRate={source.sampleRate} onSeek={seekTo} />}
+                         modules={processingModules} segments={visibleHumSegments} sampleRate={source.sampleRate} onSeek={seekToPlayhead} />}
                         {spectrogramSource === 'current' && <div className="trim-overlay" aria-label="Edited recording trim handles">
                           {(['start', 'end'] as const).map((edge) => {
                             const position = edge === 'start' ? trimStart : trimEnd;
@@ -2580,7 +2590,7 @@ function App() {
                      </div>}
                    {historySegments.length > 0 && <HumHistoryView
                      modules={processingModules} segments={historySegments} sampleRate={source.sampleRate}
-                     duration={duration} onSeek={seekTo} />}
+                     duration={duration} onSeek={seekToPlayhead} />}
                     </div>
                 </>
               )}
