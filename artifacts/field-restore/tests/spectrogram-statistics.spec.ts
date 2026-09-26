@@ -55,17 +55,25 @@ test('statistics can move beside the spectrogram and return without changing mea
   expect(plotBounds.height).toBeGreaterThan(80);
 
   const details = page.getByTestId('edit-secondary');
+  const plotBeforeDetails = (await plot.boundingBox())!;
+  const railBeforeDetails = (await panel.boundingBox())!;
   await details.evaluate((element) => {
     const filler = document.createElement('div');
+    filler.dataset.layoutProbe = 'details';
     filler.style.height = '600px';
     element.appendChild(filler);
   });
   rail = (await panel.boundingBox())!;
   plotBounds = (await plot.boundingBox())!;
+  expect(plotBounds.y).toBeCloseTo(plotBeforeDetails.y, 0);
+  expect(plotBounds.height).toBeCloseTo(plotBeforeDetails.height, 0);
+  expect(rail.y).toBeCloseTo(railBeforeDetails.y, 0);
   await details.evaluate((element) => { element.scrollTop = element.scrollHeight; });
   expect(await details.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
   expect((await panel.boundingBox())!.y).toBeCloseTo(rail.y, 0);
   expect((await plot.boundingBox())!.y).toBeCloseTo(plotBounds.y, 0);
+  await details.evaluate((element) => { element.querySelector('[data-layout-probe]')?.remove(); });
+  expect((await plot.boundingBox())!.height).toBeCloseTo(plotBeforeDetails.height, 0);
 
   await page.getByTestId('button-spectral-selection-mode').click();
   await expect(page.getByTestId('button-add-spectral-repair')).toBeInViewport();
