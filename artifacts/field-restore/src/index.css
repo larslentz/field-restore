@@ -241,6 +241,17 @@
 .sidebar-save-note { padding: 0 10px 7px 35px; color: #abbdb4; font-size: 10px; line-height: 1.4; }
 .project-save-action { display: flex; flex-direction: column; align-items: flex-end; gap: 5px; flex: 0 1 275px; min-width: 0; }
 .project-save-action p { text-align: right; }
+.project-location-links { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 18px; margin-top: 8px; font-size: 11px; }
+.project-location-links a { display: inline-flex; align-items: center; gap: 4px; color: hsl(var(--foreground)); text-decoration: underline; text-underline-offset: 2px; }
+.project-location-links span, .project-metadata-hint { color: hsl(var(--muted-foreground)); }
+.project-metadata-hint { margin-top: 8px; font-size: 11px; line-height: 1.5; }
+.project-word-entry { display: flex; align-items: center; gap: 8px; }
+.project-word-entry .input-field { flex: 1; min-width: 0; }
+.project-word-entry .quiet-btn { flex: none; }
+.project-word-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.project-word-chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 4px 3px 8px; border: 1px solid hsl(var(--border)); border-radius: 99px; background: hsl(var(--muted)); font-size: 11px; }
+.project-word-chip button { display: inline-grid; place-items: center; min-width: 22px; min-height: 22px; border-radius: 99px; }
+.project-word-chip button:hover, .project-word-chip button:focus-visible { background: hsl(var(--background)); }
 .compact-chain-trigger { display: none; }
 .compact-more-link { display: none; }
 .sidebar-chain { min-height: 150px; max-height: 44vh; margin-top: 22px; padding: 0 10px; display: flex; flex-direction: column; }

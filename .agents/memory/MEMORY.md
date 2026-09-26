@@ -9,3 +9,4 @@
 - [Harmonic spectral floors](harmonic-spectral-floors.md) — common 50/60 Hz series can occupy neighboring FFT bins; estimate floors away from adjacent partials.
 - [LBPR presentation](lbpr-presentation.md) — display unitless LBPR numbers with separate Left and Right readings, without explanatory text below the measurement.
 - [Fixed spectrogram at short heights](fixed-spectrogram-short-heights.md) — bound variable guidance separately from primary actions so an anchored footer cannot hide controls or consume the plot.
+- [Compact JSX editing](compact-jsx-editing.md) — expand dense one-line JSX before changing nested content; inline replacements can silently remove wrapper elements.

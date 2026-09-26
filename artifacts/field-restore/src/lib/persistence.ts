@@ -4,6 +4,8 @@ import type { EditModule } from './edit-chain';
 export interface StoredProject {
   title: string;
   notes: string;
+  what3wordsAddress?: string;
+  descriptiveWords?: string[];
   sourceName: string;
   sourceFingerprint?: string;
   sampleRate: number;
@@ -54,8 +56,8 @@ export function loadProject(): StoredProject | null {
     return raw ? JSON.parse(raw) as StoredProject : null;
   } catch { return null; }
 }
-export function projectFromSource(source: AudioSource, modules: EditModule[], markers: StoredProject['markers'], regions: StoredProject['regions'], title: string, notes: string, trim?: [number, number], sourceFingerprint?: string | null): StoredProject {
+export function projectFromSource(source: AudioSource, modules: EditModule[], markers: StoredProject['markers'], regions: StoredProject['regions'], title: string, notes: string, trim?: [number, number], sourceFingerprint?: string | null, what3wordsAddress = '', descriptiveWords: string[] = []): StoredProject {
   const maxSamples = 1_000_000;
   const originalBase64 = source.channels[0]?.length <= maxSamples ? encodeChannels(source.channels) : undefined;
-  return { title, notes, sourceName: source.name, ...(sourceFingerprint ? { sourceFingerprint } : {}), sampleRate: source.sampleRate, modules, markers, regions, trim, savedAt: new Date().toISOString(), originalBase64, originalLength: source.channels[0]?.length };
+  return { title, notes, what3wordsAddress, descriptiveWords, sourceName: source.name, ...(sourceFingerprint ? { sourceFingerprint } : {}), sampleRate: source.sampleRate, modules, markers, regions, trim, savedAt: new Date().toISOString(), originalBase64, originalLength: source.channels[0]?.length };
 }

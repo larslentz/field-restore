@@ -13,6 +13,7 @@ import { audioRange, fingerprintAudio, parseAudioMetadata, readAudioFrames, type
 import { decodeFlac } from '@/lib/flac';
 import { isVerifiedRelink, openVerifiedFileHandle } from '@/lib/file-access';
 import { listProjects, loadProject as loadProjectV2, queryFileHandlePermission, requestFileHandlePermission, saveProject as saveProjectV2, type ProjectRecord } from '@/lib/project-store';
+import { exportFilenames, filenameWord, what3wordsMapUrl } from '@/lib/project-metadata';
 import { analyzeFileInitialHum, createStreamingEditChain } from '@/lib/streaming-edit-chain';
 import type { SpectralRepairPatches } from '@/lib/streaming-edit-chain';
 import { prepareSpectralRepairsInWorker } from '@/lib/worker-spectral-prep';
@@ -208,6 +209,8 @@ function App() {
   }, [modal, presetDialogOpen]);
   const [title, setTitle] = useState('Coastal dawn / north bluff');
   const [notes, setNotes] = useState('Low-tide ambience. Keep the distant tern call at 07:48 intact.');
+  const [what3wordsAddress, setWhat3wordsAddress] = useState('');
+  const [descriptiveWords, setDescriptiveWords] = useState<string[]>([]);
   const [savedStatus, setSavedStatus] = useState('Local session');
   const [restoredProject, setRestoredProject] = useState(false);
   const [error, setError] = useState('');
@@ -636,8 +639,10 @@ function App() {
   const stageSavedProject = useCallback((record: ProjectRecord) => {
     setRestoredProject(true);
     setProjectId(null);
-    setTitle(record.source.name.replace(/\.(wav|flac)$/i, ''));
-    setNotes('');
+    setTitle(record.title);
+    setNotes(record.notes);
+    setWhat3wordsAddress(record.what3wordsAddress ?? '');
+    setDescriptiveWords(record.descriptiveWords ?? []);
     setModules([]);
     setMarkers([]);
     setRegions([]);
@@ -663,6 +668,8 @@ function App() {
     restoreTrim(record.trim, metadata.frameCount / metadata.sampleRate);
     setTitle(record.title);
     setNotes(record.notes);
+    setWhat3wordsAddress(record.what3wordsAddress ?? '');
+    setDescriptiveWords(record.descriptiveWords ?? []);
     setProjectId(record.id);
     setRestoredProject(true);
     setPendingPermission(null);
@@ -679,14 +686,14 @@ function App() {
       const channels = decodeChannels(saved.originalBase64, saved.originalLength);
       const next: AudioSource = { channels, sampleRate: saved.sampleRate, duration: channels[0].length / saved.sampleRate, name: saved.sourceName };
       setSourceFingerprint(saved.sourceFingerprint ?? null);
-      setSource(next); setTitle(saved.title); setNotes(saved.notes); setModules(withoutLegacyDcModules(saved.modules)); setMarkers(saved.markers); setRegions(saved.regions); restoreTrim(saved.trim, next.duration);
+      setSource(next); setTitle(saved.title); setNotes(saved.notes); setWhat3wordsAddress(saved.what3wordsAddress ?? ''); setDescriptiveWords(saved.descriptiveWords ?? []); setModules(withoutLegacyDcModules(saved.modules)); setMarkers(saved.markers); setRegions(saved.regions); restoreTrim(saved.trim, next.duration);
       setSavedStatus(`Restored${saved.modules.some(isLegacyWind) ? ' · Wind Removal converted to automatic' : ''} ${new Date(saved.savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
     } else if (saved?.original?.length) {
       setRestoredProject(true);
       const channels = saved.original.map((channel) => new Float32Array(channel));
       const next: AudioSource = { channels, sampleRate: saved.sampleRate, duration: channels[0].length / saved.sampleRate, name: saved.sourceName };
       setSourceFingerprint(saved.sourceFingerprint ?? null);
-      setSource(next); setTitle(saved.title); setNotes(saved.notes); setModules(withoutLegacyDcModules(saved.modules)); setMarkers(saved.markers); setRegions(saved.regions); restoreTrim(saved.trim, next.duration);
+      setSource(next); setTitle(saved.title); setNotes(saved.notes); setWhat3wordsAddress(saved.what3wordsAddress ?? ''); setDescriptiveWords(saved.descriptiveWords ?? []); setModules(withoutLegacyDcModules(saved.modules)); setMarkers(saved.markers); setRegions(saved.regions); restoreTrim(saved.trim, next.duration);
       setSavedStatus(`Restored${saved.modules.some(isLegacyWind) ? ' · Wind Removal converted to automatic' : ''} ${new Date(saved.savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
     }
     void listProjects().then(async (projects) => {
@@ -1565,13 +1572,15 @@ function App() {
          restoreTrim(savedProject.trim, metadata.frameCount / metadata.sampleRate);
         setTitle(savedProject.title);
         setNotes(savedProject.notes);
+        setWhat3wordsAddress(savedProject.what3wordsAddress ?? '');
+        setDescriptiveWords(savedProject.descriptiveWords ?? []);
         setProjectId(savedProject.id);
         setPendingPermission(null);
         setPendingRelink(null);
          setSavedStatus(`Source relinked · project restored${savedProject.modules.some(isLegacyWind) ? ' · Wind Removal converted to automatic' : ''}`);
       } else {
          setRestoredProject(false);
-        setModules(makeDefaultChain()); setMarkers([]); setRegions([]); setTitle(file.name.replace(/\.(wav|flac)$/i, '')); setProjectId(null);
+        setModules(makeDefaultChain()); setMarkers([]); setRegions([]); setTitle(file.name.replace(/\.(wav|flac)$/i, '')); setWhat3wordsAddress(''); setDescriptiveWords([]); setProjectId(null);
          restoreTrim(null, metadata.frameCount / metadata.sampleRate);
       }
       setSelection([0, Math.min(metadata.frameCount / metadata.sampleRate, 5)]); setOperationStatus('');
@@ -1667,6 +1676,8 @@ function App() {
           id: projectId ?? undefined,
           title,
           notes,
+          what3wordsAddress,
+          descriptiveWords,
           modules,
           markers,
           regions,
@@ -1693,13 +1704,13 @@ function App() {
       }
       return;
     }
-    const project = projectFromSource(source, modules, markers, regions, title, notes, trim ?? undefined, sourceFingerprint);
+    const project = projectFromSource(source, modules, markers, regions, title, notes, trim ?? undefined, sourceFingerprint, what3wordsAddress, descriptiveWords);
     const ok = saveProject(project);
     setSavedStatus(ok ? `Project saved in this browser · ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 'Browser storage full · project not saved; Export creates WAV + report, not a project backup');
   };
 
   const exportAudio = async () => {
-    const safeName = (title || source.name).replace(/[^a-z0-9-_]+/gi, '-').replace(/-+/g, '-').toLowerCase();
+    const filenames = exportFilenames(title, source.name, descriptiveWords);
     if (largeSource) {
       const picker = (window as typeof window & {
         showSaveFilePicker?: (options?: unknown) => Promise<FileSystemFileHandle>;
@@ -1712,7 +1723,7 @@ function App() {
       exportJobRef.current?.abort();
       exportJobRef.current = controller;
       try {
-        const handle = await picker({ suggestedName: `${safeName || 'field-restore'}-rx.wav`, types: [{ description: 'WAV audio', accept: { 'audio/wav': ['.wav'] } }] });
+        const handle = await picker({ suggestedName: filenames.wav, types: [{ description: 'WAV audio', accept: { 'audio/wav': ['.wav'] } }] });
         await withLargeExportLeaveWarning(async () => {
           const { file, metadata } = largeSource;
           const firstFrame = Math.floor(trimStart * metadata.sampleRate);
@@ -1774,7 +1785,7 @@ function App() {
       }
       const firstFrame = Math.floor(trimStart * source.sampleRate);
       const lastFrame = Math.min(source.channels[0]?.length ?? 0, Math.ceil(trimEnd * source.sampleRate));
-      downloadBlob(encodeWav({ ...source, channels: rendered.channels.map((channel) => channel.subarray(firstFrame, lastFrame)) }), `${safeName || 'field-restore'}-rx.wav`);
+      downloadBlob(encodeWav({ ...source, channels: rendered.channels.map((channel) => channel.subarray(firstFrame, lastFrame)) }), filenames.wav);
     }
     const report = makeRestorationReport({
       source: source.name,
@@ -1787,7 +1798,7 @@ function App() {
       modules,
       selection: [selectionStart, selectionEnd],
     });
-    downloadBlob(new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' }), `${safeName || 'field-restore'}-restoration-report.json`);
+    downloadBlob(new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' }), filenames.report);
     setOperationStatus(''); setModal(null); setSavedStatus('WAV + report exported');
   };
 
@@ -2368,7 +2379,7 @@ function App() {
           <button type="button" className="nav-item" onClick={(event) => openModal(event, 'export')} aria-label="Export 32-bit WAV" data-testid="nav-export"><Download size={15} /><span className="nav-label">Export 32-bit WAV</span></button>
           <button type="button" className="nav-item" onClick={save} aria-label="Save project" aria-describedby="sidebar-save-project-description" data-testid="nav-save"><Save size={15} /><span className="nav-label">Save project</span></button>
           <p id="sidebar-save-project-description" className="sidebar-save-note">{SAVE_PROJECT_DESCRIPTION}</p>
-          <button type="button" className="nav-item" onClick={() => { stopPlayback(); setRestoredProject(false); setLargeSource(null); setSourceFingerprint(null); setUndoStack([]); setRedoStack([]); setSource(createDemoAudio()); restoreTrim(null, 18); setModules(makeDefaultChain()); setSelection([4.1, 7.8]); setMarkers([]); setRegions([]); setTitle('Coastal dawn / north bluff'); setSavedStatus('Demo source loaded'); }} data-testid="nav-demo"><Waves size={15} /><span className="nav-label">Load demo source</span></button>
+          <button type="button" className="nav-item" onClick={() => { stopPlayback(); setRestoredProject(false); setLargeSource(null); setSourceFingerprint(null); setUndoStack([]); setRedoStack([]); setSource(createDemoAudio()); restoreTrim(null, 18); setModules(makeDefaultChain()); setSelection([4.1, 7.8]); setMarkers([]); setRegions([]); setTitle('Coastal dawn / north bluff'); setWhat3wordsAddress(''); setDescriptiveWords([]); setSavedStatus('Demo source loaded'); }} data-testid="nav-demo"><Waves size={15} /><span className="nav-label">Load demo source</span></button>
         </div>
         <div className="mt-auto px-4 pb-5 sidebar-meta">
           <div className="border-t border-[#34454b] pt-4">
@@ -2426,7 +2437,7 @@ function App() {
            <div className={`workspace-grid${activeTab === 'edit' && statisticsOrientation === 'vertical' ? ' workspace-grid-stats-vertical' : ''}`}>
                <div className={`min-w-0 ${activeTab === 'edit' ? `edit-workspace stats-${statisticsOrientation}` : 'space-y-4'}`}>
               {activeTab === 'project' ? (
-                 <ProjectPanel title={title} notes={notes} setTitle={setTitle} setNotes={setNotes} source={source} sourceChannelCount={sourceChannelCount} save={() => void save()} openSettings={(event) => openModal(event, 'settings')} />
+                 <ProjectPanel title={title} notes={notes} setTitle={setTitle} setNotes={setNotes} what3wordsAddress={what3wordsAddress} setWhat3wordsAddress={setWhat3wordsAddress} descriptiveWords={descriptiveWords} setDescriptiveWords={setDescriptiveWords} source={source} sourceChannelCount={sourceChannelCount} save={() => void save()} openSettings={(event) => openModal(event, 'settings')} />
               ) : activeTab === 'analyze' ? (
                 <AnalyzePanel originalStats={originalStats} currentStats={currentStats} selectionOriginalStats={selectionOriginalStats} selectionCurrentStats={selectionCurrentStats} duration={duration} selection={[selectionStart, selectionEnd]} trim={[committedTrimStart, committedTrimEnd]} hasSelection={hasSelection} modules={modules} />
               ) : (
@@ -3005,16 +3016,86 @@ function SignalComparison({ title, original, current }: { title: string; origina
   );
 }
 
-function ProjectPanel({ title, notes, setTitle, setNotes, source, sourceChannelCount, save, openSettings }: { title: string; notes: string; setTitle: (value: string) => void; setNotes: (value: string) => void; source: AudioSource; sourceChannelCount: number; save: () => void; openSettings: (event: ReactMouseEvent<HTMLButtonElement>) => void }) {
-  return <div className="space-y-4"><section className="panel">
-    <div className="panel-header project-save-header">
-      <div className="section-title">Project metadata</div>
-      <div className="project-save-action">
-        <button type="button" className="primary-btn" onClick={save} aria-describedby="project-save-description" data-testid="button-project-save"><Save size={14} /> Save project</button>
-        <p id="project-save-description" className="text-[11px] leading-relaxed text-muted-foreground">{SAVE_PROJECT_DESCRIPTION}</p>
+type ProjectPanelProps = {
+  title: string;
+  notes: string;
+  setTitle: (value: string) => void;
+  setNotes: (value: string) => void;
+  what3wordsAddress: string;
+  setWhat3wordsAddress: (value: string) => void;
+  descriptiveWords: string[];
+  setDescriptiveWords: (words: string[]) => void;
+  source: AudioSource;
+  sourceChannelCount: number;
+  save: () => void;
+  openSettings: (event: ReactMouseEvent<HTMLButtonElement>) => void;
+};
+
+function ProjectPanel({ title, notes, setTitle, setNotes, what3wordsAddress, setWhat3wordsAddress, descriptiveWords, setDescriptiveWords, source, sourceChannelCount, save, openSettings }: ProjectPanelProps) {
+  const [wordDraft, setWordDraft] = useState('');
+  const mapUrl = what3wordsMapUrl(what3wordsAddress);
+  const filenames = exportFilenames(title, source.name, descriptiveWords);
+  const addWords = () => {
+    const words = [...descriptiveWords];
+    for (const entry of wordDraft.split(/[,;\n]+/)) {
+      const word = entry.trim();
+      const token = filenameWord(word);
+      if (token && !words.some((saved) => filenameWord(saved) === token)) words.push(word);
+    }
+    setDescriptiveWords(words);
+    setWordDraft('');
+  };
+
+  return <div className="space-y-4">
+    <section className="panel">
+      <div className="panel-header project-save-header">
+        <div className="section-title">Project metadata</div>
+        <div className="project-save-action">
+          <button type="button" className="primary-btn" onClick={save} aria-describedby="project-save-description" data-testid="button-project-save"><Save size={14} /> Save project</button>
+          <p id="project-save-description" className="text-[11px] leading-relaxed text-muted-foreground">{SAVE_PROJECT_DESCRIPTION}</p>
+        </div>
       </div>
-    </div>
-    <div className="panel-body space-y-5 max-w-[740px]"><label><span className="field-label">Project title</span><input className="input-field text-[16px]" value={title} onChange={(event) => setTitle(event.target.value)} data-testid="input-project-title" /></label><label><span className="field-label">Field notes</span><textarea className="textarea-field min-h-[170px]" value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Describe place, mic, weather, handling, and decisions…" data-testid="textarea-project-notes" /></label><div className="grid sm:grid-cols-3 gap-3"><div className="p-3 bg-[hsl(var(--muted))] rounded"><div className="eyebrow">Source</div><div className="font-mono-value text-[11px] mt-2 truncate">{source.name}</div></div><div className="p-3 bg-[hsl(var(--muted))] rounded"><div className="eyebrow">Format</div><div className="font-mono-value text-[11px] mt-2">{source.sampleRate / 1000} kHz / {sourceChannelCount} ch</div></div><div className="p-3 bg-[hsl(var(--muted))] rounded"><div className="eyebrow">Duration</div><div className="font-mono-value text-[11px] mt-2">{formatTime(source.duration)}</div></div></div></div></section><section className="panel"><div className="panel-header"><div className="section-title">Local-first guarantees</div></div><div className="panel-body grid sm:grid-cols-2 gap-3 text-[12px]"><div className="border rounded p-3"><Check size={15} color="hsl(var(--primary))" /><div className="font-semibold mt-2">Original is immutable</div><div className="text-muted-foreground mt-1 leading-relaxed">All processing reads from the original local file. No destructive overwrite occurs.</div></div><div className="border rounded p-3"><Check size={15} color="hsl(var(--primary))" /><div className="font-semibold mt-2">No network required</div><div className="text-muted-foreground mt-1 leading-relaxed">WAV parsing, DSP estimates, playback, persistence, and export happen in this tab.</div></div><button type="button" className="quiet-btn justify-self-start" onClick={openSettings} data-testid="button-project-settings"><Settings size={14} /> Storage settings</button></div></section></div>;
+      <div className="panel-body space-y-5 max-w-[740px]">
+        <label><span className="field-label">Project title</span><input className="input-field text-[16px]" value={title} onChange={(event) => setTitle(event.target.value)} data-testid="input-project-title" /></label>
+        <div>
+          <label htmlFor="project-what3words" className="field-label">What3Words location</label>
+          <input id="project-what3words" className="input-field" value={what3wordsAddress} onChange={(event) => setWhat3wordsAddress(event.target.value)} placeholder="///filled.count.soap" spellCheck={false} autoComplete="off" data-testid="input-project-what3words" />
+          <div className="project-location-links">
+            {mapUrl
+              ? <a href={mapUrl} target="_blank" rel="noopener noreferrer" data-testid="link-what3words-map">Open location on What3Words map <ExternalLink size={12} aria-hidden="true" /></a>
+              : <span>{what3wordsAddress.trim() ? 'Enter three words separated by periods to open the map.' : 'Add a three-word address to open its map.'}</span>}
+            <a href="https://what3words.com/" target="_blank" rel="noopener noreferrer" data-testid="link-what3words-choose">Choose a location on What3Words <ExternalLink size={12} aria-hidden="true" /></a>
+          </div>
+          <p className="project-metadata-hint">Links open an external site and share the address you enter with What3Words. The app does not look up or verify addresses.</p>
+        </div>
+        <div>
+          <label htmlFor="project-descriptive-word" className="field-label">Descriptive words for export</label>
+          <div className="project-word-entry">
+            <input id="project-descriptive-word" className="input-field" value={wordDraft} onChange={(event) => setWordDraft(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); addWords(); } }} placeholder="Add a word (or separate several with commas)" data-testid="input-project-descriptive-word" />
+            <button type="button" className="quiet-btn" onClick={addWords} disabled={!wordDraft.trim()} data-testid="button-add-descriptive-word"><Plus size={13} /> Add</button>
+          </div>
+          {descriptiveWords.length > 0 && <ul className="project-word-list" aria-label="Descriptive words" data-testid="list-project-descriptive-words">
+            {descriptiveWords.map((word, index) => <li key={`${index}-${word}`} className="project-word-chip">{word}<button type="button" aria-label={`Remove ${word}`} onClick={() => setDescriptiveWords(descriptiveWords.filter((_, wordIndex) => wordIndex !== index))}><X size={12} /></button></li>)}
+          </ul>}
+          <p className="project-metadata-hint">WAV filename: <span className="font-mono-value break-all" data-testid="text-export-filename">{filenames.wav}</span></p>
+        </div>
+        <label><span className="field-label">Field notes</span><textarea className="textarea-field min-h-[170px]" value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Describe place, mic, weather, handling, and decisions…" data-testid="textarea-project-notes" /></label>
+        <div className="grid sm:grid-cols-3 gap-3">
+          <div className="p-3 bg-[hsl(var(--muted))] rounded"><div className="eyebrow">Source</div><div className="font-mono-value text-[11px] mt-2 truncate">{source.name}</div></div>
+          <div className="p-3 bg-[hsl(var(--muted))] rounded"><div className="eyebrow">Format</div><div className="font-mono-value text-[11px] mt-2">{source.sampleRate / 1000} kHz / {sourceChannelCount} ch</div></div>
+          <div className="p-3 bg-[hsl(var(--muted))] rounded"><div className="eyebrow">Duration</div><div className="font-mono-value text-[11px] mt-2">{formatTime(source.duration)}</div></div>
+        </div>
+      </div>
+    </section>
+    <section className="panel">
+      <div className="panel-header"><div className="section-title">Local-first guarantees</div></div>
+      <div className="panel-body grid sm:grid-cols-2 gap-3 text-[12px]">
+        <div className="border rounded p-3"><Check size={15} color="hsl(var(--primary))" /><div className="font-semibold mt-2">Original is immutable</div><div className="text-muted-foreground mt-1 leading-relaxed">All processing reads from the original local file. No destructive overwrite occurs.</div></div>
+        <div className="border rounded p-3"><Check size={15} color="hsl(var(--primary))" /><div className="font-semibold mt-2">No network required for audio</div><div className="text-muted-foreground mt-1 leading-relaxed">WAV parsing, DSP estimates, playback, persistence, and export happen in this tab. Location links open What3Words separately.</div></div>
+        <button type="button" className="quiet-btn justify-self-start" onClick={openSettings} data-testid="button-project-settings"><Settings size={14} /> Storage settings</button>
+      </div>
+    </section>
+  </div>;
 }
 
 function ExportModal({ onClose, onExport, title }: { onClose: () => void; onExport: () => void; title: string }) {
@@ -3028,7 +3109,20 @@ function HelpModal({ onClose }: { onClose: () => void }) {
 function SettingsModal({ onClose, spectrogramPalette, onSpectrogramPaletteChange }: { onClose: () => void; spectrogramPalette: SpectrogramPaletteId; onSpectrogramPaletteChange: (palette: SpectrogramPaletteId) => void }) {
   const [dark, setDark] = useState(() => document.documentElement.classList.contains('dark'));
   const toggleTheme = () => { const next = !dark; setDark(next); document.documentElement.classList.toggle('dark', next); localStorage.setItem('field-restore-theme', next ? 'dark' : 'light'); };
-  return <div className="modal-backdrop"><div className="modal-card" role="dialog" aria-modal="true" aria-labelledby="settings-title"><div className="modal-header"><div><div className="eyebrow">Instrument settings</div><h2 id="settings-title" className="text-[17px] font-bold mt-1">Preferences</h2></div><button type="button" className="icon-btn" onClick={onClose} aria-label="Close settings" data-testid="button-close-settings"><X size={16} /></button></div><div className="modal-body space-y-4"><div className="flex items-center justify-between border rounded p-3"><div><div className="text-[12px] font-semibold">Darkroom contrast</div><div className="text-[11px] text-muted-foreground mt-1">Switch to a darker monitoring surface.</div></div><button type="button" className={`quiet-btn ${dark ? '!bg-[hsl(var(--primary))] !text-[hsl(var(--primary-foreground))]' : ''}`} onClick={toggleTheme} aria-pressed={dark} data-testid="button-toggle-theme">{dark ? 'On' : 'Off'}</button></div><fieldset><legend className="field-label">Spectrogram color scale</legend><div className="palette-grid">{(Object.entries(SPECTROGRAM_PALETTES) as Array<[SpectrogramPaletteId, typeof SPECTROGRAM_PALETTES[SpectrogramPaletteId]]>).map(([id, palette]) => <button key={id} type="button" className={`palette-option ${spectrogramPalette === id ? 'selected' : ''}`} onClick={() => onSpectrogramPaletteChange(id)} aria-pressed={spectrogramPalette === id} data-testid={`button-palette-${id}`}><span className="palette-swatch" style={{ background: `linear-gradient(90deg, ${palette.stops.map(([position, color]) => `${color} ${position * 100}%`).join(', ')})` }} /><span><strong>{palette.label}</strong><small>{palette.description}</small></span>{spectrogramPalette === id && <Check size={14} />}</button>)}</div></fieldset><div className="border rounded p-3 text-[11px] leading-relaxed text-muted-foreground"><RotateCcw size={14} className="inline mr-2 -mt-0.5" />Project storage uses browser localStorage. Clear site data in browser settings to remove it. No audio or metadata leaves this device.</div></div><div className="modal-footer"><button type="button" className="primary-btn" onClick={onClose} data-testid="button-done-settings">Done</button></div></div></div>;
+  return <div className="modal-backdrop">
+    <div className="modal-card" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+      <div className="modal-header"><div><div className="eyebrow">Instrument settings</div><h2 id="settings-title" className="text-[17px] font-bold mt-1">Preferences</h2></div><button type="button" className="icon-btn" onClick={onClose} aria-label="Close settings" data-testid="button-close-settings"><X size={16} /></button></div>
+      <div className="modal-body space-y-4">
+        <div className="flex items-center justify-between border rounded p-3">
+          <div><div className="text-[12px] font-semibold">Darkroom contrast</div><div className="text-[11px] text-muted-foreground mt-1">Switch to a darker monitoring surface.</div></div>
+          <button type="button" className={`quiet-btn ${dark ? '!bg-[hsl(var(--primary))] !text-[hsl(var(--primary-foreground))]' : ''}`} onClick={toggleTheme} aria-pressed={dark} data-testid="button-toggle-theme">{dark ? 'On' : 'Off'}</button>
+        </div>
+        <fieldset><legend className="field-label">Spectrogram color scale</legend><div className="palette-grid">{(Object.entries(SPECTROGRAM_PALETTES) as Array<[SpectrogramPaletteId, typeof SPECTROGRAM_PALETTES[SpectrogramPaletteId]]>).map(([id, palette]) => <button key={id} type="button" className={`palette-option ${spectrogramPalette === id ? 'selected' : ''}`} onClick={() => onSpectrogramPaletteChange(id)} aria-pressed={spectrogramPalette === id} data-testid={`button-palette-${id}`}><span className="palette-swatch" style={{ background: `linear-gradient(90deg, ${palette.stops.map(([position, color]) => `${color} ${position * 100}%`).join(', ')})` }} /><span><strong>{palette.label}</strong><small>{palette.description}</small></span>{spectrogramPalette === id && <Check size={14} />}</button>)}</div></fieldset>
+        <div className="border rounded p-3 text-[11px] leading-relaxed text-muted-foreground"><RotateCcw size={14} className="inline mr-2 -mt-0.5" />Projects are stored in this browser. Audio stays on this device; opening a What3Words location link shares that address with What3Words.</div>
+      </div>
+      <div className="modal-footer"><button type="button" className="primary-btn" onClick={onClose} data-testid="button-done-settings">Done</button></div>
+    </div>
+  </div>;
 }
 
 export default App;

@@ -17,6 +17,8 @@ export interface ProjectRecord {
   id: string;
   title: string;
   notes: string;
+  what3wordsAddress?: string;
+  descriptiveWords?: string[];
   savedAt: string;
   modules: EditModule[];
   markers: StoredProject['markers'];
@@ -103,6 +105,8 @@ function withoutAudio(input: ProjectInput): ProjectRecord {
     id: input.id ?? makeId(),
     title: input.title ?? 'Untitled project',
     notes: input.notes ?? '',
+    what3wordsAddress: input.what3wordsAddress ?? '',
+    descriptiveWords: input.descriptiveWords ?? [],
     savedAt: input.savedAt ?? new Date().toISOString(),
     modules: input.modules ?? [],
     markers: input.markers ?? [],
@@ -146,6 +150,8 @@ export function migrateStoredProject(input: StoredProject | ProjectInput, id?: s
     id: id ?? value.id,
     title: value.title ?? 'Untitled project',
     notes: value.notes ?? '',
+    what3wordsAddress: value.what3wordsAddress ?? '',
+    descriptiveWords: value.descriptiveWords ?? [],
     savedAt: value.savedAt,
     modules: value.modules ?? [],
     markers: value.markers ?? [],
