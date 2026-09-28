@@ -30,6 +30,10 @@ test('both removal items offer independent low-end shelves with honest response 
     }
     const shelfCurve = card.getByTestId(`eq-curve-low-end-${id}`);
     await expect(shelfCurve).toBeVisible();
+    if (name === 'Wind Removal') {
+      await expect(shelfCurve).toContainText('Bypassed · not applied');
+      await card.getByTestId(`button-bypass-${id}`).click();
+    }
     if (!initiallyEnabled) await expect(shelfCurve).toContainText('Off · not applied');
     const shelfFollowsControls = await card.evaluate((element, moduleId) => {
       const controls = element.querySelector(`[data-testid="low-end-controls-${moduleId}"]`);

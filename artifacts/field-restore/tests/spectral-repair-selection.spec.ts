@@ -82,8 +82,10 @@ test('the repair created from a rectangle changes exported audio compared with b
   await page.goto('/');
   await page.getByTestId('input-import-wav').setInputFiles({ name: 'spectral-defect.wav', mimeType: 'audio/wav', buffer: wav });
   await expect(page.getByTestId('text-source-name')).toHaveText('spectral-defect.wav');
-  // Isolate the newly created repair from the demo chain's noise and fade modules.
-  await page.getByTestId('toggle-all-modules-sidebar').uncheck();
+  // The default chain starts in a mixed state; enable all first, then bypass all.
+  const allModules = page.getByTestId('toggle-all-modules-sidebar');
+  await allModules.check();
+  await allModules.uncheck();
   await page.getByTestId('button-add-module').click();
   await page.getByTestId('menu-module-spectral-repair').click();
   await drawOnSpectrogram(page, .35, .65, .25, .4);

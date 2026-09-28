@@ -71,6 +71,9 @@ test('live hum status does not resize the spectrogram when playback starts or st
   await page.goto('/');
   await expect(page.getByTestId('text-selection-time')).toHaveText('No selection · full track');
   await expect(page.getByTestId('button-clear-selection')).toHaveCount(0);
+  const humRow = page.locator('[data-testid^="sidebar-module-"]').filter({ hasText: 'Hum Removal' });
+  await humRow.getByRole('button', { name: 'Enable Hum Removal' }).click();
+  await expect(humRow).not.toHaveClass(/bypassed/);
   await expect(page.getByTestId('memory-render-status')).toHaveCount(0);
   const canvas = page.getByTestId('canvas-spectrogram');
   const before = (await canvas.boundingBox())!;
