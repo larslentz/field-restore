@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   makeDefaultChain,
+  makeCommonFieldChain,
   makeLowRumbleRemoval,
   makeModule,
   makeProcessingChain,
@@ -16,6 +17,18 @@ const gain = { id: 'gain', type: 'gain', name: 'Gain', enabled: true, params: { 
 
 test('editable presets never expose DC removal', () => {
   assert.equal(makeDefaultChain().some((module) => module.type === 'dc'), false);
+});
+
+test('default and common-field chains bypass optional Hum and Wind cleanup', () => {
+  const defaults = makeDefaultChain();
+  const commonField = makeCommonFieldChain();
+
+  for (const chain of [defaults, commonField]) {
+    for (const name of ['Hum Removal', 'Wind Removal']) {
+      assert.equal(chain.find((module) => module.name === name)?.enabled, false, `${name} should start bypassed`);
+    }
+    assert.equal(chain.find((module) => module.name === 'Low Rumble Removal')?.enabled, true);
+  }
 });
 
 test('chain check mark toggles all editable modules while retaining their settings', () => {

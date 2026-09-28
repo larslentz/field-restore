@@ -44,7 +44,7 @@ export const makeLowRumbleRemoval = (): EditModule => {
   return { ...module, params: { mode: 'Fixed low rumble', cutoff: 55.5, q: 0.38, lowEndEnabled: 1, lowEndFrequency: 55, lowEndQ: .4, lowEndGain: 2 } };
 };
 
-export const makeDefaultChain = (): EditModule[] => [
+const makeFieldRecordingChain = (): EditModule[] => [
   makeModule('gain', { name: 'Gain', params: { db: 0 } }),
   makeLowRumbleRemoval(),
   makeModule('hum', { name: 'Hum Removal', params: { mode: 'Adaptive', frequency: 60, reduction: 12 } }),
@@ -52,6 +52,15 @@ export const makeDefaultChain = (): EditModule[] => [
   makeModule('fade'),
   makeModule('gain', { name: 'Gain', params: { db: 0 } }),
 ];
+
+const bypassOptionalCleanup = (modules: EditModule[]): EditModule[] => modules.map((module) =>
+  module.name === 'Hum Removal' || module.name === 'Wind Removal'
+    ? { ...module, enabled: false }
+    : module,
+);
+
+export const makeDefaultChain = (): EditModule[] => bypassOptionalCleanup(makeFieldRecordingChain());
+export const makeCommonFieldChain = (): EditModule[] => bypassOptionalCleanup(makeFieldRecordingChain());
 
 export const AUTOMATIC_DC_REMOVAL: EditModule = {
   id: 'automatic-dc-removal',

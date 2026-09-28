@@ -13,6 +13,10 @@ test('the edit drawer keeps module controls, summaries, bypass, reorder, and com
   const drawer = page.getByRole('dialog', { name: 'Edit Hum Removal' });
   const card = page.getByTestId(`card-module-${humId}`);
   await expect(drawer).toBeVisible();
+  const bypassButton = card.getByTestId(`button-bypass-${humId}`);
+  await expect(bypassButton).toHaveAttribute('aria-pressed', 'false');
+  await bypassButton.click();
+  await expect(bypassButton).toHaveAttribute('aria-pressed', 'true');
   await expect(card.getByText('Mode', { exact: true })).toBeVisible();
   await expect(card.getByTestId(`select-hum-mode-${humId}`)).toHaveValue('Adaptive');
   await expect(card.getByTestId('range-hum-frequency')).toHaveCount(0);
@@ -29,14 +33,13 @@ test('the edit drawer keeps module controls, summaries, bypass, reorder, and com
   await expect(card.locator('.module-summary')).toHaveText(/^Dynamic · (none confirmed|~\d+ Hz(?: \+\d+)?)$/);
   await expect(humRow.locator('.sidebar-chain-copy small')).toHaveText(await card.locator('.module-summary').innerText());
 
-  const bypassButton = card.getByTestId(`button-bypass-${humId}`);
   await bypassButton.click();
   await expect(bypassButton).toHaveAttribute('aria-pressed', 'false');
   await expect(card).toHaveClass(/bypassed/);
   await expect(humRow).toHaveClass(/bypassed/);
   await expect(card.locator('.module-summary')).toHaveText('Bypassed');
   await expect(card.getByTestId(`hum-scan-${humId}`)).toContainText('bypassed');
-  await expect(page.getByTestId('button-open-full-chain')).toContainText('5/6 editable enabled');
+  await expect(page.getByTestId('button-open-full-chain')).toContainText('4/6 editable enabled');
 
   const moduleNames = () => sidebarRows.locator('.sidebar-chain-copy strong').allTextContents();
   const orderBeforeMove = await moduleNames();

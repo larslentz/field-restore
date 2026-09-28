@@ -4,9 +4,17 @@ test('saving an edit chain makes it reloadable without changing the current proj
   await page.goto('/');
   const presetMenu = page.getByTestId('select-local-preset');
   const humRow = page.locator('[data-testid^="sidebar-module-"]').filter({ hasText: 'Hum Removal' });
+  const windRow = page.locator('[data-testid^="sidebar-module-"]').filter({ hasText: 'Wind Removal' });
+  await expect(humRow).toHaveClass(/bypassed/);
+  await expect(windRow).toHaveClass(/bypassed/);
+  await humRow.getByRole('button', { name: 'Enable Hum Removal' }).click();
+  await expect(humRow).not.toHaveClass(/bypassed/);
+  await windRow.getByRole('button', { name: 'Enable Wind Removal' }).click();
+  await expect(windRow).not.toHaveClass(/bypassed/);
   const bypass = humRow.getByRole('button', { name: 'Bypass Hum Removal' });
   await bypass.click();
   await expect(humRow).toHaveClass(/bypassed/);
+  await expect(windRow).not.toHaveClass(/bypassed/);
 
   await presetMenu.selectOption('save');
   const dialog = page.getByRole('dialog', { name: 'Save edit chain' });
@@ -20,9 +28,11 @@ test('saving an edit chain makes it reloadable without changing the current proj
   await page.reload();
   await expect(presetMenu.locator('option', { hasText: 'My quiet field chain' })).toHaveCount(1);
   await presetMenu.selectOption('common-field');
-  await expect(humRow).not.toHaveClass(/bypassed/);
+  await expect(humRow).toHaveClass(/bypassed/);
+  await expect(windRow).toHaveClass(/bypassed/);
   await presetMenu.selectOption({ label: 'My quiet field chain' });
   await expect(humRow).toHaveClass(/bypassed/);
+  await expect(windRow).not.toHaveClass(/bypassed/);
   await expect(page.getByTestId('button-open-full-chain')).toContainText('5/6 editable enabled');
 });
 
@@ -48,6 +58,10 @@ test('a noise sample captured on an imported file cannot be applied after switch
   await page.getByTestId('input-import-wav').setInputFiles({ name: 'recording-a.wav', mimeType: 'audio/wav', buffer: wav });
   await expect(page.getByTestId('text-source-name')).toHaveText('recording-a.wav');
   await expect(page.getByTestId('text-selection-time')).toHaveText('No selection · full track');
+  const initialHumRow = page.locator('[data-testid^="sidebar-module-"]').filter({ hasText: 'Hum Removal' });
+  const initialWindRow = page.locator('[data-testid^="sidebar-module-"]').filter({ hasText: 'Wind Removal' });
+  await expect(initialHumRow).toHaveClass(/bypassed/);
+  await expect(initialWindRow).toHaveClass(/bypassed/);
   const canvas = page.getByTestId('canvas-spectrogram');
   await canvas.scrollIntoViewIfNeeded();
   const box = (await canvas.boundingBox())!;
@@ -73,6 +87,8 @@ test('a noise sample captured on an imported file cannot be applied after switch
   await page.getByTestId('input-preset-name').fill('Recording A sample');
   await page.getByTestId('button-confirm-save-preset').click();
   await page.getByTestId('nav-demo').click();
+  await expect(page.locator('[data-testid^="sidebar-module-"]').filter({ hasText: 'Hum Removal' })).toHaveClass(/bypassed/);
+  await expect(page.locator('[data-testid^="sidebar-module-"]').filter({ hasText: 'Wind Removal' })).toHaveClass(/bypassed/);
   await presetMenu.selectOption({ label: 'Recording A sample' });
   await expect(page.getByTestId('status-error')).toContainText('Noise Reduction is now Automatic');
   const newRow = page.locator('[data-testid^="sidebar-module-"]').filter({ hasText: 'Noise Reduction' });
