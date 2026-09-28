@@ -30,7 +30,8 @@ test('dragged trim handles affect only Edited, survive save and shorten exported
   await page.goto('/');
   await page.getByTestId('input-import-wav').setInputFiles({ name: 'trim-test.wav', mimeType: 'audio/wav', buffer: smallWav() });
   await expect(page.getByTestId('text-source-name')).toHaveText('trim-test.wav');
-  await page.getByTestId('button-clear-selection').click();
+  await expect(page.getByTestId('text-selection-time')).toHaveText('No selection · full track');
+  await expect(page.getByTestId('button-clear-selection')).toHaveCount(0);
 
   const canvas = page.getByTestId('canvas-spectrogram');
   const box = (await canvas.boundingBox())!;
@@ -71,10 +72,9 @@ test('dragged trim handles affect only Edited, survive save and shorten exported
   await page.reload();
   await expect(page.getByTestId('text-source-name')).toHaveText('trim-test.wav');
   await expect(page.getByTestId('trim-summary')).toContainText('00:00.800');
-  // Restoring a project starts with a selection; clearing it returns the one statistics row to the kept range.
-  await expect(page.getByTestId('panel-signal-statistics')).toContainText('Selection is outside the edited range');
-  await page.getByTestId('button-clear-selection').click();
+  // Restoring a project leaves the selection empty, so statistics describe the kept range.
   await expect(page.getByTestId('panel-signal-statistics')).toContainText('Edited / kept range');
+  await expect(page.getByTestId('button-clear-selection')).toHaveCount(0);
 
   const downloads: Array<import('@playwright/test').Download> = [];
   page.on('download', (download) => downloads.push(download));

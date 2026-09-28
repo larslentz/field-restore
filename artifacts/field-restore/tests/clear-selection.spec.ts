@@ -2,8 +2,6 @@ import { expect, test } from '@playwright/test';
 
 test('clearing a selection plays the full track, even when looping, and allows selecting again', async ({ page }) => {
   await page.goto('/');
-  await expect(page.getByTestId('text-selection-time')).toContainText('selected');
-  await page.getByTestId('button-clear-selection').click();
   await expect(page.getByTestId('text-selection-time')).toHaveText('No selection · full track');
   await expect(page.getByTestId('button-clear-selection')).toHaveCount(0);
   await expect(page.getByTestId('text-playhead')).toContainText('00:00.0');
@@ -22,6 +20,16 @@ test('clearing a selection plays the full track, even when looping, and allows s
   await canvas.scrollIntoViewIfNeeded();
   const bounds = (await canvas.boundingBox())!;
   const y = bounds.y + bounds.height / 4;
+  await page.mouse.move(bounds.x + bounds.width * .3, y);
+  await page.mouse.down();
+  await page.mouse.move(bounds.x + bounds.width * .55, y, { steps: 5 });
+  await page.mouse.up();
+  await expect(page.getByTestId('text-selection-time')).toContainText('selected');
+  await page.getByTestId('button-clear-selection').click();
+  await expect(page.getByTestId('text-selection-time')).toHaveText('No selection · full track');
+  await expect(page.getByTestId('button-clear-selection')).toHaveCount(0);
+  await expect(page.getByTestId('text-playhead')).toContainText('00:00.0');
+
   await page.mouse.move(bounds.x + bounds.width * .3, y);
   await page.mouse.down();
   await page.mouse.move(bounds.x + bounds.width * .55, y, { steps: 5 });

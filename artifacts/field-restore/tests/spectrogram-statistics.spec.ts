@@ -1,14 +1,26 @@
 import { expect, test } from '@playwright/test';
 
-test('one set of statistics follows the selection and the Original/Edited view', async ({ page }) => {
+test('statistics start with the full track and follow explicit selections and the Original/Edited view', async ({ page }) => {
   await page.goto('/');
   const bar = page.getByTestId('panel-signal-statistics');
   const group = bar.locator('.signal-stats-group');
   await expect(group).toHaveCount(1);
   await expect(bar.getByTestId('label-statistics-source')).toHaveText('Edited');
-  await expect(group.locator('.signal-stats-label')).toContainText('Edited / selection within kept range');
+  await expect(group.locator('.signal-stats-label')).toContainText('Edited / kept range');
   await expect(group.locator('.stat-grid')).toBeVisible();
+  const editedFull = await group.locator('.stat-grid').innerText();
+
+  const canvas = page.getByTestId('canvas-spectrogram');
+  await canvas.scrollIntoViewIfNeeded();
+  const bounds = (await canvas.boundingBox())!;
+  const y = bounds.y + bounds.height / 4;
+  await page.mouse.move(bounds.x + bounds.width * .3, y);
+  await page.mouse.down();
+  await page.mouse.move(bounds.x + bounds.width * .55, y, { steps: 5 });
+  await page.mouse.up();
+  await expect(group.locator('.signal-stats-label')).toContainText('Edited / selection within kept range');
   const editedSelection = await group.locator('.stat-grid').innerText();
+  expect(editedSelection).not.toBe(editedFull);
 
   await page.getByTestId('button-spectrogram-original').click();
   await expect(page.getByTestId('label-spectrogram-source')).toContainText('Original recording');
@@ -28,8 +40,8 @@ test('one set of statistics follows the selection and the Original/Edited view',
   await expect(bar.getByTestId('label-statistics-source')).toHaveText('Edited');
   await expect(group.locator('.signal-stats-label')).toContainText('Edited / kept range');
   await expect(group.locator('.stat-grid')).toBeVisible();
-  const editedFull = await group.locator('.stat-grid').innerText();
-  expect(editedFull).not.toBe(editedSelection);
+  const editedAfterClear = await group.locator('.stat-grid').innerText();
+  expect(editedAfterClear).toBe(editedFull);
   expect(editedFull).not.toBe(originalFull);
 });
 
@@ -83,8 +95,6 @@ test('statistics can move beside the spectrogram and return without changing mea
   await page.getByTestId('button-spectral-selection-mode').click();
 
   await page.getByTestId('button-spectrogram-original').click();
-  await expect(panel.locator('.signal-stats-label')).toContainText('Original / selection');
-  await page.getByTestId('button-clear-selection').click();
   await expect(panel.locator('.signal-stats-label')).toContainText('Original / full file');
   await page.getByTestId('button-spectrogram-edited').click();
   await expect(panel.locator('.signal-stats-label')).toContainText('Edited / kept range');

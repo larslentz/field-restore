@@ -128,7 +128,7 @@ function App() {
   const [modules, setModules] = useState<EditModule[]>(makeDefaultChain);
   const [undoStack, setUndoStack] = useState<EditModule[][]>([]);
   const [redoStack, setRedoStack] = useState<EditModule[][]>([]);
-  const [selection, setSelection] = useState<[number, number]>([4.1, 7.8]);
+  const [selection, setSelection] = useState<[number, number]>([0, 0]);
   const [spectralSelectionMode, setSpectralSelectionMode] = useState(false);
   const [spectralSelection, setSpectralSelection] = useState<SpectralBounds | null>(null);
   const [spectralError, setSpectralError] = useState('');
@@ -366,7 +366,7 @@ function App() {
   const audioSourceRef = useRef<AudioBufferSourceNode | null>(null);
   const animationRef = useRef<number | null>(null);
   const playHeadRef = useRef(0);
-  const selectionRef = useRef<[number, number]>([4.1, 7.8]);
+  const selectionRef = useRef<[number, number]>([0, 0]);
   const trimRef = useRef<[number, number] | null>(null);
   const pointerDragRef = useRef<{ start: number; current: number; startClientX: number; moved: boolean } | null>(null);
   const spectralDragRef = useRef<{ start: number; frequency: number; pane: number; moved: boolean } | null>(null);
@@ -676,7 +676,8 @@ function App() {
     setRestoredProject(true);
     setPendingPermission(null);
     setPendingRelink(null);
-    setSelection([0, Math.min(5, metadata.frameCount / metadata.sampleRate)]);
+    selectionRef.current = [0, 0];
+    setSelection([0, 0]);
     setSavedStatus(`Restored file-backed project${record.modules.some(isLegacyWind) ? ' · Wind Removal converted to automatic' : ''} · ${new Date(record.savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
     return true;
   }, [restoreTrim]);
@@ -1595,7 +1596,7 @@ function App() {
         setModules(makeDefaultChain()); setMarkers([]); setRegions([]); setTitle(file.name.replace(/\.(wav|flac)$/i, '')); setWhat3wordsAddress(''); setDescriptiveWords([]); setProjectId(null);
          restoreTrim(null, metadata.frameCount / metadata.sampleRate);
       }
-      setSelection([0, Math.min(metadata.frameCount / metadata.sampleRate, 5)]); setOperationStatus('');
+      selectionRef.current = [0, 0]; setSelection([0, 0]); setOperationStatus('');
     } catch (caught) {
       setOperationStatus('');
       setError(caught instanceof Error ? caught.message : 'Unable to read this audio file.');
@@ -2411,7 +2412,7 @@ function App() {
           <button type="button" className="nav-item" onClick={(event) => openModal(event, 'export')} aria-label="Export 32-bit WAV" data-testid="nav-export"><Download size={15} /><span className="nav-label">Export 32-bit WAV</span></button>
           <button type="button" className="nav-item" onClick={save} aria-label="Save project" aria-describedby="sidebar-save-project-description" data-testid="nav-save"><Save size={15} /><span className="nav-label">Save project</span></button>
           <p id="sidebar-save-project-description" className="sidebar-save-note">{SAVE_PROJECT_DESCRIPTION}</p>
-          <button type="button" className="nav-item" onClick={() => { stopPlayback(); setRestoredProject(false); setLargeSource(null); setSourceFingerprint(null); setUndoStack([]); setRedoStack([]); setSource(createDemoAudio()); restoreTrim(null, 18); setModules(makeDefaultChain()); setSelection([4.1, 7.8]); setMarkers([]); setRegions([]); setTitle('Coastal dawn / north bluff'); setWhat3wordsAddress(''); setDescriptiveWords([]); setSavedStatus('Demo source loaded'); }} data-testid="nav-demo"><Waves size={15} /><span className="nav-label">Load demo source</span></button>
+          <button type="button" className="nav-item" onClick={() => { stopPlayback(); setRestoredProject(false); setLargeSource(null); setSourceFingerprint(null); setUndoStack([]); setRedoStack([]); setSource(createDemoAudio()); restoreTrim(null, 18); setModules(makeDefaultChain()); selectionRef.current = [0, 0]; setSelection([0, 0]); setMarkers([]); setRegions([]); setTitle('Coastal dawn / north bluff'); setWhat3wordsAddress(''); setDescriptiveWords([]); setSavedStatus('Demo source loaded'); }} data-testid="nav-demo"><Waves size={15} /><span className="nav-label">Load demo source</span></button>
         </div>
         <div className="mt-auto px-4 pb-5 sidebar-meta">
           <div className="border-t border-[#34454b] pt-4">
