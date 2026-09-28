@@ -31,7 +31,7 @@ test('clicking a new playhead overrides an old selection for Play and Space, but
   await page.goto('/');
   await page.getByTestId('input-import-wav').setInputFiles({ name: 'seek-check.wav', mimeType: 'audio/wav', buffer: shortWav() });
   await expect(page.getByTestId('text-source-name')).toHaveText('seek-check.wav');
-  await expect(page.getByTestId('text-selection-time')).toContainText('selected');
+  await expect(page.getByTestId('text-selection-time')).toHaveText('No selection · full track');
   await page.getByTestId('select-monitor').selectOption('original');
 
   const canvas = page.getByTestId('canvas-spectrogram');
@@ -39,6 +39,11 @@ test('clicking a new playhead overrides an old selection for Play and Space, but
   const box = (await canvas.boundingBox())!;
   const x = (fraction: number) => 48 + (box.width - 120) * fraction;
   const y = box.height / 4;
+  await page.mouse.move(box.x + x(.2), box.y + y);
+  await page.mouse.down();
+  await page.mouse.move(box.x + x(.35), box.y + y, { steps: 5 });
+  await page.mouse.up();
+  await expect(page.getByTestId('text-selection-time')).toContainText('selected');
   await canvas.click({ position: { x: x(.65), y } });
   await expect(page.getByTestId('text-selection-time')).toHaveText('No selection · full track');
   await expect.poll(() => playheadSeconds(page)).toBeGreaterThan(10);
@@ -68,7 +73,7 @@ test('clicking a new playhead overrides an old selection for Play and Space, but
   await page.getByTestId('button-stop').click();
 });
 
-test('a file-backed recording starts from the chosen playhead instead of the initial selection', async ({ page }) => {
+test('a file-backed recording starts unselected and plays from the chosen playhead', async ({ page }) => {
   const fixtureDir = path.join(import.meta.dirname, '.fixtures');
   const fixture = path.join(fixtureDir, 'playhead-file-backed.wav');
   const frames = 64 * 1024 * 1024 / 2 + 8_000;
@@ -98,7 +103,7 @@ test('a file-backed recording starts from the chosen playhead instead of the ini
   await page.goto('/');
   await page.getByTestId('input-import-wav').setInputFiles(fixture);
   await expect(page.getByTestId('text-source-name')).toHaveText('playhead-file-backed.wav');
-  await expect(page.getByTestId('text-selection-time')).toContainText('selected');
+  await expect(page.getByTestId('text-selection-time')).toHaveText('No selection · full track');
   await page.getByTestId('select-monitor').selectOption('original');
   const canvas = page.getByTestId('canvas-spectrogram');
   await canvas.scrollIntoViewIfNeeded();

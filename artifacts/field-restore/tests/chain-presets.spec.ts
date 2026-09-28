@@ -47,6 +47,17 @@ test('a noise sample captured on an imported file cannot be applied after switch
   await page.goto('/');
   await page.getByTestId('input-import-wav').setInputFiles({ name: 'recording-a.wav', mimeType: 'audio/wav', buffer: wav });
   await expect(page.getByTestId('text-source-name')).toHaveText('recording-a.wav');
+  await expect(page.getByTestId('text-selection-time')).toHaveText('No selection · full track');
+  const canvas = page.getByTestId('canvas-spectrogram');
+  await canvas.scrollIntoViewIfNeeded();
+  const box = (await canvas.boundingBox())!;
+  const plotWidth = box.width - 120;
+  const y = box.y + box.height / 4;
+  await page.mouse.move(box.x + 48 + plotWidth * .15, y);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 48 + plotWidth * .7, y, { steps: 5 });
+  await page.mouse.up();
+  await expect(page.getByTestId('text-selection-time')).toContainText('selected');
   await page.getByTestId('button-add-module').click();
   await page.getByTestId('menu-module-noise').click();
   const noiseRow = page.locator('[data-testid^="sidebar-module-"]').filter({ hasText: 'Noise Reduction' });

@@ -69,7 +69,8 @@ test('Edit spectrogram, statistics and transport stay fixed while details scroll
 test('live hum status does not resize the spectrogram when playback starts or stops', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 720 });
   await page.goto('/');
-  await page.getByTestId('button-clear-selection').click();
+  await expect(page.getByTestId('text-selection-time')).toHaveText('No selection · full track');
+  await expect(page.getByTestId('button-clear-selection')).toHaveCount(0);
   await expect(page.getByTestId('memory-render-status')).toHaveCount(0);
   const canvas = page.getByTestId('canvas-spectrogram');
   const before = (await canvas.boundingBox())!;
