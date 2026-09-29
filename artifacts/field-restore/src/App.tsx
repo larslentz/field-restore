@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { Activity, ArrowDown, ArrowUp, Check, ChevronDown, CircleHelp, Download, ExternalLink, FileAudio, FolderOpen, Gauge, GripVertical, Info, Keyboard, Layers3, LoaderCircle, Menu, PanelBottom, PanelLeft, PanelRightOpen, Pause, Play, Plus, Redo2, RotateCcw, Save, Settings, Square, Trash2, Undo2, Waves, X, ZoomIn, ZoomOut } from 'lucide-react';
 import { createDemoAudio, downloadBlob, encodeWav, parseWav, type AudioSource } from '@/lib/audio';
 import { decodeChannels, loadProject, projectFromSource, saveProject } from '@/lib/persistence';
-import { AUTOMATIC_DC_REMOVAL, humOpeningReadout, isFixedLowRumble, isLegacyWind, lowEndShelfEnabled, lowEndShelfFollowsWind, makeCommonFieldChain, makeDefaultChain, makeLowRumbleRemoval, makeModule, makeProcessingChain, makeRestorationReport, MODULE_LABELS, toggleEditableModules, withFadeRange, withoutLegacyDcModules, type EditModule, type HumScanState } from '@/lib/edit-chain';
+import { AUTOMATIC_DC_REMOVAL, humOpeningReadout, isFixedLowRumble, isLegacyWind, lowEndShelfEnabled, lowEndShelfFollowsWind, makeCommonFieldChain, makeDefaultChain, makeLowRumbleRemoval, makeModule, makeProcessingChain, makeRestorationReport, MODULE_LABELS, restoreSavedChain, toggleEditableModules, withFadeRange, type EditModule, type HumScanState } from '@/lib/edit-chain';
 import { WIND_COMPENSATION_TIMING, WIND_SHELF_SCOPE_DETECTED, WIND_SHELF_SCOPE_WHOLE, windCompensationTiming } from '@/lib/wind-reduction';
 import { analyzeLoudness, type LoudnessStats } from '@/lib/loudness';
 import { createPlaybackRangePlan, playbackPositionAtElapsed } from '@/lib/playback-range';
@@ -645,7 +645,7 @@ function App() {
     setNotes(record.notes);
     setWhat3wordsAddress(record.what3wordsAddress ?? '');
     setDescriptiveWords(record.descriptiveWords ?? []);
-    setModules([]);
+    setModules(restoreSavedChain(record.modules));
     setMarkers([]);
     setRegions([]);
     restoreTrim(record.trim, Number(record.source.duration ?? 0));
@@ -661,10 +661,7 @@ function App() {
     const { file, metadata, fingerprint } = verified;
     setLargeSource({ file, metadata, fingerprint, fileHandle: record.fileHandle });
     setSourceFingerprint(fingerprint);
-    setUndoStack([]);
-    setRedoStack([]);
     setSource({ channels: [], sampleRate: metadata.sampleRate, duration: metadata.frameCount / metadata.sampleRate, name: file.name });
-    setModules(withoutLegacyDcModules(record.modules));
     setMarkers(record.markers);
     setRegions(record.regions);
     restoreTrim(record.trim, metadata.frameCount / metadata.sampleRate);
@@ -689,14 +686,14 @@ function App() {
       const channels = decodeChannels(saved.originalBase64, saved.originalLength);
       const next: AudioSource = { channels, sampleRate: saved.sampleRate, duration: channels[0].length / saved.sampleRate, name: saved.sourceName };
       setSourceFingerprint(saved.sourceFingerprint ?? null);
-      setSource(next); setTitle(saved.title); setNotes(saved.notes); setWhat3wordsAddress(saved.what3wordsAddress ?? ''); setDescriptiveWords(saved.descriptiveWords ?? []); setModules(withoutLegacyDcModules(saved.modules)); setMarkers(saved.markers); setRegions(saved.regions); restoreTrim(saved.trim, next.duration);
+      setSource(next); setTitle(saved.title); setNotes(saved.notes); setWhat3wordsAddress(saved.what3wordsAddress ?? ''); setDescriptiveWords(saved.descriptiveWords ?? []); setModules(restoreSavedChain(saved.modules)); setMarkers(saved.markers); setRegions(saved.regions); restoreTrim(saved.trim, next.duration);
       setSavedStatus(`Restored${saved.modules.some(isLegacyWind) ? ' · Wind Removal converted to automatic' : ''} ${new Date(saved.savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
     } else if (saved?.original?.length) {
       setRestoredProject(true);
       const channels = saved.original.map((channel) => new Float32Array(channel));
       const next: AudioSource = { channels, sampleRate: saved.sampleRate, duration: channels[0].length / saved.sampleRate, name: saved.sourceName };
       setSourceFingerprint(saved.sourceFingerprint ?? null);
-      setSource(next); setTitle(saved.title); setNotes(saved.notes); setWhat3wordsAddress(saved.what3wordsAddress ?? ''); setDescriptiveWords(saved.descriptiveWords ?? []); setModules(withoutLegacyDcModules(saved.modules)); setMarkers(saved.markers); setRegions(saved.regions); restoreTrim(saved.trim, next.duration);
+      setSource(next); setTitle(saved.title); setNotes(saved.notes); setWhat3wordsAddress(saved.what3wordsAddress ?? ''); setDescriptiveWords(saved.descriptiveWords ?? []); setModules(restoreSavedChain(saved.modules)); setMarkers(saved.markers); setRegions(saved.regions); restoreTrim(saved.trim, next.duration);
       setSavedStatus(`Restored${saved.modules.some(isLegacyWind) ? ' · Wind Removal converted to automatic' : ''} ${new Date(saved.savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
     }
     void listProjects().then(async (projects) => {
@@ -1573,13 +1570,10 @@ function App() {
         setSavedStatus('Imported · not saved');
       }
        const savedProject = pendingRelink ?? pendingPermission;
-       setUndoStack([]);
-       setRedoStack([]);
        const relinkMatches = savedProject
          && isVerifiedRelink(savedProject.source.fingerprint, fingerprint);
       if (relinkMatches) {
         setRestoredProject(true);
-        setModules(withoutLegacyDcModules(savedProject.modules));
         setMarkers(savedProject.markers);
         setRegions(savedProject.regions);
          restoreTrim(savedProject.trim, metadata.frameCount / metadata.sampleRate);
@@ -1593,7 +1587,11 @@ function App() {
          setSavedStatus(`Source relinked · project restored${savedProject.modules.some(isLegacyWind) ? ' · Wind Removal converted to automatic' : ''}`);
       } else {
          setRestoredProject(false);
+         setUndoStack([]);
+         setRedoStack([]);
         setModules(makeDefaultChain()); setMarkers([]); setRegions([]); setTitle(file.name.replace(/\.(wav|flac)$/i, '')); setWhat3wordsAddress(''); setDescriptiveWords([]); setProjectId(null);
+         setPendingPermission(null);
+         setPendingRelink(null);
          restoreTrim(null, metadata.frameCount / metadata.sampleRate);
       }
       selectionRef.current = [0, 0]; setSelection([0, 0]); setOperationStatus('');

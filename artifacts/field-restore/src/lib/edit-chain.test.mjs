@@ -8,6 +8,7 @@ import {
   makeProcessingChain,
   makeRestorationReport,
   renderChain,
+  restoreSavedChain,
   toggleEditableModules,
   withoutLegacyDcModules,
 } from './edit-chain.ts';
@@ -29,6 +30,22 @@ test('default and common-field chains bypass optional Hum and Wind cleanup', () 
     }
     assert.equal(chain.find((module) => module.name === 'Low Rumble Removal')?.enabled, true);
   }
+});
+
+test('reopening an empty saved chain uses Common Field without changing nonempty choices', () => {
+  for (const stored of [[], [legacyDc]]) {
+    const restored = restoreSavedChain(stored);
+    assert.deepEqual(restored.map((module) => module.name), makeCommonFieldChain().map((module) => module.name));
+    assert.equal(restored.find((module) => module.name === 'Hum Removal')?.enabled, false);
+    assert.equal(restored.find((module) => module.name === 'Wind Removal')?.enabled, false);
+    assert.equal(restored.find((module) => module.name === 'Low Rumble Removal')?.enabled, true);
+  }
+  const stored = [
+    { ...makeModule('wind'), enabled: false },
+    { ...makeModule('hum'), enabled: false, params: { mode: 'Static', frequency: 50, reduction: 4 } },
+  ];
+  assert.deepEqual(restoreSavedChain(stored), stored);
+  assert.deepEqual(restoreSavedChain([legacyDc, ...stored]), stored);
 });
 
 test('chain check mark toggles all editable modules while retaining their settings', () => {

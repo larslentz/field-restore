@@ -122,6 +122,11 @@ export const withoutLegacyDcModules = (modules: EditModule[]): EditModule[] =>
       : normalized;
   });
 
+export const restoreSavedChain = (modules: EditModule[]): EditModule[] => {
+  const editable = withoutLegacyDcModules(modules);
+  return editable.length ? editable : makeCommonFieldChain();
+};
+
 export const makeProcessingChain = (modules: EditModule[]): EditModule[] => [
   AUTOMATIC_DC_REMOVAL,
   ...withoutLegacyDcModules(modules),
