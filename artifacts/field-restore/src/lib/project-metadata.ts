@@ -16,5 +16,5 @@ export function exportFilenames(title: string, sourceName: string, descriptiveWo
   const base = (title || sourceName).replace(/[^a-z0-9-_]+/gi, '-').replace(/-+/g, '-').toLowerCase() || 'field-restore';
   const words = descriptiveWords.map(filenameWord).filter(Boolean);
   const stem = base + (words.length ? `_${words.join('_')}` : '');
-  return { wav: `${stem}_FR.wav`, report: `${stem}-restoration-report.json` };
+  return { wav: `${stem}_FR.wav`, report: `${stem}-restoration-report.txt` };
 }

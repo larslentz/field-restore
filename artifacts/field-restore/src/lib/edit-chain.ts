@@ -196,6 +196,97 @@ export function makeRestorationReport(input: RestorationReportInput) {
   };
 }
 
+const humanizeReportSetting = (key: string, value: number | string, sampleRate: number) => {
+  const labels: Record<string, string> = {
+    db: 'Gain',
+    frequency: 'Frequency',
+    cutoff: 'Cutoff',
+    reduction: 'Reduction',
+    strength: 'Strength',
+    q: 'Q factor',
+    lowEndFrequency: 'Low-end frequency',
+    lowEndGain: 'Low-end gain',
+    lowEndQ: 'Low-end Q factor',
+    compensationAttackMs: 'Compensation attack',
+    compensationReleaseMs: 'Compensation release',
+    in: 'Fade-in length',
+    out: 'Fade-out length',
+    inEnabled: 'Fade-in',
+    outEnabled: 'Fade-out',
+    sampleStart: 'Noise sample start',
+    sampleEnd: 'Noise sample end',
+    fadeStartFrame: 'Fade range start',
+    fadeEndFrame: 'Fade range end',
+  };
+  const genericLabel = key.replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/_/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
+  const label = labels[key] ?? genericLabel;
+  let displayValue: string;
+  if (key === 'inEnabled' || key === 'outEnabled' || key === 'lowEndEnabled') {
+    displayValue = Number(value) ? 'On' : 'Off';
+  } else if ((key === 'fadeStartFrame' || key === 'fadeEndFrame') && typeof value === 'number') {
+    displayValue = `${(value / sampleRate).toFixed(3)} s`;
+  } else if (typeof value === 'number') {
+    const unit = key.endsWith('Ms') ? ' ms'
+      : ['db', 'low', 'mid', 'high', 'gain', 'amount', 'reduction', 'lowEndGain'].includes(key) ? ' dB'
+        : ['frequency', 'cutoff', 'lowEndFrequency', 'fundamental'].includes(key) ? ' Hz'
+          : ['in', 'out', 'start', 'end', 'context', 'length', 'sampleStart', 'sampleEnd'].includes(key) ? ' s'
+            : key === 'strength' || key === 'weighting' ? '%'
+              : '';
+    const valueText = Number.isInteger(value) ? value.toLocaleString('en-US') : String(value);
+    displayValue = `${valueText}${unit}`;
+  } else {
+    displayValue = value;
+  }
+  return `   ${label}: ${displayValue}`;
+};
+
+const reportTime = (seconds: number) => {
+  if (!Number.isFinite(seconds)) return 'Unknown';
+  const milliseconds = Math.round(Math.max(0, seconds) * 1000);
+  const hours = Math.floor(milliseconds / 3_600_000);
+  const minutes = Math.floor(milliseconds / 60_000) % 60;
+  const wholeSeconds = Math.floor(milliseconds / 1000) % 60;
+  const fraction = milliseconds % 1000;
+  return `${hours ? `${hours}:` : ''}${String(minutes).padStart(2, '0')}:${String(wholeSeconds).padStart(2, '0')}.${String(fraction).padStart(3, '0')}`;
+};
+
+export function formatRestorationReport(report: ReturnType<typeof makeRestorationReport>): string {
+  const channelLabel = report.channels === 1 ? 'Mono'
+    : report.channels === 2 ? 'Stereo'
+      : `${report.channels} channels`;
+  const chain = report.modules.length
+    ? report.modules.map((module, index) => [
+      `${index + 1}. ${module.name} — ${module.enabled ? 'Enabled' : 'Bypassed'}`,
+      ...Object.entries(module.params).map(([key, value]) => humanizeReportSetting(key, value, report.sampleRate)),
+    ].join('\n')).join('\n')
+    : 'No editable modules.';
+  return [
+    'FIELD RESTORE — RESTORATION REPORT',
+    '==================================',
+    `Exported: ${report.exportedAt} (UTC)`,
+    `Source recording: ${report.source}`,
+    `Output format: ${report.format}`,
+    `WAV container: ${report.container}`,
+    `Sample rate: ${report.sampleRate.toLocaleString('en-US')} Hz`,
+    `Channels: ${channelLabel} (${report.channels})`,
+    `Export duration: ${reportTime(report.duration)}`,
+    `Original duration: ${reportTime(report.sourceDuration)}`,
+    `Trim range: ${reportTime(report.trim[0])} – ${reportTime(report.trim[1])}`,
+    `Selection: ${reportTime(report.selection[0])} – ${reportTime(report.selection[1])}`,
+    `Automatic DC offset removal: ${report.automaticDcOffsetRemoval ? 'Applied' : 'Not applied'}`,
+    '',
+    'EDIT CHAIN',
+    '----------',
+    chain,
+    '',
+    'PROCESSING NOTES',
+    '----------------',
+    ...report.limitations.map((limitation) => `- ${limitation}`),
+    '',
+  ].join('\n');
+}
+
 const dbToAmp = (db: number) => 10 ** (db / 20);
 
 /** A 2 Hz corner settles a constant offset within a second while preserving 20 Hz bass. */

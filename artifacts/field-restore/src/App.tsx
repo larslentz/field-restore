@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { Activity, ArrowDown, ArrowUp, Check, ChevronDown, CircleHelp, Download, ExternalLink, FileAudio, FolderOpen, Gauge, GripVertical, Info, Keyboard, Layers3, LoaderCircle, Menu, PanelBottom, PanelLeft, PanelRightOpen, Pause, Play, Plus, Redo2, RotateCcw, Save, Settings, Square, Trash2, Undo2, Waves, X, ZoomIn, ZoomOut } from 'lucide-react';
 import { createDemoAudio, downloadBlob, encodeWav, parseWav, type AudioSource } from '@/lib/audio';
 import { decodeChannels, loadProject, projectFromSource, saveProject } from '@/lib/persistence';
-import { AUTOMATIC_DC_REMOVAL, humOpeningReadout, isFixedLowRumble, isLegacyWind, lowEndShelfEnabled, lowEndShelfFollowsWind, makeCommonFieldChain, makeDefaultChain, makeLowRumbleRemoval, makeModule, makeProcessingChain, makeRestorationReport, MODULE_LABELS, restoreSavedChain, toggleEditableModules, withFadeRange, type EditModule, type HumScanState } from '@/lib/edit-chain';
+import { AUTOMATIC_DC_REMOVAL, formatRestorationReport, humOpeningReadout, isFixedLowRumble, isLegacyWind, lowEndShelfEnabled, lowEndShelfFollowsWind, makeCommonFieldChain, makeDefaultChain, makeLowRumbleRemoval, makeModule, makeProcessingChain, makeRestorationReport, MODULE_LABELS, restoreSavedChain, toggleEditableModules, withFadeRange, type EditModule, type HumScanState } from '@/lib/edit-chain';
 import { WIND_COMPENSATION_TIMING, WIND_SHELF_SCOPE_DETECTED, WIND_SHELF_SCOPE_WHOLE, windCompensationTiming } from '@/lib/wind-reduction';
 import { analyzeLoudness, type LoudnessStats } from '@/lib/loudness';
 import { createPlaybackRangePlan, playbackPositionAtElapsed } from '@/lib/playback-range';
@@ -1820,7 +1820,7 @@ function App() {
       selection: [selectionStart, selectionEnd],
     });
     if (relay) {
-      try { await relay.downloadReport(JSON.stringify(report, null, 2), filenames.report); }
+      try { await relay.downloadReport(formatRestorationReport(report), filenames.report); }
       catch (caught) {
         relay.abort();
         setError(caught instanceof Error ? caught.message : 'Restoration report download could not start.');
@@ -1828,7 +1828,7 @@ function App() {
         return;
       }
     } else {
-      downloadBlob(new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' }), filenames.report);
+      downloadBlob(new Blob([formatRestorationReport(report)], { type: 'text/plain;charset=utf-8' }), filenames.report);
     }
     setOperationStatus(''); setModal(null); setSavedStatus(browserDownloadStarted ? 'WAV + report downloads started' : 'WAV + report exported');
   };

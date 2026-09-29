@@ -14,7 +14,7 @@ test('What3Words links accept a three-word address with or without the prefix', 
 test('descriptive words join the existing project name with underscores before the FR suffix', () => {
   assert.deepEqual(exportFilenames('Coastal dawn / north bluff', 'coastal-dawn-demo.wav', ['dawn', 'marsh', 'terns']), {
     wav: 'coastal-dawn-north-bluff_dawn_marsh_terns_FR.wav',
-    report: 'coastal-dawn-north-bluff_dawn_marsh_terns-restoration-report.json',
+    report: 'coastal-dawn-north-bluff_dawn_marsh_terns-restoration-report.txt',
   });
   assert.equal(exportFilenames('Coastal dawn / north bluff', '', []).wav, 'coastal-dawn-north-bluff_FR.wav');
   assert.equal(filenameWord(' Low tide! '), 'low-tide');

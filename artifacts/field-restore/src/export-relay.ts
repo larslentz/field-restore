@@ -40,8 +40,8 @@ window.addEventListener('message', (event) => {
           status.textContent = 'WAV download started. Preparing the restoration report…';
           break;
         case 'report':
-          downloadBlob(new Blob([data.contents], { type: 'application/json' }), data.filename);
-          status.textContent = 'WAV and restoration report downloads started. Check Brave’s Downloads list for completion.';
+          downloadBlob(new Blob([data.contents], { type: 'text/plain;charset=utf-8' }), data.filename);
+          status.textContent = 'WAV and text report downloads started. Check Brave’s Downloads list for completion.';
           break;
         default:
           throw new Error('Unrecognized export message.');
