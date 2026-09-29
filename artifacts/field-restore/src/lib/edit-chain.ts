@@ -196,7 +196,7 @@ export function makeRestorationReport(input: RestorationReportInput) {
   };
 }
 
-const humanizeReportSetting = (key: string, value: number | string, sampleRate: number) => {
+const humanizeReportSetting = (module: EditModule, key: string, value: number | string, sampleRate: number) => {
   const labels: Record<string, string> = {
     db: 'Gain',
     frequency: 'Frequency',
@@ -220,16 +220,20 @@ const humanizeReportSetting = (key: string, value: number | string, sampleRate: 
   };
   const genericLabel = key.replace(/([a-z0-9])([A-Z])/g, '$1 $2')
     .replace(/_/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
-  const label = labels[key] ?? genericLabel;
+  const label = module.type === 'spectral-repair' && key === 'low' ? 'Lower frequency'
+    : module.type === 'spectral-repair' && key === 'high' ? 'Upper frequency'
+      : labels[key] ?? genericLabel;
   let displayValue: string;
   if (key === 'inEnabled' || key === 'outEnabled' || key === 'lowEndEnabled') {
     displayValue = Number(value) ? 'On' : 'Off';
   } else if ((key === 'fadeStartFrame' || key === 'fadeEndFrame') && typeof value === 'number') {
     displayValue = `${(value / sampleRate).toFixed(3)} s`;
   } else if (typeof value === 'number') {
+    const isEqBand = module.type === 'eq' && ['low', 'mid', 'high'].includes(key);
     const unit = key.endsWith('Ms') ? ' ms'
-      : ['db', 'low', 'mid', 'high', 'gain', 'amount', 'reduction', 'lowEndGain'].includes(key) ? ' dB'
+      : (['db', 'gain', 'amount', 'reduction', 'lowEndGain'].includes(key) || isEqBand) ? ' dB'
         : ['frequency', 'cutoff', 'lowEndFrequency', 'fundamental'].includes(key) ? ' Hz'
+          : module.type === 'spectral-repair' && (key === 'low' || key === 'high') ? ' Hz'
           : ['in', 'out', 'start', 'end', 'context', 'length', 'sampleStart', 'sampleEnd'].includes(key) ? ' s'
             : key === 'strength' || key === 'weighting' ? '%'
               : '';
@@ -258,7 +262,7 @@ export function formatRestorationReport(report: ReturnType<typeof makeRestoratio
   const chain = report.modules.length
     ? report.modules.map((module, index) => [
       `${index + 1}. ${module.name} — ${module.enabled ? 'Enabled' : 'Bypassed'}`,
-      ...Object.entries(module.params).map(([key, value]) => humanizeReportSetting(key, value, report.sampleRate)),
+      ...Object.entries(module.params).map(([key, value]) => humanizeReportSetting(module, key, value, report.sampleRate)),
     ].join('\n')).join('\n')
     : 'No editable modules.';
   return [

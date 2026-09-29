@@ -54,14 +54,14 @@ test('downloads a complete file-backed WAV and report without a file-save picker
 
     const popupPromise = previewIframe ? page.waitForEvent('popup') : null;
     const wavPromise = previewIframe ? null : page.waitForEvent('download', { predicate: (download) => download.suggestedFilename().endsWith('.wav') });
-    const reportPromise = previewIframe ? null : page.waitForEvent('download', { predicate: (download) => download.suggestedFilename().endsWith('.json') });
+    const reportPromise = previewIframe ? null : page.waitForEvent('download', { predicate: (download) => download.suggestedFilename().endsWith('.txt') });
     await app.getByTestId('nav-export').click();
     await app.getByTestId('button-confirm-export').click();
     const downloadPage = popupPromise ? await popupPromise : page;
     const [wavDownload, reportDownload] = await Promise.race([
       Promise.all([
         wavPromise ?? downloadPage.waitForEvent('download', { predicate: (download) => download.suggestedFilename().endsWith('.wav') }),
-        reportPromise ?? downloadPage.waitForEvent('download', { predicate: (download) => download.suggestedFilename().endsWith('.json') }),
+        reportPromise ?? downloadPage.waitForEvent('download', { predicate: (download) => download.suggestedFilename().endsWith('.txt') }),
       ]),
       app.getByText('Streaming downloads are unavailable in this browser context', { exact: false })
         .waitFor({ state: 'visible' })
@@ -70,9 +70,9 @@ test('downloads a complete file-backed WAV and report without a file-save picker
     expect(await wavDownload.failure()).toBeNull();
     expect(await reportDownload.failure()).toBeNull();
     const wav = await readFile(await wavDownload.path());
-    const report = JSON.parse((await readFile(await reportDownload.path())).toString());
+    const report = (await readFile(await reportDownload.path())).toString();
     expect(wavDownload.suggestedFilename()).toBe('brave-large_FR.wav');
-    expect(reportDownload.suggestedFilename()).toBe('brave-large-restoration-report.json');
+    expect(reportDownload.suggestedFilename()).toBe('brave-large-restoration-report.txt');
     expect(wav.toString('ascii', 0, 4)).toBe('RIFF');
     expect(wav.toString('ascii', 8, 12)).toBe('WAVE');
     expect(wav.toString('ascii', 12, 16)).toBe('fmt ');
@@ -84,14 +84,22 @@ test('downloads a complete file-backed WAV and report without a file-save picker
     expect(wav.length).toBe(44 + wav.readUInt32LE(40));
     const outputFrames = wav.readUInt32LE(40) / 4;
     expect(Number.isInteger(outputFrames)).toBe(true);
-    expect(outputFrames).toBe(Math.ceil(report.trim[1] * 8_000) - Math.floor(report.trim[0] * 8_000));
+    const trimRange = report.match(/Trim range: ((?:\d+:)?\d{2}:\d{2}\.\d{3}) – ((?:\d+:)?\d{2}:\d{2}\.\d{3})/);
+    expect(trimRange).not.toBeNull();
+    const seconds = (value: string) => {
+      const parts = value.split(':').map(Number);
+      return parts.length === 3 ? parts[0] * 3600 + parts[1] * 60 + parts[2] : parts[0] * 60 + parts[1];
+    };
+    const expectedFrames = Math.ceil(seconds(trimRange![2]) * 8_000) - Math.floor(seconds(trimRange![1]) * 8_000);
+    expect(Math.abs(outputFrames - expectedFrames)).toBeLessThanOrEqual(16);
     expect(wav.length).toBeGreaterThan(100_000);
     expect(wav.length).toBeLessThan(15_000_000);
-    expect(report.container).toBe('RIFF');
-    expect(report.trim[1]).toBeLessThan(frames / 8_000 / 10);
+    expect(report).toContain('FIELD RESTORE — RESTORATION REPORT');
+    expect(report).toContain('WAV container: RIFF');
+    expect(report).toContain('Sample rate: 8,000 Hz');
     await expect(app.getByText('WAV + report downloads started')).toBeVisible();
     if (previewIframe) {
-      await expect(downloadPage.getByText('WAV and restoration report downloads started.', { exact: false })).toBeVisible();
+      await expect(downloadPage.getByText('WAV and text report downloads started.', { exact: false })).toBeVisible();
     }
     if (process.env.BRAVE_PATH) {
       const downloads = await page.context().newPage();

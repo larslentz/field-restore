@@ -7,6 +7,7 @@ import {
   makeModule,
   makeProcessingChain,
   makeRestorationReport,
+  formatRestorationReport,
   renderChain,
   restoreSavedChain,
   toggleEditableModules,
@@ -132,4 +133,28 @@ test('restoration reports record automatic DC correction without editable DC mod
   assert.equal(report.modules.some((module) => module.type === 'dc'), false);
   assert.match(report.limitations[0], /Automatic DC offset removal/);
   assert.match(report.limitations[1], /Previously saved projects may sound different.*original recordings remain untouched/);
+});
+
+test('restoration reports format as a readable text summary with the edit chain and processing notes', () => {
+  const report = makeRestorationReport({
+    source: 'field.wav',
+    sampleRate: 48_000,
+    channels: 2,
+    duration: 12.5,
+    sourceDuration: 16,
+    trim: [1, 13.5],
+    container: 'RIFF',
+    modules: [{ ...gain, enabled: false, params: { db: 3 } }],
+    selection: [2, 4],
+    exportedAt: '2026-09-29T00:00:00.000Z',
+  });
+  const text = formatRestorationReport(report);
+
+  assert.match(text, /^FIELD RESTORE — RESTORATION REPORT/m);
+  assert.match(text, /Output format: 32-bit IEEE float WAV/);
+  assert.match(text, /Sample rate: 48,000 Hz/);
+  assert.match(text, /Trim range: 00:01\.000 – 00:13\.500/);
+  assert.match(text, /1\. Gain — Bypassed\n   Gain: 3 dB/);
+  assert.match(text, /PROCESSING NOTES\n-+\n- Automatic DC offset removal/);
+  assert.doesNotMatch(text, /^\s*\{/m);
 });

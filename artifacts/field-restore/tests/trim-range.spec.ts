@@ -26,6 +26,17 @@ function smallWav() {
   return wav;
 }
 
+function reportTimeSeconds(value: string) {
+  const parts = value.split(':').map(Number);
+  return parts.length === 3 ? parts[0] * 3600 + parts[1] * 60 + parts[2] : parts[0] * 60 + parts[1];
+}
+
+function reportRange(report: string, label: string) {
+  const match = report.match(new RegExp(`${label}: ((?:\\d+:)?\\d{2}:\\d{2}\\.\\d{3}) – ((?:\\d+:)?\\d{2}:\\d{2}\\.\\d{3})`));
+  expect(match).not.toBeNull();
+  return [reportTimeSeconds(match![1]), reportTimeSeconds(match![2])];
+}
+
 test('dragged trim handles affect only Edited, survive save and shorten exported WAV', async ({ page }) => {
   await page.goto('/');
   await page.getByTestId('input-import-wav').setInputFiles({ name: 'trim-test.wav', mimeType: 'audio/wav', buffer: smallWav() });
@@ -82,15 +93,14 @@ test('dragged trim handles affect only Edited, survive save and shorten exported
   await page.getByTestId('button-confirm-export').click();
   await expect.poll(() => downloads.length).toBe(2);
   const wavDownload = downloads.find((download) => download.suggestedFilename().endsWith('.wav'))!;
-  const reportDownload = downloads.find((download) => download.suggestedFilename().endsWith('.json'))!;
+  const reportDownload = downloads.find((download) => download.suggestedFilename().endsWith('.txt'))!;
   const exported = await readFile(await wavDownload.path());
-  const report = JSON.parse((await readFile(await reportDownload.path())).toString());
+  const report = (await readFile(await reportDownload.path())).toString();
   const frames = exported.readUInt32LE(40) / 8;
   expect(frames).toBeGreaterThan(18_000);
   expect(frames).toBeLessThan(20_000);
-  expect(report.trim[0]).toBeCloseTo(0.8, 1);
-  expect(report.trim[1]).toBeCloseTo(3.2, 1);
-  expect(report.sourceDuration).toBe(4);
+  expect(report).toContain('Trim range: 00:00.800 – 00:03.200');
+  expect(report).toContain('Original duration: 00:04.000');
 
   await page.getByTestId('button-reset-trim').click();
   await expect(summary).toContainText('00:00.000 – 00:04.000');
@@ -144,7 +154,7 @@ test('file-backed export writes only the retained source frames', async ({ page 
   await page.getByTestId('nav-export').click();
   await page.getByTestId('button-confirm-export').click();
   const reportDownload = await reportPromise;
-  const report = JSON.parse((await readFile(await reportDownload.path())).toString());
+  const report = (await readFile(await reportDownload.path())).toString();
   const result = await page.evaluate(() => (window as typeof window & { __trimExport?: { header: number[]; length: number } }).__trimExport);
   expect(result).toBeDefined();
   const wavHeader = Buffer.from(result!.header);
@@ -152,6 +162,7 @@ test('file-backed export writes only the retained source frames', async ({ page 
   expect(outputFrames).toBeLessThan(frames / 10);
   expect(outputFrames).toBeGreaterThan(10_000);
   expect(result!.length).toBe(44 + outputFrames * 8);
-  expect(report.trim[0]).toBeGreaterThan(0);
-  expect(report.trim[1]).toBeLessThan(frames / 8_000 / 10);
+  const [trimStart, trimEnd] = reportRange(report, 'Trim range');
+  expect(trimStart).toBeGreaterThan(0);
+  expect(trimEnd).toBeLessThan(frames / 8_000 / 10);
 });
