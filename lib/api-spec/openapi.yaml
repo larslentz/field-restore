@@ -11,6 +11,46 @@ tags:
   - name: health
     description: Health operations
 paths:
+  /releases/{filename}:
+    servers:
+      - url: /
+    get:
+      operationId: downloadReleaseFile
+      summary: Stream the current Windows installer or release metadata
+      description: Public shipped release files only; never recordings or user exports. Full downloads use a bounded stream.
+      parameters:
+        - in: path
+          name: filename
+          required: true
+          schema:
+            type: string
+            maxLength: 160
+            pattern: '^[A-Za-z0-9][A-Za-z0-9._ -]*$'
+        - in: header
+          name: Range
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Release file
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "206":
+          description: Requested byte range
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "404":
+          description: Not a published release file
+        "416":
+          description: Invalid byte range
+        "503":
+          description: Release files unavailable
   /healthz:
     get:
       operationId: healthCheck
