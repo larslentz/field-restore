@@ -2,11 +2,46 @@
 // so the worker never buffers the completed recording in memory.
 const downloads = new Map();
 
-self.addEventListener('install', () => self.skipWaiting());
-self.addEventListener('activate', (event) => event.waitUntil(self.clients.claim()));
+// Filled by the release build. Development must never cache Vite's live modules.
+const OFFLINE = null;
+const cacheName = OFFLINE ? `field-restore-shell-${OFFLINE.version}` : null;
+const assetURLs = new Set(OFFLINE?.assets.map(file => new URL(file, self.registration.scope).href) || []);
+self.addEventListener('install', (event) => {
+  if (!OFFLINE) return;
+  event.waitUntil((async () => {
+    const cache = await caches.open(cacheName);
+    try {
+      for (const url of assetURLs) {
+        const response = await fetch(url, { cache: 'reload' });
+        if (!response.ok || response.type === 'opaque') throw new Error('Incomplete offline setup');
+        await cache.put(url, response);
+      }
+    } catch (error) {
+      await caches.delete(cacheName);
+      throw error;
+    }
+    // Do NOT skipWaiting: updates must wait until ALL existing tabs/exports have closed.
+  })());
+});
+self.addEventListener('activate', (event) => event.waitUntil((async () => {
+  if (OFFLINE) {
+    for (const key of await caches.keys()) {
+      if (key.startsWith('field-restore-shell-') && key !== cacheName) await caches.delete(key);
+    }
+  }
+  await self.clients.claim();
+})()));
 
 self.addEventListener('message', (event) => {
   const { type, id, filename } = event.data || {};
+  if (type === 'offline-status' && event.ports[0]) {
+    event.waitUntil((async () => {
+      const cache = cacheName ? await caches.open(cacheName) : null;
+      const ready = Boolean(cache && (await Promise.all([...assetURLs].map(url => cache.match(url)))).every(Boolean));
+      event.ports[0].postMessage({ ready, version: OFFLINE?.version });
+    })());
+    return;
+  }
   if (type !== 'prepare' || !id || !event.ports[0]) return;
   const port = event.ports[0];
   const download = { port, filename: String(filename), pull: null, controller: null };
@@ -39,7 +74,17 @@ self.addEventListener('message', (event) => {
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
   const prefix = `${new URL(self.registration.scope).pathname}__export/`;
-  if (event.request.method !== 'GET' || !url.pathname.startsWith(prefix)) return;
+  if (event.request.method !== 'GET') return;
+  if (!url.pathname.startsWith(prefix)) {
+    if (!OFFLINE || url.origin !== new URL(self.registration.scope).origin) return;
+    const resource = new URL(url.href);
+    resource.search = '';
+    const root = new URL(self.registration.scope);
+    const target = resource.href === root.href ? new URL('index.html', root).href : resource.href;
+    if (!assetURLs.has(target)) return;
+    event.respondWith((async () => (await (await caches.open(cacheName)).match(target)) || fetch(event.request))());
+    return;
+  }
   const id = url.pathname.slice(prefix.length);
   const download = downloads.get(id);
   if (!download) {

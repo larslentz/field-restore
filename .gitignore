@@ -2,6 +2,8 @@
 
 # compiled output
 dist
+/artifacts/field-restore/desktop/web/
+/artifacts/field-restore/release/
 tmp
 out-tsc
 *.tsbuildinfo

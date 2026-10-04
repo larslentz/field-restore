@@ -102,6 +102,10 @@ The visible Static, Dynamic, and Adaptive modes document the intended restoratio
 - Sample-rate conversion and certified true-peak/loudness compliance are not claimed.
 - Browser memory limits determine the maximum practical file length.
 
+## Windows and browser offline installation
+
+See [OFFLINE-RELEASE.md](OFFLINE-RELEASE.md) for the full Windows installer, browser installation, offline readiness, independent storage, unsigned distribution warnings, build commands and verification limits. Use **Install / offline** in the app to see setup status and download the real installer when online.
+
 ## Accessibility
 
 The interface includes keyboard-focus styling, labeled controls, readable technical values, tooltips, error states, and keyboard shortcuts for the core transport and history actions.

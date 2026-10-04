@@ -1,0 +1,9 @@
+{
+  "name": "field-restore-desktop",
+  "productName": "Field Restore",
+  "version": "1.0.0",
+  "description": "Local-first field recording restoration",
+  "author": "Field Restore",
+  "main": "main.cjs",
+  "private": true
+}

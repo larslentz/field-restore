@@ -58,3 +58,4 @@ Import WAV files, inspect and select waveform ranges, compare Original and Curre
 ## Pointers
 
 - See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details
+- See `artifacts/field-restore/OFFLINE-RELEASE.md` for Windows/browser installation, build commands, unsigned distribution and native Windows verification limits.

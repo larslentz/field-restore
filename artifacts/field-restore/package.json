@@ -1,17 +1,21 @@
 {
   "name": "@workspace/field-restore",
-  "version": "0.0.0",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite --config vite.config.ts --host 0.0.0.0",
-    "build": "vite build --config vite.config.ts",
+    "build": "vite build --config vite.config.ts && node scripts/build-offline.mjs",
+    "build:windows": "node scripts/build-windows.mjs",
     "serve": "vite preview --config vite.config.ts --host 0.0.0.0",
     "test": "tsx --test src/lib/*.test.mjs",
     "test:e2e": "playwright install chromium && playwright test --browser chromium",
+    "test:offline": "playwright test --config playwright.offline.config.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "devDependencies": {
+    "@fontsource/figtree": "^5.3.0",
+    "@fontsource/space-mono": "^5.3.0",
     "@hookform/resolvers": "^3.10.0",
     "@playwright/test": "^1.55.1",
     "@radix-ui/react-accordion": "^1.2.4",
@@ -58,6 +62,8 @@
     "cmdk": "^1.1.1",
     "codec-parser": "^2.5.0",
     "date-fns": "^3.6.0",
+    "electron": "^44.5.1",
+    "electron-builder": "^26.15.3",
     "embla-carousel-react": "^8.6.0",
     "framer-motion": "catalog:",
     "input-otp": "^1.4.2",

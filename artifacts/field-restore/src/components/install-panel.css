@@ -1,0 +1,13 @@
+.install-backdrop { position: fixed; inset: 0; z-index: 90; display: grid; place-items: center; padding: 12px; background: rgba(23, 36, 44, .62); }
+.install-dialog { width: min(560px, 100%); max-height: calc(100dvh - 24px); display: flex; flex-direction: column; background: hsl(var(--card)); color: hsl(var(--foreground)); border: 1px solid hsl(var(--card-border)); border-radius: 8px; box-shadow: 0 24px 80px rgba(0, 0, 0, .34); }
+.install-dialog:focus { outline: none; }
+.install-body { overflow-y: auto; padding: 14px 16px; display: grid; gap: 12px; font-size: 12px; line-height: 1.55; overflow-wrap: anywhere; }
+.install-body h3 { margin: 0 0 4px; font-size: 12px; font-weight: 700; }
+.install-body p, .install-body ul { margin: 0; color: hsl(var(--muted-foreground)); }
+.install-body ul { padding-left: 18px; display: grid; gap: 4px; }
+.install-body a { color: hsl(var(--foreground)); text-decoration: underline; text-underline-offset: 2px; }
+.install-status { padding: 8px 10px; border: 1px solid hsl(var(--border)); border-left: 3px solid hsl(var(--primary)); border-radius: 4px; background: hsl(var(--background)); }
+.install-status.error { border-left-color: hsl(var(--destructive)); }
+.install-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.install-hash { font-family: var(--app-font-mono); font-size: 10px; }
+.install-footer { padding: 10px 16px; border-top: 1px solid hsl(var(--border)); display: flex; justify-content: flex-end; }

@@ -10,6 +10,8 @@ import { createPlaybackRangePlan, playbackPositionAtElapsed } from '@/lib/playba
 import type { SpectrogramData } from '@/lib/spectrogram';
 import { withLargeExportLeaveWarning, writeFloat32WavChunks } from '@/lib/large-wav';
 import { createBrowserWavDownload } from '@/lib/browser-wav-download';
+import { createDesktopDestination } from '@/lib/desktop-save';
+import { InstallPanel } from '@/components/install-panel';
 import { openExportRelay, type ExportRelay } from '@/lib/export-relay';
 import { audioRange, fingerprintAudio, parseAudioMetadata, readAudioFrames, type AudioMetadata } from '@/lib/source-audio';
 import { decodeFlac } from '@/lib/flac';
@@ -1564,6 +1566,7 @@ function App() {
     try {
       setError('');
       setOperationStatus('Reading audio metadata');
+      await window.fieldRestoreDesktop?.protectSource(file);
       const metadata = await parseAudioMetadata(file, { name: file.name });
       const fingerprint = await fingerprintAudio(file, metadata);
       // Embedded project saves serialize decoded samples; keep FLAC in memory only while that
@@ -1622,6 +1625,7 @@ function App() {
   }, [pendingPermission, pendingRelink, restoreTrim, stopPlayback, openDescription]);
 
   const pickAudioFile = useCallback(async () => {
+    if (window.fieldRestoreDesktop) { fileRef.current?.click(); return; }
     const picker = (window as typeof window & {
       showOpenFilePicker?: (options?: unknown) => Promise<FileSystemFileHandle[]>;
     }).showOpenFilePicker;
@@ -1767,13 +1771,15 @@ function App() {
         showSaveFilePicker?: (options?: unknown) => Promise<FileSystemFileHandle>;
       }).showSaveFilePicker;
       const controller = new AbortController();
+      let desktopDestination: Awaited<ReturnType<typeof createDesktopDestination>> | null = null;
       exportJobRef.current?.abort();
       exportJobRef.current = controller;
       try {
+        if (window.fieldRestoreDesktop) desktopDestination = await createDesktopDestination(filenames.wav, controller.signal);
         // Embedded Brave cannot register a download service worker. Open a
         // first-party tab while this click still has user activation.
-        if (window.self !== window.top && !picker) relay = openExportRelay();
-        const handle = picker
+        if (!window.fieldRestoreDesktop && window.self !== window.top && !picker) relay = openExportRelay();
+        const handle = !window.fieldRestoreDesktop && picker
           ? await picker({ suggestedName: filenames.wav, types: [{ description: 'WAV audio', accept: { 'audio/wav': ['.wav'] } }] })
           : null;
         await withLargeExportLeaveWarning(async () => {
@@ -1790,12 +1796,12 @@ function App() {
             setOperationStatus('Preparing trimmed export');
             await warmFileProcessor(file, metadata, processor, warmStart, firstFrame, controller.signal);
           }
-          const writable = handle
+          const writable = desktopDestination ?? (handle
             ? await handle.createWritable()
             : relay
               ? await relay.createDestination(filenames.wav, controller.signal, () => controller.abort())
-              : await createBrowserWavDownload(filenames.wav, controller.signal, () => controller.abort());
-          browserDownloadStarted = !handle;
+              : await createBrowserWavDownload(filenames.wav, controller.signal, () => controller.abort()));
+          browserDownloadStarted = !handle && !desktopDestination;
           setOperationStatus('Exporting file-backed WAV');
           await writeFloat32WavChunks(writable, {
             channels: metadata.channels,
@@ -1808,6 +1814,7 @@ function App() {
           });
         });
       } catch (caught) {
+        await desktopDestination?.abort?.();
         relay?.abort();
         const cancelledAtPicker = (caught as Error).name === 'AbortError';
         setError(cancelledAtPicker
@@ -1843,7 +1850,11 @@ function App() {
       }
       const firstFrame = Math.floor(trimStart * source.sampleRate);
       const lastFrame = Math.min(source.channels[0]?.length ?? 0, Math.ceil(trimEnd * source.sampleRate));
-      downloadBlob(encodeWav({ ...source, channels: rendered.channels.map((channel) => channel.subarray(firstFrame, lastFrame)) }), filenames.wav);
+      try {
+        await downloadBlob(encodeWav({ ...source, channels: rendered.channels.map((channel) => channel.subarray(firstFrame, lastFrame)) }), filenames.wav);
+      } catch (caught) {
+        setOperationStatus(''); setError(caught instanceof Error ? caught.message : 'Unable to save WAV.'); return;
+      }
     }
     const report = makeRestorationReport({
       source: source.name,
@@ -1866,7 +1877,11 @@ function App() {
         return;
       }
     } else {
-      downloadBlob(new Blob([formatRestorationReport(report)], { type: 'text/plain;charset=utf-8' }), filenames.report);
+      try {
+        await downloadBlob(new Blob([formatRestorationReport(report)], { type: 'text/plain;charset=utf-8' }), filenames.report);
+      } catch (caught) {
+        setOperationStatus(''); setError(caught instanceof Error ? `WAV saved, but report was not saved: ${caught.message}` : 'Report was not saved.'); return;
+      }
     }
     setOperationStatus(''); setModal(null); setSavedStatus(browserDownloadStarted ? 'WAV + report downloads started' : 'WAV + report exported');
   };
@@ -2491,6 +2506,7 @@ function App() {
             </div>;
           })()}
           <div className="topbar-actions flex items-center gap-1.5">
+            <InstallPanel />
             <button type="button" className="icon-btn" onClick={undo} disabled={!undoStack.length} aria-label="Undo last edit" data-testid="button-undo"><Undo2 size={16} /></button>
             <button type="button" className="icon-btn" onClick={redo} disabled={!redoStack.length} aria-label="Redo last edit" data-testid="button-redo"><Redo2 size={16} /></button>
             <span className="hidden lg:inline font-mono-value text-[10px] text-muted-foreground mx-2">⌘Z / ⌘⇧Z</span>
@@ -3115,6 +3131,7 @@ type ProjectPanelProps = {
 
 function ProjectPanel({ title, notes, setTitle, setNotes, what3wordsAddress, setWhat3wordsAddress, descriptiveWords, setDescriptiveWords, trackDescription, setTrackDescription, descriptionDraft, source, sourceChannelCount, save, openSettings }: ProjectPanelProps) {
   const [wordDraft, setWordDraft] = useState('');
+  const [downloadError, setDownloadError] = useState('');
   const mapUrl = what3wordsMapUrl(what3wordsAddress);
   const filenames = exportFilenames(title, source.name, descriptiveWords);
   const addWords = () => {
@@ -3179,11 +3196,12 @@ function ProjectPanel({ title, notes, setTitle, setNotes, what3wordsAddress, set
         <TrackDescriptionFields
           value={trackDescription}
           onChange={setTrackDescription}
-          onDownload={() => downloadBlob(
+          onDownload={() => { setDownloadError(''); void downloadBlob(
             new Blob([formatTrackDescription(trackDescription)], { type: 'text/plain;charset=utf-8' }),
             trackDescriptionFilename(title, source.name, descriptiveWords),
-          )}
+          ).catch((error) => setDownloadError(error instanceof Error ? error.message : 'Unable to save description.')); }}
         />
+          {downloadError && <p role="alert" className="text-xs">{downloadError}</p>}
           </fieldset>
         </div>
         <label><span className="field-label">Field notes</span><textarea className="textarea-field min-h-[170px]" value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Describe place, mic, weather, handling, and decisions…" data-testid="textarea-project-notes" /></label>

@@ -119,7 +119,12 @@ export function sliceChannels(channels: ChannelData, start: number, end: number)
   return channels.map((channel) => channel.slice(start, end));
 }
 
-export function downloadBlob(blob: Blob, filename: string) {
+export async function downloadBlob(blob: Blob, filename: string) {
+  if (window.fieldRestoreDesktop) {
+    const { saveDesktopBlob } = await import('./desktop-save');
+    await saveDesktopBlob(blob, filename);
+    return;
+  }
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
   anchor.href = url; anchor.download = filename; anchor.click();
