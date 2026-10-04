@@ -41,6 +41,134 @@ async function expectDescription(page: Page, values = description) {
   for (const [key, value] of Object.entries(values)) await expect(field(page, key)).toHaveValue(value);
 }
 
+const blankDescription = { sentence1: '', sentence2: '', sentence3: '', continuation: '' };
+
+for (const rf64 of [false, true]) {
+  test(`${rf64 ? 'file-backed' : 'embedded'} unsaved import offers draft only for matching source, then discards explicitly`, async ({ page }) => {
+    await page.goto('/');
+    const upload = { name: 'draft-source.wav', mimeType: 'audio/wav', buffer: recording(rf64) };
+    await page.getByTestId('input-import-wav').setInputFiles(upload);
+    await expect(page.getByTestId('text-source-name')).toHaveText(upload.name);
+    await page.getByTestId('nav-project').click();
+    for (const [key, value] of Object.entries(description)) await field(page, key).fill(value);
+    await page.reload();
+    await page.getByTestId('nav-project').click();
+    await expectDescription(page, blankDescription);
+    await expect(page.getByTestId('description-draft-recovery')).toHaveCount(0);
+    // Same filename, changed audio must not recover the draft.
+    const changed = Buffer.from(upload.buffer);
+    changed.writeInt16LE(12345, changed.length - 2);
+    await page.getByTestId('input-import-wav').setInputFiles({ ...upload, buffer: changed });
+    await expect(page.getByTestId('text-source-name')).toHaveText(upload.name);
+    await expect(page.getByTestId('description-draft-recovery')).toHaveCount(0);
+    await expectDescription(page, blankDescription);
+    // Even byte-identical audio under a different import name is separate.
+    await page.getByTestId('input-import-wav').setInputFiles({ ...upload, name: 'other.wav' });
+    await expect(page.getByTestId('text-source-name')).toHaveText('other.wav');
+    await expectDescription(page, blankDescription);
+    await expect(page.getByTestId('description-draft-recovery')).toHaveCount(0);
+    await page.getByTestId('input-import-wav').setInputFiles(upload);
+    await expect(page.getByTestId('description-draft-recovery')).toBeVisible();
+    await expectDescription(page, blankDescription);
+    await page.getByTestId('button-restore-description-draft').click();
+    await expectDescription(page);
+    await page.reload();
+    await page.getByTestId('input-import-wav').setInputFiles(upload);
+    await page.getByTestId('nav-project').click();
+    await expect(page.getByTestId('description-draft-recovery')).toBeVisible();
+    await page.getByTestId('button-discard-description-draft').click();
+    await expectDescription(page, blankDescription);
+    await page.reload();
+    await page.getByTestId('input-import-wav').setInputFiles(upload);
+    await page.getByTestId('nav-project').click();
+    await expect(page.getByTestId('text-source-name')).toHaveText(upload.name);
+    await expect(page.getByTestId('description-draft-recovery')).toHaveCount(0);
+  });
+
+  test(`${rf64 ? 'file-backed pending relink' : 'embedded'} saved project keeps baseline until explicit recovery and save`, async ({ page }) => {
+    await page.goto('/');
+    const upload = { name: 'saved-source.wav', mimeType: 'audio/wav', buffer: recording(rf64) };
+    await page.getByTestId('input-import-wav').setInputFiles(upload);
+    await expect(page.getByTestId('text-source-name')).toHaveText(upload.name);
+    await page.getByTestId('nav-project').click();
+    for (const [key, value] of Object.entries(description)) await field(page, key).fill(value);
+    await page.getByTestId('button-project-save').click();
+    await expect(page.getByText(/Project saved in this browser/)).toBeVisible();
+    const draft = { ...description, sentence1: '  Unsaved line.\nAnother line.  ', sentence2: '', continuation: 'Unfinished.\n\nLast paragraph.' };
+    for (const [key, value] of Object.entries(draft)) await field(page, key).fill(value);
+    await page.reload();
+    await page.getByTestId('nav-project').click();
+    await expect(page.getByTestId('description-draft-recovery')).toBeVisible();
+    await expectDescription(page);
+    await page.getByTestId('button-restore-description-draft').click();
+    await expectDescription(page, draft);
+    // Restore must not overwrite the saved project; another reload still offers recovery.
+    await page.reload();
+    await page.getByTestId('nav-project').click();
+    await expect(page.getByTestId('description-draft-recovery')).toBeVisible();
+    await expectDescription(page);
+    await page.getByTestId('button-restore-description-draft').click();
+    if (rf64) {
+      await page.getByTestId('button-project-save').click();
+      await expect(page.getByText('Relink the source audio before saving this project. Description changes are kept as a local draft.')).toBeVisible();
+      await page.getByTestId('input-import-wav').setInputFiles(upload);
+      await expect(page.getByText(/Source relinked/)).toBeVisible();
+      await expectDescription(page, draft);
+    }
+    await page.getByTestId('button-project-save').click();
+    await expect(page.getByText(/Project saved in this browser/)).toBeVisible();
+    await page.reload();
+    await page.getByTestId('nav-project').click();
+    await expectDescription(page, draft);
+    await expect(page.getByTestId('description-draft-recovery')).toHaveCount(0);
+    // Drafts made while waiting for relink stay with that project, not the next import.
+    await field(page, 'sentence1').fill('Another unfinished description.');
+    await page.reload();
+    await page.getByTestId('nav-project').click();
+    await expect(page.getByTestId('description-draft-recovery')).toBeVisible();
+    await expectDescription(page, draft);
+    await page.getByTestId('button-restore-description-draft').click();
+    await expect(field(page, 'sentence1')).toHaveValue('Another unfinished description.');
+    const otherAudio = Buffer.from(upload.buffer);
+    otherAudio.writeInt16LE(12345, otherAudio.length - 2);
+    await page.getByTestId('input-import-wav').setInputFiles({ ...upload, name: 'different.wav', buffer: otherAudio });
+    await expect(page.getByTestId('text-source-name')).toHaveText('different.wav');
+    await expectDescription(page, blankDescription);
+    await expect(page.getByTestId('description-draft-recovery')).toHaveCount(0);
+  });
+}
+
+test('discarding a saved-project draft keeps its saved description, while unavailable storage is reported', async ({ page }) => {
+  await page.goto('/');
+  await page.getByTestId('input-import-wav').setInputFiles({ name: 'discard-source.wav', mimeType: 'audio/wav', buffer: recording() });
+  await expect(page.getByTestId('text-source-name')).toHaveText('discard-source.wav');
+  await page.getByTestId('nav-project').click();
+  for (const [key, value] of Object.entries(description)) await field(page, key).fill(value);
+  await page.getByTestId('button-project-save').click();
+  await expect(page.getByText(/Project saved in this browser/)).toBeVisible();
+  await field(page, 'sentence1').fill('');
+  await page.reload();
+  await page.getByTestId('nav-project').click();
+  await expect(page.getByTestId('description-draft-recovery')).toBeVisible();
+  await page.getByTestId('button-discard-description-draft').click();
+  await expectDescription(page);
+  await page.reload();
+  await page.getByTestId('nav-project').click();
+  await expectDescription(page);
+  await expect(page.getByTestId('description-draft-recovery')).toHaveCount(0);
+  await page.evaluate(() => {
+    Storage.prototype.setItem = () => { throw new DOMException('Storage is full', 'QuotaExceededError'); };
+  });
+  await field(page, 'sentence1').fill('Writing remains available.');
+  await expect(page.getByTestId('description-draft-error')).toContainText('could not be stored');
+  await expect(field(page, 'sentence1')).toHaveValue('Writing remains available.');
+  await page.getByTestId('button-project-save').click();
+  await expect(page.getByText(/Browser storage full/)).toBeVisible();
+  await page.reload();
+  await page.getByTestId('nav-project').click();
+  await expectDescription(page);
+});
+
 for (const rf64 of [false, true]) {
   test(`${rf64 ? 'file-backed' : 'embedded'} description download uses unsaved text without exporting audio`, async ({ page }) => {
     await page.goto('/');

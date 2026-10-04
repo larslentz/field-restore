@@ -3,6 +3,7 @@ import type { EditModule } from './edit-chain';
 import { normalizeTrackDescription, type TrackDescription } from './track-description';
 
 export interface StoredProject {
+  id?: string;
   title: string;
   notes: string;
   what3wordsAddress?: string;

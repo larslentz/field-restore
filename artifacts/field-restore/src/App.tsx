@@ -27,6 +27,8 @@ import { preparePresetModules, readChainPresets, saveChainPreset, type ChainPres
 import { EqCurve } from '@/components/EqCurve';
 import { TrackDescriptionFields } from '@/components/TrackDescriptionFields';
 import { formatTrackDescription, normalizeTrackDescription, type TrackDescription } from '@/lib/track-description';
+import { projectDescriptionKey, sourceDescriptionKey } from '@/lib/description-drafts';
+import { useDescriptionDraft } from '@/hooks/use-description-draft';
 import { LbprStat, PlrStat } from '@/components/SignalRatios';
 import { LbprMethodology } from '@/components/LbprMethodology';
 import { anchoredFrequencyViewMin, anchoredLevelScaleCeiling, anchoredTimeViewStart, frequencyScaleTicks, levelScaleTicks } from '@/lib/spectrogram-scale';
@@ -216,7 +218,9 @@ function App() {
   const [notes, setNotes] = useState('Low-tide ambience. Keep the distant tern call at 07:48 intact.');
   const [what3wordsAddress, setWhat3wordsAddress] = useState('');
   const [descriptiveWords, setDescriptiveWords] = useState<string[]>([]);
-  const [trackDescription, setTrackDescription] = useState<TrackDescription>(normalizeTrackDescription);
+  const descriptionDraft = useDescriptionDraft();
+  const { description: trackDescription, change: setTrackDescription, open: openDescription } = descriptionDraft;
+  const bootstrapInterruptedRef = useRef(false);
   const [savedStatus, setSavedStatus] = useState('Local session');
   const [restoredProject, setRestoredProject] = useState(false);
   const [error, setError] = useState('');
@@ -649,7 +653,7 @@ function App() {
     setNotes(record.notes);
     setWhat3wordsAddress(record.what3wordsAddress ?? '');
     setDescriptiveWords(record.descriptiveWords ?? []);
-    setTrackDescription(normalizeTrackDescription(record.trackDescription));
+    openDescription(projectDescriptionKey(record.id), normalizeTrackDescription(record.trackDescription));
     setModules(restoreSavedChain(record.modules));
     setMarkers([]);
     setRegions([]);
@@ -659,7 +663,7 @@ function App() {
     setUndoStack([]);
     setRedoStack([]);
     setSource({ channels: [], sampleRate: record.source.sampleRate, duration: Number(record.source.duration ?? 0), name: record.source.name });
-  }, [restoreTrim]);
+  }, [restoreTrim, openDescription]);
 
   const restoreVerifiedProject = useCallback((record: ProjectRecord, verified: Awaited<ReturnType<typeof openVerifiedFileHandle>>) => {
     if (!record.fileHandle || !verified) return false;
@@ -689,26 +693,29 @@ function App() {
     const saved = loadProject();
     if (saved?.originalBase64?.length && saved.originalLength) {
       setRestoredProject(true);
+      setProjectId(saved.id ?? null);
       const channels = decodeChannels(saved.originalBase64, saved.originalLength);
       const next: AudioSource = { channels, sampleRate: saved.sampleRate, duration: channels[0].length / saved.sampleRate, name: saved.sourceName };
       setSourceFingerprint(saved.sourceFingerprint ?? null);
       setSource(next); setTitle(saved.title); setNotes(saved.notes); setWhat3wordsAddress(saved.what3wordsAddress ?? ''); setDescriptiveWords(saved.descriptiveWords ?? []); setModules(restoreSavedChain(saved.modules)); setMarkers(saved.markers); setRegions(saved.regions); restoreTrim(saved.trim, next.duration);
-      setTrackDescription(normalizeTrackDescription(saved.trackDescription));
+      openDescription(projectDescriptionKey(saved.id ?? JSON.stringify([saved.sourceName, saved.savedAt])), normalizeTrackDescription(saved.trackDescription));
       setSavedStatus(`Restored${saved.modules.some(isLegacyWind) ? ' · Wind Removal converted to automatic' : ''} ${new Date(saved.savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
     } else if (saved?.original?.length) {
       setRestoredProject(true);
+      setProjectId(saved.id ?? null);
       const channels = saved.original.map((channel) => new Float32Array(channel));
       const next: AudioSource = { channels, sampleRate: saved.sampleRate, duration: channels[0].length / saved.sampleRate, name: saved.sourceName };
       setSourceFingerprint(saved.sourceFingerprint ?? null);
       setSource(next); setTitle(saved.title); setNotes(saved.notes); setWhat3wordsAddress(saved.what3wordsAddress ?? ''); setDescriptiveWords(saved.descriptiveWords ?? []); setModules(restoreSavedChain(saved.modules)); setMarkers(saved.markers); setRegions(saved.regions); restoreTrim(saved.trim, next.duration);
-      setTrackDescription(normalizeTrackDescription(saved.trackDescription));
+      openDescription(projectDescriptionKey(saved.id ?? JSON.stringify([saved.sourceName, saved.savedAt])), normalizeTrackDescription(saved.trackDescription));
       setSavedStatus(`Restored${saved.modules.some(isLegacyWind) ? ' · Wind Removal converted to automatic' : ''} ${new Date(saved.savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
     }
+    if (!saved?.originalBase64?.length && !saved?.original?.length) openDescription('demo');
     void listProjects().then(async (projects) => {
       const latest = projects[0];
       if (!latest) return;
       const record = await loadProjectV2(latest.id);
-      if (!record) return;
+      if (!record || bootstrapInterruptedRef.current) return;
        stageSavedProject(record);
        if (!record.fileHandle) {
          setPendingRelink(record);
@@ -719,10 +726,12 @@ function App() {
        try {
          permission = await queryFileHandlePermission(record.fileHandle);
        } catch {
+          if (bootstrapInterruptedRef.current) return;
          setPendingRelink(record);
          setSavedStatus('Saved project loaded · relink source audio');
          return;
        }
+        if (bootstrapInterruptedRef.current) return;
        if (permission === 'prompt') {
          setPendingPermission(record);
          setSavedStatus('Saved project loaded · file access needed');
@@ -730,6 +739,7 @@ function App() {
        }
        if (permission === 'granted') {
          const verified = await openVerifiedFileHandle(record.fileHandle, record.source.fingerprint ?? '');
+          if (bootstrapInterruptedRef.current) return;
          if (restoreVerifiedProject(record, verified)) return;
        }
        setPendingRelink(record);
@@ -737,7 +747,7 @@ function App() {
     }).catch(() => {
       // Legacy localStorage restoration remains available when IndexedDB is unavailable.
     });
-  }, [restoreTrim, restoreVerifiedProject, stageSavedProject]);
+  }, [restoreTrim, restoreVerifiedProject, stageSavedProject, openDescription]);
 
   useEffect(() => {
     if (!largeSource) return;
@@ -1550,6 +1560,7 @@ function App() {
       setError('Choose an uncompressed WAV or lossless FLAC recording to begin editing.');
       return;
     }
+    bootstrapInterruptedRef.current = true;
     try {
       setError('');
       setOperationStatus('Reading audio metadata');
@@ -1598,7 +1609,7 @@ function App() {
          setUndoStack([]);
          setRedoStack([]);
         setModules(makeDefaultChain()); setMarkers([]); setRegions([]); setTitle(file.name.replace(/\.(wav|flac)$/i, '')); setWhat3wordsAddress(''); setDescriptiveWords([]); setProjectId(null);
-        setTrackDescription(normalizeTrackDescription());
+        openDescription(sourceDescriptionKey(file.name, fingerprint));
          setPendingPermission(null);
          setPendingRelink(null);
          restoreTrim(null, metadata.frameCount / metadata.sampleRate);
@@ -1608,7 +1619,7 @@ function App() {
       setOperationStatus('');
       setError(caught instanceof Error ? caught.message : 'Unable to read this audio file.');
     }
-  }, [pendingPermission, pendingRelink, restoreTrim, stopPlayback]);
+  }, [pendingPermission, pendingRelink, restoreTrim, stopPlayback, openDescription]);
 
   const pickAudioFile = useCallback(async () => {
     const picker = (window as typeof window & {
@@ -1690,6 +1701,15 @@ function App() {
   };
 
   const save = async () => {
+    if (descriptionDraft.pending) {
+      setError('Restore or discard the recovered description draft in Project before saving.');
+      return;
+    }
+    if (pendingRelink || pendingPermission) {
+      setError('Relink the source audio before saving this project. Description changes are kept as a local draft.');
+      return;
+    }
+    const draftOwner = descriptionDraft.capture();
     if (largeSource) {
       try {
         const record = await saveProjectV2({
@@ -1718,6 +1738,8 @@ function App() {
           fileHandle: largeSource.fileHandle,
           analysis: { original: largeOriginalStats, current: largeCurrentStats, selectionOriginal: largeSelectionOriginalStats, selectionCurrent: largeSelectionCurrentStats },
         });
+        descriptionDraft.saved(projectDescriptionKey(record.id), trackDescription, draftOwner);
+        if (descriptionDraft.capture() !== draftOwner) return;
         setProjectId(record.id);
         setSavedStatus(`Project saved in this browser · ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}${largeSource.fileHandle ? '' : ' · relink source file after reopening'}`);
       } catch (caught) {
@@ -1726,7 +1748,12 @@ function App() {
       return;
     }
     const project = projectFromSource(source, modules, markers, regions, title, notes, trim ?? undefined, sourceFingerprint, what3wordsAddress, descriptiveWords, trackDescription);
+    project.id = projectId ?? crypto.randomUUID();
     const ok = saveProject(project);
+    if (ok) {
+      setProjectId(project.id);
+      descriptionDraft.saved(projectDescriptionKey(project.id), trackDescription, draftOwner);
+    }
     setSavedStatus(ok ? `Project saved in this browser · ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 'Browser storage full · project not saved; Export creates WAV + report, not a project backup');
   };
 
@@ -2422,11 +2449,13 @@ function App() {
           <button type="button" className="nav-item" onClick={save} aria-label="Save project" aria-describedby="sidebar-save-project-description" data-testid="nav-save"><Save size={15} /><span className="nav-label">Save project</span></button>
           <p id="sidebar-save-project-description" className="sidebar-save-note">{SAVE_PROJECT_DESCRIPTION}</p>
           <button type="button" className="nav-item" onClick={() => {
+            bootstrapInterruptedRef.current = true;
             stopPlayback(); setRestoredProject(false); setLargeSource(null); setSourceFingerprint(null);
             setUndoStack([]); setRedoStack([]); setSource(createDemoAudio()); restoreTrim(null, 18);
             setModules(makeDefaultChain()); selectionRef.current = [0, 0]; setSelection([0, 0]);
             setMarkers([]); setRegions([]); setTitle('Coastal dawn / north bluff');
-            setWhat3wordsAddress(''); setDescriptiveWords([]); setTrackDescription(normalizeTrackDescription());
+            setWhat3wordsAddress(''); setDescriptiveWords([]); openDescription('demo');
+            setProjectId(null); setPendingRelink(null); setPendingPermission(null);
             setSavedStatus('Demo source loaded');
           }} data-testid="nav-demo"><Waves size={15} /><span className="nav-label">Load demo source</span></button>
         </div>
@@ -2491,6 +2520,7 @@ function App() {
                    what3wordsAddress={what3wordsAddress} setWhat3wordsAddress={setWhat3wordsAddress}
                    descriptiveWords={descriptiveWords} setDescriptiveWords={setDescriptiveWords}
                    trackDescription={trackDescription} setTrackDescription={setTrackDescription}
+                   descriptionDraft={descriptionDraft}
                    source={source} sourceChannelCount={sourceChannelCount}
                    save={() => void save()} openSettings={(event) => openModal(event, 'settings')}
                  />
@@ -3076,13 +3106,14 @@ type ProjectPanelProps = {
   setDescriptiveWords: (words: string[]) => void;
   trackDescription: TrackDescription;
   setTrackDescription: (value: TrackDescription) => void;
+  descriptionDraft: ReturnType<typeof useDescriptionDraft>;
   source: AudioSource;
   sourceChannelCount: number;
   save: () => void;
   openSettings: (event: ReactMouseEvent<HTMLButtonElement>) => void;
 };
 
-function ProjectPanel({ title, notes, setTitle, setNotes, what3wordsAddress, setWhat3wordsAddress, descriptiveWords, setDescriptiveWords, trackDescription, setTrackDescription, source, sourceChannelCount, save, openSettings }: ProjectPanelProps) {
+function ProjectPanel({ title, notes, setTitle, setNotes, what3wordsAddress, setWhat3wordsAddress, descriptiveWords, setDescriptiveWords, trackDescription, setTrackDescription, descriptionDraft, source, sourceChannelCount, save, openSettings }: ProjectPanelProps) {
   const [wordDraft, setWordDraft] = useState('');
   const mapUrl = what3wordsMapUrl(what3wordsAddress);
   const filenames = exportFilenames(title, source.name, descriptiveWords);
@@ -3130,6 +3161,21 @@ function ProjectPanel({ title, notes, setTitle, setNotes, what3wordsAddress, set
           </ul>}
           <p className="project-metadata-hint">WAV filename: <span className="font-mono-value break-all" data-testid="text-export-filename">{filenames.wav}</span></p>
         </div>
+        <div className="space-y-3">
+          {descriptionDraft.pending && <div role="status" className="space-y-2 rounded border border-border p-3" data-testid="description-draft-recovery">
+            <p className="text-sm font-medium">Unfinished description found for this recording</p>
+            <p className="text-xs text-muted-foreground">Last draft: {new Date(descriptionDraft.pending.updatedAt).toLocaleString()}. Restore it to continue writing, or discard it to keep the saved description. Neither choice changes your saved project.</p>
+            <details className="text-xs"><summary>Preview recovered description</summary>
+              <pre className="whitespace-pre-wrap break-words mt-2">{formatTrackDescription(descriptionDraft.pending.description)}</pre>
+            </details>
+            <div className="flex flex-wrap gap-2">
+              <button type="button" className="primary-btn" onClick={descriptionDraft.restore} data-testid="button-restore-description-draft">Restore draft</button>
+              <button type="button" className="quiet-btn" onClick={descriptionDraft.discard} data-testid="button-discard-description-draft">Discard draft</button>
+            </div>
+          </div>}
+          {descriptionDraft.storageError && <p role="alert" className="text-xs" data-testid="description-draft-error">{descriptionDraft.storageError}</p>}
+          <p className="text-xs text-muted-foreground">Description drafts are kept locally in this browser, separately from Save project. For an unsaved import, reimport the same recording after reloading to recover its draft.</p>
+          <fieldset disabled={!!descriptionDraft.pending} className={descriptionDraft.pending ? 'opacity-60' : ''}>
         <TrackDescriptionFields
           value={trackDescription}
           onChange={setTrackDescription}
@@ -3138,6 +3184,8 @@ function ProjectPanel({ title, notes, setTitle, setNotes, what3wordsAddress, set
             trackDescriptionFilename(title, source.name, descriptiveWords),
           )}
         />
+          </fieldset>
+        </div>
         <label><span className="field-label">Field notes</span><textarea className="textarea-field min-h-[170px]" value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Describe place, mic, weather, handling, and decisions…" data-testid="textarea-project-notes" /></label>
         <div className="grid sm:grid-cols-3 gap-3">
           <div className="p-3 bg-[hsl(var(--muted))] rounded"><div className="eyebrow">Source</div><div className="font-mono-value text-[11px] mt-2 truncate">{source.name}</div></div>
