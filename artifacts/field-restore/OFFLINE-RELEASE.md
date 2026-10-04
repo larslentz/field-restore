@@ -1,6 +1,6 @@
 # Windows offline release
 
-## Current status: unsigned installer ready to share
+## Current status: unsigned 1.0.0; applicable native Windows 11 checks reported passing
 
 An unsigned Windows x64 installer is available at
 `public/releases/Field-Restore-1.0.0-Windows-x64-Setup.exe`. Download it from the
@@ -8,15 +8,21 @@ app's Install dialog. The release metadata and `SHA256SUMS.txt` describe the
 final built installer. Users can verify its SHA-256 before running it.
 
 This is a Linux-produced, unsigned cross-build. It is **not digitally signed**,
-its publisher is **not verified**, and it has **not been tested on native
-Windows**. Windows may show an unknown-publisher or SmartScreen warning.
-`nativeWindowsTested` remains false. Treat it as an unsigned preview build; don't
-represent it as a verified or Windows-tested release.
+its publisher is **not verified**, and the user reports that the native Windows
+applicable acceptance checks passed on Windows 11. Their PowerShell checksum
+evidence matches this exact installer. The user confirmed that 1.0.0 is the
+first and only released installer, so cross-version update testing is **not
+applicable to this release**, not a failure or a passing update test.
+Same-version reinstallation and retention were reported passing.
+`nativeWindowsTested` is true for this installer on the strength of those
+user-performed checks. No native Windows 10 results were supplied.
+Windows may show an unknown-publisher or SmartScreen warning; functional
+testing does not establish a verified publisher or guarantee download reliability.
 
 The user chose to defer code signing. No certificate has been purchased, no
 signing credentials have been requested or read, and no binary has been
-automatically uploaded or published. The signing and native Windows verification
-requirements below remain deferred; do not claim that either has passed.
+automatically uploaded or published by this verification work. Signing remains
+deferred. Do not describe this installer as signed or its publisher as verified.
 
 ## Prerequisites requiring approval
 
@@ -72,8 +78,10 @@ adapted to the approved signing mechanism before creating a signed release:
   keeps a signed release downloadable.
 - `publisher`: optional exact approved signer display name for signed releases.
   Populate from verified signing evidence, not a guessed app/organization name.
-- `nativeWindowsTested`: true only after all acceptance checks below actually
-  pass on native Windows for this exact release.
+- `nativeWindowsTested`: true only after all applicable acceptance checks below
+  actually pass on native Windows for this exact release, with results and any
+  justified not-applicable checks recorded. It does not claim testing on every
+  supported Windows version or publisher verification.
 
 The browser cannot verify Authenticode. The dialog describes metadata as such
 and asks users to verify the Windows digital signature and checksum. Missing
@@ -83,24 +91,104 @@ Signed installers can still receive SmartScreen reputation warnings.
 
 ## Native Windows acceptance gate
 
+Use the printable [native Windows checklist](docs/windows-acceptance.html) to
+run these checks locally and return evidence. The checklist itself is not
+passing evidence. For the first released installer, cross-version updating is
+not applicable because no earlier release exists. For later releases, inability
+to obtain a genuine earlier installer leaves update testing blocked.
+
 Record Windows version, release version, final installer hash, signer,
 certificate thumbprint, timestamp and actual results. Until this is performed,
 each item is **blocked / not run**, not passing:
 
-- Fresh per-user installation on supported Windows; verify installed app and
-  uninstaller signatures and publisher.
+- Fresh per-user installation on supported Windows; for signed candidates,
+  verify installed app and uninstaller signatures and publisher.
 - Disconnect networking, launch the installed app, import WAV/RF64 and FLAC,
   edit/play back and export playable audio plus reports.
 - Hash original input files before/after editing and export. Confirm exports
   cannot overwrite an original, including when the source folder is selected.
 - Save an editable project, close the app completely and restart offline.
   Verify edits/settings and persisted source access or explicit relinking.
-- Update an earlier installed release after saving/closing the app; verify
-  project/settings retention and all updated signatures.
+- For releases with a genuine released predecessor, update an earlier installed
+  release after saving/closing the app; verify project/settings retention and,
+  for signed candidates, all updated signatures. Record this as not applicable
+  for a confirmed first release; never fabricate a predecessor.
 - Uninstall while preserving original recordings and user projects/settings.
   Confirm shortcuts/registration and shipped files are removed, and unrelated
   files in the installation directory remain.
 
-Only after all checks pass may `nativeWindowsTested` become true. Signing alone,
-Linux browser tests, NSIS compilation and inspection of bundled files do not
-satisfy this gate.
+Only after all applicable checks pass may `nativeWindowsTested` become true.
+An unexplained omission or unavailable test environment is not a justified
+not-applicable result. Signing alone, Linux browser tests, NSIS compilation and
+inspection of bundled files do not satisfy this gate. Each new installer build
+resets the flag to false; prior evidence does not transfer to new bytes.
+
+## Verification record — 2026-10-04
+
+Candidate: `Field-Restore-1.0.0-Windows-x64-Setup.exe` (version 1.0.0).
+SHA-256 of the current installer bytes:
+`450306122cc53387f0bd9a49286813ad4cb38884f9f55379ec86c3def989c142`.
+
+The installer hash was computed in the Linux workspace and matches both
+`windows-release.json` and `SHA256SUMS.txt`. This checks file consistency only;
+it is not evidence that the installer works on Windows.
+
+Published-download check: the normal full-file GET returned HTTP 500 even
+though HEAD returned HTTP 200. Downloading all 111,770,380 bytes using 4 MiB
+HTTP range requests succeeded and produced the expected SHA-256 above.
+The user subsequently reported that downloading and testing on Windows worked.
+The earlier full-response failure has not been independently shown to be
+resolved; the ranged-download check is not native Windows acceptance evidence.
+
+The user performed testing on their own machine and identified the operating
+system as Windows 11. They selected all four acceptance groups as passing:
+fresh installation/offline audio workflow, original-source protection,
+persistence across offline restarts, and update/uninstall retention.
+Their additional update evidence was: “Tested update and passed.”
+No failures or skipped checks were reported.
+
+These are user-reported results, not tests executed or observed by the agent.
+The Windows edition/build was not provided. The user subsequently supplied a
+Windows PowerShell screenshot hashing
+`Field-Restore-1.0.0-Windows-x64-Setup.exe` with SHA-256. The displayed hash
+matches the candidate hash above (hexadecimal case is immaterial), tying the
+reported tests to this exact installer. No personal filesystem path is retained
+in this record.
+
+In response to the request for the earlier installed version, the user supplied
+“1.0.0”. This is recorded as a same-version reinstall with reported retention,
+not a confirmed update from a distinct earlier release. Cross-version update
+testing was not performed; the earlier grouped PASS report is not evidence of
+cross-version updating.
+
+The user then clarified: “There is not earlier installer. 1.0.0 is the only one
+released.” This establishes that it is the first released installer, rather
+than an older release merely being unavailable to the tester. The cross-version
+update check is therefore **not applicable** to 1.0.0. No further tests are
+requested for this release. A future release must verify updating from 1.0.0.
+
+The candidate is unsigned; signer, signing-certificate thumbprint
+and signing timestamp are not applicable to this unsigned-preview test.
+Signature verification remains a separate requirement for a signed release.
+
+| Required check | Actual result |
+| --- | --- |
+| Native Windows installation and launch | Reported PASS by user on Windows 11; installer SHA-256 confirmed by PowerShell screenshot |
+| Offline WAV/RF64 and FLAC import, editing, playback, audio/report export | Reported PASS by user |
+| Original-source hashes unchanged; source overwrite prevented | Reported PASS by user |
+| Project, edits, settings and source access/relinking across offline restarts | Reported PASS by user |
+| Same-version reinstall; project/settings retention | Reported PASS by user for 1.0.0 over 1.0.0 |
+| Update from a distinct earlier installed release; project/settings retention | NOT APPLICABLE — 1.0.0 is the first and only released installer; no predecessor exists |
+| Uninstall removes shipped files, shortcuts and registration while retaining projects/settings, originals and unrelated files | Reported PASS by user |
+
+`nativeWindowsTested` is **true** for the exact candidate hash above, based on
+user-reported native Windows 11 passes for every applicable acceptance check
+and the supplied checksum evidence. Windows 10 has not been tested in this
+record. Signing remains deferred; the installer remains unsigned.
+
+For the next genuine release, save a project/settings in 1.0.0, close the app,
+install the new candidate, and verify retention plus offline source access,
+playback and export. Record both release identities and actual results before
+marking that new installer tested. Do not fabricate a predecessor or label a
+same-version reinstall a cross-version update. Do not substitute Wine or Linux
+browser results, upload binaries or attach a remote runner without approval.

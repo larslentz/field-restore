@@ -1,0 +1,16 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "UvQtLn8Yl44q8h2UA7XLz"
+uri = "file://artifacts/field-restore/docs/windows-acceptance.html"
+type = "html"
+title = "Windows installer verification checklist"
+description = "Printable instructions and results table for native installation, offline audio use, source protection, restart persistence, update and uninstall testing. No Windows checks have passed yet."
+logical_id = "cdf4ac2b-6b75-4fc1-b8b1-39713c42099a"
+content_hash = "sha256:bdb0fa21af4777a732b0da6132819f4ccd23c0cad7381bf09c604dc7fd5162ab"
+size = 9755
+mtime_ms = 1791137865468
+storage_uri = "gcs://replit-rams-assets-kirk/rams/assets/repl:8a9e2605-9f1a-4420-9d32-d3ac3d57cef0/cdf4ac2b-6b75-4fc1-b8b1-39713c42099a/77337088-d53c-4311-85c3-502707e36b9e"
+storage_version_token = "1791137879972332"
+content_type = "text/html"

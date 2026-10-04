@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Field Restore — Native Windows acceptance checklist</title>
+<style>
+body{font:16px/1.55 system-ui,sans-serif;color:#202520;background:#fff;max-width:900px;margin:40px auto;padding:0 24px}
+h1,h2{line-height:1.2}h2{margin-top:32px}pre{background:#f3f4f2;padding:16px;white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px}
+code{overflow-wrap:anywhere}li{margin:10px 0}.notice{border-left:4px solid #a16207;padding:12px 18px;background:#fff8e9}
+table{border-collapse:collapse;width:100%;font-size:14px}th,td{border:1px solid #bbb;padding:10px;text-align:left;vertical-align:top}
+@media print{body{margin:0;max-width:none}h2{break-after:avoid}pre,tr{break-inside:avoid}}
+</style>
+</head>
+<body>
+<h1>Field Restore: native Windows acceptance checklist</h1>
+<p>Candidate: <strong>1.0.0, unsigned, Windows x64</strong>. Prepared 2026-10-04.
+This is a test procedure, not a record of passing tests.</p>
+<div class="notice"><strong>Use a spare machine or separate Windows test account.</strong>
+Back up any existing projects/settings and use disposable copies of audio.
+Uninstalling removes the installed application and shortcuts; never use irreplaceable files for overwrite tests.
+Do not disable antivirus or SmartScreen, or upload binaries to third parties.
+If security policy blocks this unsigned installer, record that result rather than bypassing policy.</div>
+<h2>1. Prepare and identify the candidate</h2>
+<ol>
+<li>Record Windows 10 or 11 edition, version/build and x64 architecture from Settings → System → About. Record the test date.</li>
+<li>Download <code>Field-Restore-1.0.0-Windows-x64-Setup.exe</code> from the app's Install dialog.
+Keep these instructions and any earlier installer locally before disconnecting.</li>
+<li>In PowerShell, adjust the path below if needed, then compute the hash:
+<pre>$installer = Join-Path $HOME 'Downloads\Field-Restore-1.0.0-Windows-x64-Setup.exe'
+Get-FileHash -Algorithm SHA256 -LiteralPath $installer</pre>
+Expected SHA-256:
+<pre>450306122cc53387f0bd9a49286813ad4cb38884f9f55379ec86c3def989c142</pre>
+Stop if it differs. This candidate has no verified signer, certificate thumbprint or signing timestamp.</li>
+<li>Prepare short, playable WAV, RF64 and FLAC test recordings in a folder outside the installation directory.
+Use a separate export folder. Missing RF64 or FLAC coverage must be marked NOT RUN, not PASS.</li>
+<li>Record hashes before testing. Change this path to your test recordings folder:
+<pre>$sources = 'C:\Users\YOUR_TEST_ACCOUNT\Documents\FieldRestoreTest\Sources'
+Get-ChildItem -LiteralPath $sources -File |
+  Get-FileHash -Algorithm SHA256 |
+  Export-Csv -NoTypeInformation -LiteralPath "$HOME\Desktop\field-restore-sources-before.csv"</pre></li>
+</ol>
+<h2>2. Fresh install and offline launch</h2>
+<ol>
+<li>Use a test account with no prior Field Restore installation or data. Run the verified candidate installer.
+Record installer warnings, install destination and whether installation succeeds without administrator elevation.</li>
+<li>The default destination is <code>%LOCALAPPDATA%\Programs\Field Restore</code>.
+Check the desktop and Start menu shortcuts and Windows Installed apps registration.</li>
+<li>Close the app completely, disable Wi-Fi and disconnect Ethernet, then launch from an installed shortcut.
+Confirm the complete interface loads without networking. Keep networking disconnected for the following checks.</li>
+</ol>
+<h2>3. Offline import, editing, export and source protection</h2>
+<ol>
+<li>For each WAV, RF64 and FLAC source: import it, play it, apply an audible restoration edit, compare original/processed playback,
+and export processed WAV audio and a report. Record the actual edit and output paths.</li>
+<li>Play each exported WAV in an independent local audio player. Check duration, channels and audible result.
+Open each report in a local text viewer and confirm it contains the expected recording/edit information.</li>
+<li>Using only the disposable WAV source, attempt to export to that exact original filename and path.
+If Windows asks for overwrite confirmation, proceed only for the disposable file so the application's protection is exercised.
+Expected: Field Restore rejects overwriting the original. Record the message.</li>
+<li>Export under a new filename in the original source folder. Expected: export succeeds and the original remains unchanged.</li>
+<li>Recompute and compare source hashes:
+<pre>Get-ChildItem -LiteralPath $sources -File |
+  Get-FileHash -Algorithm SHA256 |
+  Export-Csv -NoTypeInformation -LiteralPath "$HOME\Desktop\field-restore-sources-after.csv"
+Compare-Object `
+  (Import-Csv -LiteralPath "$HOME\Desktop\field-restore-sources-before.csv") `
+  (Import-Csv -LiteralPath "$HOME\Desktop\field-restore-sources-after.csv") `
+  -Property Path,Hash</pre>
+Expected: no differences. Keep exported files outside this folder until the new-filename test,
+then remove only that test export before comparing. Do not remove or rename source files.</li>
+</ol>
+<h2>4. Persistence and relinking across restarts</h2>
+<ol>
+<li>Save an editable project with a distinctive title, an edit with recorded parameter values and a changed persistent setting.
+Record these values. Export a local project backup if available.</li>
+<li>Close Field Restore completely. Confirm it is no longer running in Task Manager, then restart while offline.
+Reopen the saved project and verify title, edits/parameters and settings. Confirm source access works or the app explicitly requests relinking;
+after relinking the correct original, playback and export must work.</li>
+<li>With the app closed, move a disposable source to another folder. Reopen its saved project and check that missing-source handling
+is explicit rather than silently using different audio. Relink the moved original and confirm edits remain intact.</li>
+</ol>
+<h2>5. Update from an earlier release</h2>
+<div class="notice">This requires a genuine earlier installed release. Reinstalling 1.0.0 over itself does not verify an update.
+For a confirmed first release with no released predecessor, record NOT APPLICABLE and the reason.
+For a later release where an earlier installer exists but is unavailable, record NOT RUN and leave native verification incomplete.
+The user confirmed that 1.0.0 is the first and only released installer; cross-version updating is not applicable to it.</div>
+<ol>
+<li>In a separate test account or resettable spare machine, install the earlier release and record its version and installer hash.
+Create/save a project and change a persistent setting there. Record title, edit values and source/output hashes.</li>
+<li>Close the old app completely. Install the verified 1.0.0 candidate into the same location and under the same Windows account.</li>
+<li>Launch offline. Confirm the new version in Installed apps, retained project/settings, working source access or explicit relinking,
+and successful playback and export. Record any warnings, missing data or duplicate registration/shortcuts.</li>
+</ol>
+<h2>6. Uninstall and retention</h2>
+<ol>
+<li>Before uninstalling, save and close the app. Create a uniquely named unrelated text file and a nested folder with another file inside
+the actual installation directory. Record their full paths and hashes. Do not reuse any shipped filename.
+Also keep disposable original audio, exports and project backups outside the installation directory.</li>
+<li>Uninstall through Windows Installed apps. Confirm shipped application files, the uninstaller, Field Restore shortcuts and
+Installed apps registration are removed. Confirm the unrelated files and nested folder remain unchanged;
+the installation folder may legitimately remain because these files are present.</li>
+<li>Confirm originals, exported audio/reports and project backups still exist with unchanged hashes.
+Confirm <code>%APPDATA%\Field Restore</code> remains. Do not manually delete it.</li>
+<li>Reinstall the same verified candidate under the same account, launch offline and reopen the saved project.
+Confirm project edits/settings are retained and playback/export work after any explicit source relink.</li>
+</ol>
+<h2>Results to return</h2>
+<p>For every row, report PASS, FAIL or NOT RUN, with observations. Include screenshots/error text for failures.
+Redact personal usernames and unrelated file paths. Do not send credentials or private recordings.</p>
+<table>
+<tr><th>Evidence / check</th><th>Your actual result</th></tr>
+<tr><td>Date, Windows edition/version/build, x64</td><td></td></tr>
+<tr><td>Candidate version and computed installer SHA-256</td><td></td></tr>
+<tr><td>Fresh per-user install, registration and shortcuts</td><td></td></tr>
+<tr><td>Launch with Wi-Fi/Ethernet disconnected</td><td></td></tr>
+<tr><td>Offline WAV / RF64 / FLAC import, editing, playback (each format)</td><td></td></tr>
+<tr><td>Playable audio and readable report exports (each format)</td><td></td></tr>
+<tr><td>Original overwrite rejected; new-name export in source folder succeeds</td><td></td></tr>
+<tr><td>Before/after source hash comparison</td><td></td></tr>
+<tr><td>Offline restart retains projects, edits and settings</td><td></td></tr>
+<tr><td>Missing-source message and successful explicit relinking</td><td></td></tr>
+<tr><td>Earlier version/hash and update retention results</td><td></td></tr>
+<tr><td>Uninstall removes shipped files, shortcuts and registration</td><td></td></tr>
+<tr><td>Uninstall retains unrelated files/folders and originals/exports/backups (hashes)</td><td></td></tr>
+<tr><td>Reinstall confirms saved projects/settings remain usable offline</td><td></td></tr>
+</table>
+<p><strong>Release gate:</strong> Any applicable FAIL or NOT RUN leaves <code>nativeWindowsTested</code> false.
+A first release's cross-version update check may be NOT APPLICABLE only with confirmation that no released predecessor exists.
+Results apply only to the exact installer hash and Windows versions actually tested.
+Unsigned status remains independent of functional test results.</p>
+</body>
+</html>

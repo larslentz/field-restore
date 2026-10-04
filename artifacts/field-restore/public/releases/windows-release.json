@@ -5,5 +5,5 @@
   "unsigned": true,
   "architecture": "x64",
   "supportedWindows": "Windows 10/11 x64",
-  "nativeWindowsTested": false
+  "nativeWindowsTested": true
 }

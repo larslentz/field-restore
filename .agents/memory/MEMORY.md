@@ -14,4 +14,6 @@
 - [Brave embedded preview exports](brave-embedded-preview-exports.md) — cross-site Replit iframes can deny service-worker registration even when a standalone tab permits it.
 - [Description draft recovery](description-draft-recovery.md) — recovery is explicit and separate from Save project; retain project identity while waiting for source relink.
 - [Windows packaging](windows-packaging.md) — Wine version checks are not helper-execution proof; use native unsigned NSIS compilation and verify Windows separately.
+- [First Windows release](windows-first-release.md) — user confirmed 1.0.0 has no released predecessor; its cross-version update test is not applicable, not blocked.
+- [Published installer downloads](published-installer-downloads.md) — verify complete GET and checksum; successful HEAD responses can hide full-download failures.
 - [Project backup boundaries](project-backup-boundaries.md) — portable local backups are explicit; independent storage, external audio, and draft-recovery boundaries remain intact.
