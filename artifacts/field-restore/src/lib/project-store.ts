@@ -134,9 +134,11 @@ function transaction<T>(database: IDBDatabase, mode: IDBTransactionMode, action:
   return new Promise((resolve, reject) => {
     const tx = database.transaction(STORE_NAME, mode);
     let request: IDBRequest<T>;
+    let result: T;
     try {
       request = action(tx.objectStore(STORE_NAME));
-      request.onsuccess = () => resolve(request.result);
+      request.onsuccess = () => { result = request.result; };
+      tx.oncomplete = () => resolve(result);
       request.onerror = () => reject(request.error);
       tx.onerror = () => reject(tx.error);
       tx.onabort = () => reject(tx.error ?? new Error('transaction was aborted'));
@@ -182,6 +184,35 @@ export async function saveProject(input: ProjectInput | StoredProject): Promise<
   } catch (error) {
     database.close();
     throw new ProjectStoreError('save', error);
+  }
+}
+
+/** Commit a restore atomically; a newly created conflict must not be overwritten. */
+export async function saveRestoredProject(input: ProjectInput, expectedSavedAt?: string): Promise<ProjectRecord> {
+  const record = withoutAudio(input);
+  const database = await openDatabase();
+  try {
+    await closeAfter(database, () => new Promise<void>((resolve, reject) => {
+      const tx = database.transaction(STORE_NAME, 'readwrite');
+      const store = tx.objectStore(STORE_NAME);
+      let failure: Error | undefined;
+      const request = store.get(record.id);
+      request.onsuccess = () => {
+        const current = request.result as ProjectRecord | undefined;
+        if (current ? current.savedAt !== expectedSavedAt : expectedSavedAt !== undefined) {
+          failure = new Error('The saved project changed during restore. Cancel and import the backup again to review the conflict.');
+          tx.abort();
+        } else {
+          store.put(record);
+        }
+      };
+      tx.oncomplete = () => resolve();
+      tx.onabort = () => reject(failure ?? tx.error ?? new Error('Restore was aborted.'));
+      tx.onerror = () => reject(tx.error);
+    }));
+    return record;
+  } catch (error) {
+    throw new ProjectStoreError('restore', error);
   }
 }
 

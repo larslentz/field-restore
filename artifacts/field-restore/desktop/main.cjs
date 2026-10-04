@@ -62,9 +62,9 @@ app.whenReady().then(() => {
   });
   ipcMain.handle('field-restore:save-select', async (event, filename) => {
     trusted(event);
-    if (typeof filename !== 'string' || filename.length > 240 || /[\\/\x00-\x1f]/.test(filename) || !/\.(wav|txt)$/i.test(filename)) throw new Error('Invalid output filename.');
+    if (typeof filename !== 'string' || filename.length > 240 || /[\\/\x00-\x1f]/.test(filename) || !/\.(wav|txt|fieldrestore)$/i.test(filename)) throw new Error('Invalid output filename.');
     const result = await dialog.showSaveDialog(window, { defaultPath: path.join(app.getPath('documents'), filename),
-      filters: [{ name: filename.endsWith('.wav') ? 'WAV audio' : 'Plain text', extensions: [path.extname(filename).slice(1)] }] });
+      filters: [{ name: filename.endsWith('.wav') ? 'WAV audio' : filename.endsWith('.fieldrestore') ? 'Editable project backup' : 'Plain text', extensions: [path.extname(filename).slice(1)] }] });
     if (result.canceled || !result.filePath) return null;
     return saves.create(result.filePath);
   });

@@ -28,6 +28,7 @@ import { recordWindHistory, windActivityAt, windActivityAtSorted, type WindHisto
 import { preparePresetModules, readChainPresets, saveChainPreset, type ChainPreset } from '@/lib/chain-presets';
 import { EqCurve } from '@/components/EqCurve';
 import { TrackDescriptionFields } from '@/components/TrackDescriptionFields';
+import { ProjectBackupPanel } from '@/components/ProjectBackupPanel';
 import { formatTrackDescription, normalizeTrackDescription, type TrackDescription } from '@/lib/track-description';
 import { projectDescriptionKey, sourceDescriptionKey } from '@/lib/description-drafts';
 import { useDescriptionDraft } from '@/hooks/use-description-draft';
@@ -369,6 +370,7 @@ function App() {
   const [pendingPermission, setPendingPermission] = useState<ProjectRecord | null>(null);
   const [pendingRelink, setPendingRelink] = useState<ProjectRecord | null>(null);
   const [isRenewingPermission, setIsRenewingPermission] = useState(false);
+  const backupOwnerRef = useRef<ReturnType<typeof descriptionDraft.capture> | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [canvasBounds, setCanvasBounds] = useState({ width: 0, height: 0 });
@@ -668,7 +670,7 @@ function App() {
   }, [restoreTrim, openDescription]);
 
   const restoreVerifiedProject = useCallback((record: ProjectRecord, verified: Awaited<ReturnType<typeof openVerifiedFileHandle>>) => {
-    if (!record.fileHandle || !verified) return false;
+    if (!verified) return false;
     const { file, metadata, fingerprint } = verified;
     setLargeSource({ file, metadata, fingerprint, fileHandle: record.fileHandle });
     setSourceFingerprint(fingerprint);
@@ -1569,9 +1571,13 @@ function App() {
       await window.fieldRestoreDesktop?.protectSource(file);
       const metadata = await parseAudioMetadata(file, { name: file.name });
       const fingerprint = await fingerprintAudio(file, metadata);
+      const savedProject = pendingRelink ?? pendingPermission;
+      const relinkMatches = savedProject && isVerifiedRelink(savedProject.source.fingerprint, fingerprint);
       // Embedded project saves serialize decoded samples; keep FLAC in memory only while that
       // serialized project can still fit reliably in browser storage.
-      const useFileBackedPath = file.size >= 64 * 1024 * 1024 || metadata.format === 'RF64' ||
+      // A restored portable project remains in its project database even for a small WAV.
+      // Switching it back to legacy localStorage would leave a stale database save on reload.
+      const useFileBackedPath = relinkMatches || file.size >= 64 * 1024 * 1024 || metadata.format === 'RF64' ||
         (metadata.format === 'FLAC' && metadata.frameCount * metadata.channels * 4 >= 512 * 1024);
       stopPlayback();
       if (useFileBackedPath) {
@@ -1591,9 +1597,6 @@ function App() {
         setSource(parsed);
         setSavedStatus('Imported · not saved');
       }
-       const savedProject = pendingRelink ?? pendingPermission;
-       const relinkMatches = savedProject
-         && isVerifiedRelink(savedProject.source.fingerprint, fingerprint);
       if (relinkMatches) {
         setRestoredProject(true);
         setMarkers(savedProject.markers);
@@ -1759,6 +1762,28 @@ function App() {
       descriptionDraft.saved(projectDescriptionKey(project.id), trackDescription, draftOwner);
     }
     setSavedStatus(ok ? `Project saved in this browser · ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 'Browser storage full · project not saved; Export creates WAV + report, not a project backup');
+  };
+
+  const captureBackup = () => {
+    if (descriptionDraft.pending) throw new Error('Restore or discard the recovered description draft in Project before backing up.');
+    const pending = pendingRelink ?? pendingPermission;
+    const fingerprint = sourceFingerprint ?? pending?.source.fingerprint;
+    if (!fingerprint) throw new Error('Import the original WAV or FLAC recording before backing up. This source has no verifiable fingerprint.');
+    backupOwnerRef.current = descriptionDraft.capture();
+    return {
+      id: projectId ?? pending?.id ?? crypto.randomUUID(),
+      title, notes, what3wordsAddress, descriptiveWords, trackDescription, modules,
+      markers: pending?.markers ?? markers, regions: pending?.regions ?? regions,
+      trim: trim ?? undefined,
+      source: pending?.source ?? {
+        name: source.name, sampleRate: source.sampleRate, duration, channels: sourceChannelCount, fingerprint,
+        ...(largeSource ? {
+          size: largeSource.file.size, lastModified: largeSource.file.lastModified,
+          format: largeSource.metadata.format, bitsPerSample: largeSource.metadata.bitsPerSample,
+          frameCount: largeSource.metadata.frameCount,
+        } : {}),
+      },
+    };
   };
 
   const exportAudio = async () => {
@@ -2531,6 +2556,7 @@ function App() {
            <div className={`workspace-grid${activeTab === 'edit' && statisticsOrientation === 'vertical' ? ' workspace-grid-stats-vertical' : ''}`}>
                <div className={`min-w-0 ${activeTab === 'edit' ? `edit-workspace stats-${statisticsOrientation}` : 'space-y-4'}`}>
               {activeTab === 'project' ? (
+                <>
                  <ProjectPanel
                    title={title} notes={notes} setTitle={setTitle} setNotes={setNotes}
                    what3wordsAddress={what3wordsAddress} setWhat3wordsAddress={setWhat3wordsAddress}
@@ -2540,6 +2566,20 @@ function App() {
                    source={source} sourceChannelCount={sourceChannelCount}
                    save={() => void save()} openSettings={(event) => openModal(event, 'settings')}
                  />
+                 <ProjectBackupPanel
+                   capture={captureBackup}
+                   blocked={!!operationStatus}
+                   onExported={(id) => {
+                     if (backupOwnerRef.current === descriptionDraft.capture() && !pendingRelink && !pendingPermission) setProjectId((current) => current ?? id);
+                   }}
+                   onRestored={(record, verified) => {
+                     bootstrapInterruptedRef.current = true;
+                     stopPlayback();
+                     stageSavedProject(record);
+                     restoreVerifiedProject(record, verified);
+                   }}
+                 />
+                </>
               ) : activeTab === 'analyze' ? (
                 <AnalyzePanel originalStats={originalStats} currentStats={currentStats} selectionOriginalStats={selectionOriginalStats} selectionCurrentStats={selectionCurrentStats} duration={duration} selection={[selectionStart, selectionEnd]} trim={[committedTrimStart, committedTrimEnd]} hasSelection={hasSelection} modules={modules} />
               ) : (

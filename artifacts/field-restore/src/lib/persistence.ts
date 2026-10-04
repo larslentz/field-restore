@@ -59,6 +59,13 @@ export function loadProject(): StoredProject | null {
     return raw ? JSON.parse(raw) as StoredProject : null;
   } catch { return null; }
 }
+/** Retire only the explicitly replaced legacy save, never description-draft keys. */
+export function removeReplacedProject(id: string, savedAt: string): boolean {
+  const current = loadProject();
+  if (current?.id !== id || current.savedAt !== savedAt) return false;
+  localStorage.removeItem(KEY);
+  return true;
+}
 export function projectFromSource(source: AudioSource, modules: EditModule[], markers: StoredProject['markers'], regions: StoredProject['regions'], title: string, notes: string, trim?: [number, number], sourceFingerprint?: string | null, what3wordsAddress = '', descriptiveWords: string[] = [], trackDescription?: TrackDescription): StoredProject {
   const maxSamples = 1_000_000;
   const originalBase64 = source.channels[0]?.length <= maxSamples ? encodeChannels(source.channels) : undefined;

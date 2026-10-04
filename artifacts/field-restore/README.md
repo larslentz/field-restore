@@ -31,6 +31,34 @@ The managed Replit workflow supplies the required `PORT` and `BASE_PATH` values.
 - Project metadata and a compact local project snapshot are stored in browser storage.
 - A deterministic synthesized stereo demo is included and requires no network access.
 
+## Editable project backups
+
+In **Project**, choose **Back up editable project** to download the current editable
+state as a versioned `.fieldrestore` JSON file. This includes the edit chain
+(including sampled noise settings), markers, regions, trim, notes, location,
+descriptive words, exact description text, project identity and source fingerprint.
+It does not update the local saved project or automatically recover description drafts.
+Resolve any pending writing recovery before exporting a backup.
+
+All backup audio stays external, including small imported recordings. Keep the
+backup and its original WAV or FLAC outside browser storage. Browser file handles,
+permissions, audio samples and disposable analysis caches are not transferred.
+The built-in demo and older projects without fingerprints need a real source
+import before they can be backed up. Metadata backups are limited to 8 MB; large
+recordings are verified using bounded reads, never by loading the entire file.
+
+Choose **Import project backup**, then select the original recording. The app
+validates the backup and checks the recording's fingerprint, channel count,
+sample rate and duration before enabling restore. A matching local project identity
+offers **Restore as a copy** or **Replace saved project and open**. Cancel leaves
+saved projects unchanged. Restore replaces the open workspace, so back up unsaved
+work first. Description drafts remain separately recoverable, not automatically applied.
+
+Backups work locally and offline in both the installed browser app and desktop
+app. Their storage is independent: moving a backup and original audio between them
+is an explicit user action, not an upload or automatic migration. A restored source
+has no transferable file permission; relink it after reopening.
+
 ## WAV support
 
 ### Large browser-download regression
