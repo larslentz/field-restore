@@ -8,25 +8,7 @@ import {
   subscribeOffline,
 } from '@/lib/offline';
 import './install-panel.css';
-
-interface WindowsRelease {
-  filename: string;
-  version: string;
-  sha256: string;
-}
-
-const SAFE_EXE = /^[A-Za-z0-9][A-Za-z0-9._ -]{0,120}\.exe$/i;
-
-function parseRelease(value: unknown): WindowsRelease | null {
-  if (!value || typeof value !== 'object') return null;
-  const r = value as Record<string, unknown>;
-  if (typeof r.filename !== 'string' || typeof r.version !== 'string' || typeof r.sha256 !== 'string') return null;
-  if (r.unsigned !== true) return null;
-  if (!SAFE_EXE.test(r.filename) || r.filename.includes('..')) return null;
-  if (!/^[A-Fa-f0-9]{64}$/.test(r.sha256)) return null;
-  if (!r.version.trim() || r.version.length > 40) return null;
-  return { filename: r.filename, version: r.version, sha256: r.sha256.toLowerCase() };
-}
+import { parseWindowsRelease, type WindowsRelease } from '@/lib/windows-release';
 
 export function InstallPanel() {
   const state = useSyncExternalStore(subscribeOffline, getOfflineState, getOfflineState);
@@ -42,7 +24,7 @@ export function InstallPanel() {
     const ctl = new AbortController();
     fetch(`${import.meta.env.BASE_URL}releases/windows-release.json`, { cache: 'no-cache', signal: ctl.signal })
       .then((res) => (res.ok ? res.json() : null))
-      .then((json) => setRelease(parseRelease(json)))
+      .then((json) => setRelease(parseWindowsRelease(json)))
       .catch(() => setRelease(null));
     return () => ctl.abort();
   }, [open]);
@@ -132,7 +114,15 @@ export function InstallPanel() {
               {release && (
                 <section data-testid="section-windows-installer">
                   <h3>Windows installer · v{release.version}</h3>
-                  <p>This installer is unsigned, so Windows SmartScreen may warn about an unknown publisher. Verify the SHA-256 below before choosing to run it.</p>
+                  {release.unsigned ? (
+                    <p>This installer is unsigned, so Windows SmartScreen may warn about an unknown publisher. Verify the SHA-256 below before choosing to run it.</p>
+                  ) : (
+                    <p>Release metadata lists this installer as signed.
+                      {release.publisher ? <> Expected publisher: <strong data-testid="text-installer-publisher">{release.publisher}</strong>.</> : ' Publisher details are unavailable.'}
+                      {' '}Before running it, verify the SHA-256 below and check Properties → Digital Signatures in Windows for a valid signature and the expected publisher. A signature does not guarantee that SmartScreen will allow it without a warning.
+                    </p>
+                  )}
+                  {!release.nativeWindowsTested && <p data-testid="text-installer-windows-unverified">Installation and offline use have not yet been verified on native Windows.</p>}
                   <div className="install-hash mt-1" data-testid="text-installer-sha256">SHA-256 {release.sha256}</div>
                   <div className="install-actions mt-2"><a className="secondary-btn" style={{ color: 'hsl(var(--secondary-foreground))', textDecoration: 'none' }} href={`${import.meta.env.BASE_URL}releases/${encodeURIComponent(release.filename)}`} download data-testid="link-windows-installer">Download {release.filename}</a></div>
                 </section>
