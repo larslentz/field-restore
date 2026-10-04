@@ -4,6 +4,7 @@ import { WindProcessor, WIND_COMPENSATION_TIMING, WIND_DEFAULTS, WIND_SHELF_SCOP
 import { NoiseReductionProcessor, noiseProfileFromParams } from './noise-reduction';
 import { ClickPopProcessor } from './click-pop-removal';
 import { renderSpectralRepair } from './spectral-repair';
+import { normalizeTrackDescription, TRACK_DESCRIPTION_FIELDS, type TrackDescription } from './track-description';
 
 export type ModuleType = 'gain' | 'fade' | 'eq' | 'dc' | 'hum' | 'wind' | 'noise' | 'click-pop' | 'spectral-repair' | 'region' | 'ambient';
 export interface EditModule {
@@ -165,6 +166,7 @@ export interface RestorationReportInput {
   trim?: [number, number];
   sourceDuration?: number;
   exportedAt?: string;
+  trackDescription?: TrackDescription;
 }
 
 export function makeRestorationReport(input: RestorationReportInput) {
@@ -183,6 +185,7 @@ export function makeRestorationReport(input: RestorationReportInput) {
     modules: withoutLegacyDcModules(input.modules),
     selection: input.selection,
     exportedAt: input.exportedAt ?? new Date().toISOString(),
+    trackDescription: normalizeTrackDescription(input.trackDescription),
     limitations: [
       'Automatic DC offset removal is always applied before editable modules.',
       'Previously saved projects may sound different when reprocessed with the updated DC correction; original recordings remain untouched.',
@@ -280,6 +283,13 @@ export function formatRestorationReport(report: ReturnType<typeof makeRestoratio
     `Selection: ${reportTime(report.selection[0])} – ${reportTime(report.selection[1])}`,
     `Automatic DC offset removal: ${report.automaticDcOffsetRemoval ? 'Applied' : 'Not applied'}`,
     '',
+    'TRACK DESCRIPTION',
+    '-----------------',
+    ...TRACK_DESCRIPTION_FIELDS.flatMap(({ key, label }) => [
+      label,
+      report.trackDescription[key].trim() ? report.trackDescription[key] : 'Not provided.',
+      '',
+    ]),
     'EDIT CHAIN',
     '----------',
     chain,

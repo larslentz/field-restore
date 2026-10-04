@@ -4,7 +4,7 @@ import type { LoudnessStats } from '@/lib/loudness';
 export function PlrStat({ stats, label }: { stats: LoudnessStats; label: string }) {
   const value = stats.plrLu;
   return (
-    <div className="stat-cell">
+    <div className="stat-cell plr-cell" data-testid="stat-plr">
       <div className="stat-value">{Number.isFinite(value) ? `${value > 0 ? '+' : ''}${value.toFixed(1)} LU` : 'N/A'}</div>
       <div className="stat-label">{label}</div>
     </div>

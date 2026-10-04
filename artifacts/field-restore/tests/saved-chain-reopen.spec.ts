@@ -94,6 +94,11 @@ test('an empty saved chain opens with Common Field and does not silently rewrite
   await page.goto('/');
   const wav = recording();
   await seedProject(page, [], wav);
+  await page.getByTestId('nav-project').click();
+  for (const key of ['sentence1', 'sentence2', 'sentence3', 'continuation']) {
+    await expect(page.getByTestId(`textarea-project-description-${key}`)).toHaveValue('');
+  }
+  await page.getByTestId('nav-edit').click();
   await expect(page.getByTestId('button-open-full-chain')).toContainText('4/6 editable enabled');
   const hum = page.locator('[data-testid^="sidebar-module-"]').filter({ hasText: 'Hum Removal' });
   const wind = page.locator('[data-testid^="sidebar-module-"]').filter({ hasText: 'Wind Removal' });

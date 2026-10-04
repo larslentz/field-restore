@@ -1,5 +1,6 @@
 import type { EditModule } from './edit-chain';
 import type { StoredProject } from './persistence';
+import { normalizeTrackDescription, type TrackDescription } from './track-description';
 
 /**
  * IndexedDB is deliberately used for project state only. Audio samples are
@@ -19,6 +20,7 @@ export interface ProjectRecord {
   notes: string;
   what3wordsAddress?: string;
   descriptiveWords?: string[];
+  trackDescription?: TrackDescription;
   savedAt: string;
   modules: EditModule[];
   markers: StoredProject['markers'];
@@ -107,6 +109,7 @@ function withoutAudio(input: ProjectInput): ProjectRecord {
     notes: input.notes ?? '',
     what3wordsAddress: input.what3wordsAddress ?? '',
     descriptiveWords: input.descriptiveWords ?? [],
+    trackDescription: normalizeTrackDescription(input.trackDescription),
     savedAt: input.savedAt ?? new Date().toISOString(),
     modules: input.modules ?? [],
     markers: input.markers ?? [],
@@ -152,6 +155,7 @@ export function migrateStoredProject(input: StoredProject | ProjectInput, id?: s
     notes: value.notes ?? '',
     what3wordsAddress: value.what3wordsAddress ?? '',
     descriptiveWords: value.descriptiveWords ?? [],
+    trackDescription: normalizeTrackDescription(value.trackDescription),
     savedAt: value.savedAt,
     modules: value.modules ?? [],
     markers: value.markers ?? [],

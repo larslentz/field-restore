@@ -25,7 +25,10 @@ import { recordHumHistory, visibleHumHistory, type HumHistorySegment, type Visib
 import { recordWindHistory, windActivityAt, windActivityAtSorted, type WindHistorySegment } from '@/lib/wind-history';
 import { preparePresetModules, readChainPresets, saveChainPreset, type ChainPreset } from '@/lib/chain-presets';
 import { EqCurve } from '@/components/EqCurve';
+import { TrackDescriptionFields } from '@/components/TrackDescriptionFields';
+import { normalizeTrackDescription, type TrackDescription } from '@/lib/track-description';
 import { LbprStat, PlrStat } from '@/components/SignalRatios';
+import { LbprMethodology } from '@/components/LbprMethodology';
 import { anchoredFrequencyViewMin, anchoredLevelScaleCeiling, anchoredTimeViewStart, frequencyScaleTicks, levelScaleTicks } from '@/lib/spectrogram-scale';
 import { SPECTROGRAM_DATA_HEIGHT, SPECTROGRAM_FFT_SIZE } from '@/lib/spectrogram-resolution';
 import { DEFAULT_SPECTROGRAM_PALETTE, SPECTROGRAM_PALETTES, spectrogramColor, spectrogramColorCss, spectrogramLegendStops, type SpectrogramPaletteId } from '@/lib/spectrogram-palette';
@@ -213,6 +216,7 @@ function App() {
   const [notes, setNotes] = useState('Low-tide ambience. Keep the distant tern call at 07:48 intact.');
   const [what3wordsAddress, setWhat3wordsAddress] = useState('');
   const [descriptiveWords, setDescriptiveWords] = useState<string[]>([]);
+  const [trackDescription, setTrackDescription] = useState<TrackDescription>(normalizeTrackDescription);
   const [savedStatus, setSavedStatus] = useState('Local session');
   const [restoredProject, setRestoredProject] = useState(false);
   const [error, setError] = useState('');
@@ -645,6 +649,7 @@ function App() {
     setNotes(record.notes);
     setWhat3wordsAddress(record.what3wordsAddress ?? '');
     setDescriptiveWords(record.descriptiveWords ?? []);
+    setTrackDescription(normalizeTrackDescription(record.trackDescription));
     setModules(restoreSavedChain(record.modules));
     setMarkers([]);
     setRegions([]);
@@ -669,6 +674,7 @@ function App() {
     setNotes(record.notes);
     setWhat3wordsAddress(record.what3wordsAddress ?? '');
     setDescriptiveWords(record.descriptiveWords ?? []);
+    // Staging already restored the description; retain any writing done while file access was pending.
     setProjectId(record.id);
     setRestoredProject(true);
     setPendingPermission(null);
@@ -687,6 +693,7 @@ function App() {
       const next: AudioSource = { channels, sampleRate: saved.sampleRate, duration: channels[0].length / saved.sampleRate, name: saved.sourceName };
       setSourceFingerprint(saved.sourceFingerprint ?? null);
       setSource(next); setTitle(saved.title); setNotes(saved.notes); setWhat3wordsAddress(saved.what3wordsAddress ?? ''); setDescriptiveWords(saved.descriptiveWords ?? []); setModules(restoreSavedChain(saved.modules)); setMarkers(saved.markers); setRegions(saved.regions); restoreTrim(saved.trim, next.duration);
+      setTrackDescription(normalizeTrackDescription(saved.trackDescription));
       setSavedStatus(`Restored${saved.modules.some(isLegacyWind) ? ' · Wind Removal converted to automatic' : ''} ${new Date(saved.savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
     } else if (saved?.original?.length) {
       setRestoredProject(true);
@@ -694,6 +701,7 @@ function App() {
       const next: AudioSource = { channels, sampleRate: saved.sampleRate, duration: channels[0].length / saved.sampleRate, name: saved.sourceName };
       setSourceFingerprint(saved.sourceFingerprint ?? null);
       setSource(next); setTitle(saved.title); setNotes(saved.notes); setWhat3wordsAddress(saved.what3wordsAddress ?? ''); setDescriptiveWords(saved.descriptiveWords ?? []); setModules(restoreSavedChain(saved.modules)); setMarkers(saved.markers); setRegions(saved.regions); restoreTrim(saved.trim, next.duration);
+      setTrackDescription(normalizeTrackDescription(saved.trackDescription));
       setSavedStatus(`Restored${saved.modules.some(isLegacyWind) ? ' · Wind Removal converted to automatic' : ''} ${new Date(saved.savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
     }
     void listProjects().then(async (projects) => {
@@ -1590,6 +1598,7 @@ function App() {
          setUndoStack([]);
          setRedoStack([]);
         setModules(makeDefaultChain()); setMarkers([]); setRegions([]); setTitle(file.name.replace(/\.(wav|flac)$/i, '')); setWhat3wordsAddress(''); setDescriptiveWords([]); setProjectId(null);
+        setTrackDescription(normalizeTrackDescription());
          setPendingPermission(null);
          setPendingRelink(null);
          restoreTrim(null, metadata.frameCount / metadata.sampleRate);
@@ -1689,6 +1698,7 @@ function App() {
           notes,
           what3wordsAddress,
           descriptiveWords,
+          trackDescription,
           modules,
           markers,
           regions,
@@ -1715,7 +1725,7 @@ function App() {
       }
       return;
     }
-    const project = projectFromSource(source, modules, markers, regions, title, notes, trim ?? undefined, sourceFingerprint, what3wordsAddress, descriptiveWords);
+    const project = projectFromSource(source, modules, markers, regions, title, notes, trim ?? undefined, sourceFingerprint, what3wordsAddress, descriptiveWords, trackDescription);
     const ok = saveProject(project);
     setSavedStatus(ok ? `Project saved in this browser · ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 'Browser storage full · project not saved; Export creates WAV + report, not a project backup');
   };
@@ -1818,6 +1828,7 @@ function App() {
       container: largeSource && (Math.ceil(trimEnd * source.sampleRate) - Math.floor(trimStart * source.sampleRate)) * sourceChannelCount * 4 + 36 > 0xffffffff ? 'RF64' : 'RIFF',
       modules,
       selection: [selectionStart, selectionEnd],
+      trackDescription,
     });
     if (relay) {
       try { await relay.downloadReport(formatRestorationReport(report), filenames.report); }
@@ -2410,7 +2421,14 @@ function App() {
           <button type="button" className="nav-item" onClick={(event) => openModal(event, 'export')} aria-label="Export 32-bit WAV" data-testid="nav-export"><Download size={15} /><span className="nav-label">Export 32-bit WAV</span></button>
           <button type="button" className="nav-item" onClick={save} aria-label="Save project" aria-describedby="sidebar-save-project-description" data-testid="nav-save"><Save size={15} /><span className="nav-label">Save project</span></button>
           <p id="sidebar-save-project-description" className="sidebar-save-note">{SAVE_PROJECT_DESCRIPTION}</p>
-          <button type="button" className="nav-item" onClick={() => { stopPlayback(); setRestoredProject(false); setLargeSource(null); setSourceFingerprint(null); setUndoStack([]); setRedoStack([]); setSource(createDemoAudio()); restoreTrim(null, 18); setModules(makeDefaultChain()); selectionRef.current = [0, 0]; setSelection([0, 0]); setMarkers([]); setRegions([]); setTitle('Coastal dawn / north bluff'); setWhat3wordsAddress(''); setDescriptiveWords([]); setSavedStatus('Demo source loaded'); }} data-testid="nav-demo"><Waves size={15} /><span className="nav-label">Load demo source</span></button>
+          <button type="button" className="nav-item" onClick={() => {
+            stopPlayback(); setRestoredProject(false); setLargeSource(null); setSourceFingerprint(null);
+            setUndoStack([]); setRedoStack([]); setSource(createDemoAudio()); restoreTrim(null, 18);
+            setModules(makeDefaultChain()); selectionRef.current = [0, 0]; setSelection([0, 0]);
+            setMarkers([]); setRegions([]); setTitle('Coastal dawn / north bluff');
+            setWhat3wordsAddress(''); setDescriptiveWords([]); setTrackDescription(normalizeTrackDescription());
+            setSavedStatus('Demo source loaded');
+          }} data-testid="nav-demo"><Waves size={15} /><span className="nav-label">Load demo source</span></button>
         </div>
         <div className="mt-auto px-4 pb-5 sidebar-meta">
           <div className="border-t border-[#34454b] pt-4">
@@ -2468,7 +2486,14 @@ function App() {
            <div className={`workspace-grid${activeTab === 'edit' && statisticsOrientation === 'vertical' ? ' workspace-grid-stats-vertical' : ''}`}>
                <div className={`min-w-0 ${activeTab === 'edit' ? `edit-workspace stats-${statisticsOrientation}` : 'space-y-4'}`}>
               {activeTab === 'project' ? (
-                 <ProjectPanel title={title} notes={notes} setTitle={setTitle} setNotes={setNotes} what3wordsAddress={what3wordsAddress} setWhat3wordsAddress={setWhat3wordsAddress} descriptiveWords={descriptiveWords} setDescriptiveWords={setDescriptiveWords} source={source} sourceChannelCount={sourceChannelCount} save={() => void save()} openSettings={(event) => openModal(event, 'settings')} />
+                 <ProjectPanel
+                   title={title} notes={notes} setTitle={setTitle} setNotes={setNotes}
+                   what3wordsAddress={what3wordsAddress} setWhat3wordsAddress={setWhat3wordsAddress}
+                   descriptiveWords={descriptiveWords} setDescriptiveWords={setDescriptiveWords}
+                   trackDescription={trackDescription} setTrackDescription={setTrackDescription}
+                   source={source} sourceChannelCount={sourceChannelCount}
+                   save={() => void save()} openSettings={(event) => openModal(event, 'settings')}
+                 />
               ) : activeTab === 'analyze' ? (
                 <AnalyzePanel originalStats={originalStats} currentStats={currentStats} selectionOriginalStats={selectionOriginalStats} selectionCurrentStats={selectionCurrentStats} duration={duration} selection={[selectionStart, selectionEnd]} trim={[committedTrimStart, committedTrimEnd]} hasSelection={hasSelection} modules={modules} />
               ) : (
@@ -2744,7 +2769,7 @@ function StatsGrid({ stats }: { stats: LoudnessStats }) {
     <div className="stat-cell"><div className="stat-value">{formatLevel(stats.integratedLufs, 'LUFS')}</div><div className="stat-label">Integrated loudness</div></div>
     <div className="stat-cell"><div className="stat-value">{formatLra(stats.loudnessRangeLu)}</div><div className="stat-label">Loudness range (LRA)</div></div>
     <div className="stat-cell"><div className="stat-value">{formatLevel(stats.maxShortTermLufs, 'LUFS')}</div><div className="stat-label">Max short-term</div></div>
-    <PlrStat stats={stats} label="Peak-to-loudness ratio (PLR)" />
+    <PlrStat stats={stats} label="PLR · Peak-to-loudness ratio" />
     <LbprStat stats={stats} label="Loud-Block Peak-to-RMS (LBPR)" />
   </div>;
 }
@@ -3013,14 +3038,7 @@ function AnalyzePanel({ originalStats, currentStats, selectionOriginalStats, sel
         </div>
       </section>
 
-      <section className="panel">
-        <div className="panel-header"><div className="section-title">Interpretation notes</div></div>
-        <div className="panel-body grid md:grid-cols-3 gap-3 text-[12px]">
-          <div className="border-l-2 border-[#d8ed55] pl-3"><strong>Loudness context</strong><p className="text-muted-foreground mt-1 leading-relaxed">Use integrated loudness for the overall program and loudness range (LRA) for long-term variation. LRA needs at least two valid 3-second readings; shorter or silent ranges show N/A. PLR is estimated true peak minus integrated loudness. LBPR uses sample peaks and the loudest 20% of non-silent, non-overlapping 3-second RMS blocks; it includes a final partial block and is a DR14-style estimate, not official TT DR. Preserve headroom for archival work.</p></div>
-          <div className="border-l-2 border-[#ff8a4c] pl-3"><strong>Chain impact</strong><p className="text-muted-foreground mt-1 leading-relaxed">{modules.filter((module) => module.enabled).length} enabled modules are rendered in order. Bypassed modules remain editable.</p></div>
-          <div className="border-l-2 border-[#91a69d] pl-3"><strong>Known boundary</strong><p className="text-muted-foreground mt-1 leading-relaxed">These browser-local readings follow BS.1770-style weighting and gating but are not a substitute for a calibrated compliance meter.</p></div>
-        </div>
-      </section>
+      <LbprMethodology />
     </div>
   );
 }
@@ -3038,8 +3056,8 @@ function SignalComparison({ title, original, current }: { title: string; origina
         <div className="stat-cell"><div className="stat-value">{formatLra(current.loudnessRangeLu)}</div><div className="stat-label">Current loudness range (LRA)</div></div>
         <div className="stat-cell"><div className="stat-value">{formatLevel(original.maxShortTermLufs, 'LUFS')}</div><div className="stat-label">Original max short-term</div></div>
         <div className="stat-cell"><div className="stat-value">{formatLevel(current.maxShortTermLufs, 'LUFS')}</div><div className="stat-label">Current max short-term</div></div>
-        <PlrStat stats={original} label="Original peak-to-loudness ratio (PLR)" />
-        <PlrStat stats={current} label="Current peak-to-loudness ratio (PLR)" />
+        <PlrStat stats={original} label="Original PLR · Peak-to-loudness ratio" />
+        <PlrStat stats={current} label="Current PLR · Peak-to-loudness ratio" />
         <LbprStat stats={original} label="Original Loud-Block Peak-to-RMS (LBPR)" />
         <LbprStat stats={current} label="Current Loud-Block Peak-to-RMS (LBPR)" />
       </div>
@@ -3056,13 +3074,15 @@ type ProjectPanelProps = {
   setWhat3wordsAddress: (value: string) => void;
   descriptiveWords: string[];
   setDescriptiveWords: (words: string[]) => void;
+  trackDescription: TrackDescription;
+  setTrackDescription: (value: TrackDescription) => void;
   source: AudioSource;
   sourceChannelCount: number;
   save: () => void;
   openSettings: (event: ReactMouseEvent<HTMLButtonElement>) => void;
 };
 
-function ProjectPanel({ title, notes, setTitle, setNotes, what3wordsAddress, setWhat3wordsAddress, descriptiveWords, setDescriptiveWords, source, sourceChannelCount, save, openSettings }: ProjectPanelProps) {
+function ProjectPanel({ title, notes, setTitle, setNotes, what3wordsAddress, setWhat3wordsAddress, descriptiveWords, setDescriptiveWords, trackDescription, setTrackDescription, source, sourceChannelCount, save, openSettings }: ProjectPanelProps) {
   const [wordDraft, setWordDraft] = useState('');
   const mapUrl = what3wordsMapUrl(what3wordsAddress);
   const filenames = exportFilenames(title, source.name, descriptiveWords);
@@ -3110,6 +3130,7 @@ function ProjectPanel({ title, notes, setTitle, setNotes, what3wordsAddress, set
           </ul>}
           <p className="project-metadata-hint">WAV filename: <span className="font-mono-value break-all" data-testid="text-export-filename">{filenames.wav}</span></p>
         </div>
+        <TrackDescriptionFields value={trackDescription} onChange={setTrackDescription} />
         <label><span className="field-label">Field notes</span><textarea className="textarea-field min-h-[170px]" value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Describe place, mic, weather, handling, and decisions…" data-testid="textarea-project-notes" /></label>
         <div className="grid sm:grid-cols-3 gap-3">
           <div className="p-3 bg-[hsl(var(--muted))] rounded"><div className="eyebrow">Source</div><div className="font-mono-value text-[11px] mt-2 truncate">{source.name}</div></div>

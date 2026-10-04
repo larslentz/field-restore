@@ -158,3 +158,21 @@ test('restoration reports format as a readable text summary with the edit chain 
   assert.match(text, /PROCESSING NOTES\n-+\n- Automatic DC offset removal/);
   assert.doesNotMatch(text, /^\s*\{/m);
 });
+
+test('text reports include the three sentences and continuation with line breaks intact', () => {
+  const trackDescription = {
+    sentence1: 'Insects continue as a car passes.',
+    sentence2: 'The quieter nearby sounds return when the car fades.',
+    sentence3: 'I kept the time after the vehicle disappears.',
+    continuation: 'A faint call remains.\n\nThe microphones did not move.',
+  };
+  const input = { source: 'field.wav', sampleRate: 8000, channels: 1, duration: 2, container: 'RIFF', modules: [], selection: [0, 0] };
+  const report = makeRestorationReport({ ...input, trackDescription });
+  assert.deepEqual(report.trackDescription, trackDescription);
+  const text = formatRestorationReport(report);
+  assert.match(text, /TRACK DESCRIPTION\n-+\nSentence 1 — What happens\nInsects continue as a car passes\./);
+  for (const value of Object.values(trackDescription)) assert.ok(text.includes(value));
+  assert.match(text, /Continuation of the description\nA faint call remains\.\n\nThe microphones did not move\./);
+  const blank = formatRestorationReport(makeRestorationReport(input));
+  assert.equal(blank.match(/Not provided\./g).length, 4);
+});
