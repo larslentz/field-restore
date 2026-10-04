@@ -15,7 +15,7 @@ import { audioRange, fingerprintAudio, parseAudioMetadata, readAudioFrames, type
 import { decodeFlac } from '@/lib/flac';
 import { isVerifiedRelink, openVerifiedFileHandle } from '@/lib/file-access';
 import { listProjects, loadProject as loadProjectV2, queryFileHandlePermission, requestFileHandlePermission, saveProject as saveProjectV2, type ProjectRecord } from '@/lib/project-store';
-import { exportFilenames, filenameWord, what3wordsMapUrl } from '@/lib/project-metadata';
+import { exportFilenames, filenameWord, trackDescriptionFilename, what3wordsMapUrl } from '@/lib/project-metadata';
 import { analyzeFileInitialHum, createStreamingEditChain } from '@/lib/streaming-edit-chain';
 import type { SpectralRepairPatches } from '@/lib/streaming-edit-chain';
 import { prepareSpectralRepairsInWorker } from '@/lib/worker-spectral-prep';
@@ -26,7 +26,7 @@ import { recordWindHistory, windActivityAt, windActivityAtSorted, type WindHisto
 import { preparePresetModules, readChainPresets, saveChainPreset, type ChainPreset } from '@/lib/chain-presets';
 import { EqCurve } from '@/components/EqCurve';
 import { TrackDescriptionFields } from '@/components/TrackDescriptionFields';
-import { normalizeTrackDescription, type TrackDescription } from '@/lib/track-description';
+import { formatTrackDescription, normalizeTrackDescription, type TrackDescription } from '@/lib/track-description';
 import { LbprStat, PlrStat } from '@/components/SignalRatios';
 import { LbprMethodology } from '@/components/LbprMethodology';
 import { anchoredFrequencyViewMin, anchoredLevelScaleCeiling, anchoredTimeViewStart, frequencyScaleTicks, levelScaleTicks } from '@/lib/spectrogram-scale';
@@ -3130,7 +3130,14 @@ function ProjectPanel({ title, notes, setTitle, setNotes, what3wordsAddress, set
           </ul>}
           <p className="project-metadata-hint">WAV filename: <span className="font-mono-value break-all" data-testid="text-export-filename">{filenames.wav}</span></p>
         </div>
-        <TrackDescriptionFields value={trackDescription} onChange={setTrackDescription} />
+        <TrackDescriptionFields
+          value={trackDescription}
+          onChange={setTrackDescription}
+          onDownload={() => downloadBlob(
+            new Blob([formatTrackDescription(trackDescription)], { type: 'text/plain;charset=utf-8' }),
+            trackDescriptionFilename(title, source.name, descriptiveWords),
+          )}
+        />
         <label><span className="field-label">Field notes</span><textarea className="textarea-field min-h-[170px]" value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Describe place, mic, weather, handling, and decisions…" data-testid="textarea-project-notes" /></label>
         <div className="grid sm:grid-cols-3 gap-3">
           <div className="p-3 bg-[hsl(var(--muted))] rounded"><div className="eyebrow">Source</div><div className="font-mono-value text-[11px] mt-2 truncate">{source.name}</div></div>

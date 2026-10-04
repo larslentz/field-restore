@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { normalizeTrackDescription } from './track-description.ts';
+import { formatTrackDescription, normalizeTrackDescription, TRACK_DESCRIPTION_FIELDS } from './track-description.ts';
+import { exportFilenames, trackDescriptionFilename } from './project-metadata.ts';
 import { projectFromSource } from './persistence.ts';
 import { migrateStoredProject } from './project-store.ts';
 
@@ -10,6 +11,23 @@ const description = {
   sentence3: 'I kept the quiet that follows the car.',
   continuation: 'The microphones remained still.\n\nA faint call continues at the field’s edge.',
 };
+
+test('description-only text preserves all four draft values, whitespace and blank fields', () => {
+  const draft = { ...description, sentence1: '  Unsaved observation.\nAnother line.  ', sentence2: '' };
+  const text = formatTrackDescription(draft);
+  assert.equal(text, `Track description\n\n${TRACK_DESCRIPTION_FIELDS.map(({ key, label }) => `${label}\n${draft[key]}`).join('\n\n')}\n`);
+  assert.ok(text.includes(draft.continuation));
+  assert.ok(!text.includes('Field notes'));
+});
+
+test('description filenames share export naming without changing audio or report filenames', () => {
+  assert.equal(trackDescriptionFilename('Field walk', 'source.wav', ['Dawn', 'Bird calls']), 'field-walk_dawn_bird-calls-track-description.txt');
+  assert.equal(trackDescriptionFilename('', 'source.wav', []), 'source-wav-track-description.txt');
+  assert.equal(trackDescriptionFilename('', '', []), 'field-restore-track-description.txt');
+  assert.deepEqual(exportFilenames('Field walk', 'source.wav', ['Dawn']), {
+    wav: 'field-walk_dawn_FR.wav', report: 'field-walk_dawn-restoration-report.txt',
+  });
+});
 
 test('missing and partial descriptions default to blank without changing supplied text', () => {
   assert.deepEqual(normalizeTrackDescription(), { sentence1: '', sentence2: '', sentence3: '', continuation: '' });

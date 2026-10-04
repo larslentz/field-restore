@@ -18,3 +18,7 @@ export function exportFilenames(title: string, sourceName: string, descriptiveWo
   const stem = base + (words.length ? `_${words.join('_')}` : '');
   return { wav: `${stem}_FR.wav`, report: `${stem}-restoration-report.txt` };
 }
+
+export function trackDescriptionFilename(title: string, sourceName: string, descriptiveWords: string[]): string {
+  return exportFilenames(title, sourceName, descriptiveWords).report.replace(/-restoration-report\.txt$/, '-track-description.txt');
+}

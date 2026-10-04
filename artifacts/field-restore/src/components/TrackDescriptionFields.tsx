@@ -1,11 +1,13 @@
 import { TRACK_DESCRIPTION_FIELDS, type TrackDescription } from '@/lib/track-description';
+import { Download } from 'lucide-react';
 
 interface Props {
   value: TrackDescription;
   onChange: (value: TrackDescription) => void;
+  onDownload: () => void;
 }
 
-export function TrackDescriptionFields({ value, onChange }: Props) {
+export function TrackDescriptionFields({ value, onChange, onDownload }: Props) {
   return (
     <fieldset className="space-y-4 min-w-0" data-testid="project-track-description">
       <legend className="section-title mb-2">The three-sentence method</legend>
@@ -29,6 +31,14 @@ export function TrackDescriptionFields({ value, onChange }: Props) {
           />
         </div>
       ))}
+      <div>
+        <button type="button" className="quiet-btn" onClick={onDownload} aria-describedby="project-description-download-hint" data-testid="button-download-track-description">
+          <Download size={14} /> Download description (.txt)
+        </button>
+        <p id="project-description-download-hint" className="text-[12px] leading-relaxed text-muted-foreground mt-2">
+          Downloads the current four fields, including unsaved changes. No audio export; Field notes stay separate.
+        </p>
+      </div>
     </fieldset>
   );
 }

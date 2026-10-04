@@ -40,3 +40,8 @@ export function normalizeTrackDescription(value?: Partial<TrackDescription> | nu
     continuation: typeof value?.continuation === 'string' ? value.continuation : '',
   };
 }
+
+/** Keep draft whitespace and paragraph breaks exactly as entered. */
+export function formatTrackDescription(value: TrackDescription): string {
+  return `Track description\n\n${TRACK_DESCRIPTION_FIELDS.map(({ key, label }) => `${label}\n${value[key]}`).join('\n\n')}\n`;
+}

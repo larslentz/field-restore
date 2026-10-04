@@ -42,6 +42,38 @@ async function expectDescription(page: Page, values = description) {
 }
 
 for (const rf64 of [false, true]) {
+  test(`${rf64 ? 'file-backed' : 'embedded'} description download uses unsaved text without exporting audio`, async ({ page }) => {
+    await page.goto('/');
+    await page.getByTestId('input-import-wav').setInputFiles({
+      name: rf64 ? 'file-backed.wav' : 'embedded.wav', mimeType: 'audio/wav', buffer: recording(rf64),
+    });
+    await page.getByTestId('nav-project').click();
+    await page.getByTestId('input-project-title').fill('Dawn walk');
+    const draft = { ...description, sentence1: '  Unsaved grass rustles.\nA bird calls.  ', sentence2: '' };
+    for (const [key, value] of Object.entries(draft)) await field(page, key).fill(value);
+    await page.getByTestId('textarea-project-notes').fill('Private field notes must not download.');
+    const downloads: string[] = [];
+    page.on('download', (download) => downloads.push(download.suggestedFilename()));
+    const nextDownload = page.waitForEvent('download');
+    await page.getByTestId('button-download-track-description').click();
+    const downloaded = await nextDownload;
+    expect(downloaded.suggestedFilename()).toBe('dawn-walk-track-description.txt');
+    const path = await downloaded.path();
+    expect(path).toBeTruthy();
+    const text = await readFile(path!, 'utf8');
+    for (const value of Object.values(draft)) expect(text).toContain(value);
+    expect(text).toContain('Sentence 2 — How the space unfolds\n\n\nSentence 3');
+    expect(text).not.toContain('Private field notes');
+    expect(text).not.toContain('Restoration report');
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expectDescription(page, draft);
+    expect(downloads).toEqual(['dawn-walk-track-description.txt']);
+    // Downloading the draft must not silently save the project.
+    await page.reload();
+    await page.getByTestId('nav-project').click();
+    await expectDescription(page, { sentence1: '', sentence2: '', sentence3: '', continuation: '' });
+  });
+
   test(`${rf64 ? 'file-backed' : 'embedded'} project descriptions survive saving, reopening and text export`, async ({ page }, testInfo) => {
     if (rf64) {
       // Use a controlled WAV destination instead of the native OS file-save dialog.
