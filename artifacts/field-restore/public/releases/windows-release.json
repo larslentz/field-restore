@@ -1,9 +1,9 @@
 {
   "filename": "Field-Restore-1.0.0-Windows-x64-Setup.exe",
   "version": "1.0.0",
-  "sha256": "450306122cc53387f0bd9a49286813ad4cb38884f9f55379ec86c3def989c142",
+  "sha256": "3efb9a1317f66f89108ba8a831aedc4772444a5c1b5f86a449069598fe19b8fb",
   "unsigned": true,
   "architecture": "x64",
   "supportedWindows": "Windows 10/11 x64",
-  "nativeWindowsTested": true
+  "nativeWindowsTested": false
 }

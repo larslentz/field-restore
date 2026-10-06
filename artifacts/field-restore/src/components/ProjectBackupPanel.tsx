@@ -97,7 +97,7 @@ export function ProjectBackupPanel({ capture, onExported, onRestored, blocked }:
   return <section className="panel" data-testid="project-backup-panel">
     <div className="panel-header"><div className="section-title">Editable project backup</div></div>
     <div className="panel-body space-y-3">
-      <p className="text-xs text-muted-foreground">Save a portable .fieldrestore file with your current edits, markers, regions, trim, metadata and exact description text. Audio stays in its original WAV or FLAC file; keep both files. No uploads or automatic migration. Browser and desktop storage are independent.</p>
+      <p className="text-xs text-muted-foreground">Save a portable .fieldrestore file with your current edits, markers, regions, trim, metadata and exact description text. Audio stays in its original WAV, FLAC, or MP4 file; keep both files. No uploads or automatic migration. Browser and desktop storage are independent.</p>
       <p className="text-xs text-muted-foreground">Backup does not update Save project or recover a pending description draft. Resolve draft recovery first. The built-in demo has no external source; import a recording before backing up.</p>
       <div className="flex flex-wrap gap-2">
         <button type="button" className="secondary-btn" disabled={disabled} onClick={() => void exportBackup()} data-testid="button-backup-export"><Download size={14} /> Back up editable project</button>
@@ -107,8 +107,8 @@ export function ProjectBackupPanel({ capture, onExported, onRestored, blocked }:
       {backup && <div className="border rounded-md p-3 space-y-3" data-testid="backup-restore-review">
         <p className="text-sm font-medium">Restore “{backup.project.title}”</p>
         <p className="text-xs text-muted-foreground">Backup saved {new Date(backup.project.savedAt).toLocaleString()}. Required source: {backup.project.source.name}. Choose the original audio to verify it before restoring.</p>
-        <label className="block text-xs">Relink original WAV or FLAC
-          <input type="file" accept=".wav,.flac" disabled={disabled} className="block mt-2 max-w-full" data-testid="input-backup-source" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ''; if (file) void relink(file); }} />
+        <label className="block text-xs">Relink original WAV, FLAC, or MP4
+          <input type="file" accept=".wav,.flac,.mp4,audio/mp4,video/mp4" disabled={disabled} className="block mt-2 max-w-full" data-testid="input-backup-source" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ''; if (file) void relink(file); }} />
         </label>
         {verified && <p className="text-xs" data-testid="backup-source-verified">Source fingerprint and audio format verified.</p>}
         <p className="text-xs text-muted-foreground">Restoring replaces the open workspace. Back it up first if you want to keep unsaved changes. Local description drafts are not applied or deleted automatically.</p>

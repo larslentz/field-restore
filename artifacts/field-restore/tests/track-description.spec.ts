@@ -86,6 +86,9 @@ for (const rf64 of [false, true]) {
   });
 
   test(`${rf64 ? 'file-backed pending relink' : 'embedded'} saved project keeps baseline until explicit recovery and save`, async ({ page }) => {
+    await page.addInitScript(() => {
+      Object.defineProperty(window, 'showOpenFilePicker', { value: undefined, configurable: true });
+    });
     await page.goto('/');
     const upload = { name: 'saved-source.wav', mimeType: 'audio/wav', buffer: recording(rf64) };
     await page.getByTestId('input-import-wav').setInputFiles(upload);
@@ -131,6 +134,12 @@ for (const rf64 of [false, true]) {
     await expect(field(page, 'sentence1')).toHaveValue('Another unfinished description.');
     const otherAudio = Buffer.from(upload.buffer);
     otherAudio.writeInt16LE(12345, otherAudio.length - 2);
+    if (rf64) {
+      await page.getByTestId('input-import-wav').setInputFiles({ ...upload, name: 'different.wav', buffer: otherAudio });
+      await expect(page.getByTestId('text-source-name')).toHaveText(upload.name);
+      await expect(field(page, 'sentence1')).toHaveValue('Another unfinished description.');
+      await page.getByTestId('nav-import-new-source').click();
+    }
     await page.getByTestId('input-import-wav').setInputFiles({ ...upload, name: 'different.wav', buffer: otherAudio });
     await expect(page.getByTestId('text-source-name')).toHaveText('different.wav');
     await expectDescription(page, blankDescription);

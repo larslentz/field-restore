@@ -1,6 +1,6 @@
 # Windows offline release
 
-## Current status: unsigned 1.0.0; applicable native Windows 11 checks reported passing
+## Current status: unsigned pre-release 1.0.0 with MP4 audio import; native Windows checks pending
 
 An unsigned Windows x64 installer is available at
 `public/releases/Field-Restore-1.0.0-Windows-x64-Setup.exe`. Download it from the
@@ -8,14 +8,16 @@ app's Install dialog. The release metadata and `SHA256SUMS.txt` describe the
 final built installer. Users can verify its SHA-256 before running it.
 
 This is a Linux-produced, unsigned cross-build. It is **not digitally signed**,
-its publisher is **not verified**, and the user reports that the native Windows
-applicable acceptance checks passed on Windows 11. Their PowerShell checksum
-evidence matches this exact installer. The user confirmed that 1.0.0 is the
-first and only released installer, so cross-version update testing is **not
-applicable to this release**, not a failure or a passing update test.
-Same-version reinstallation and retention were reported passing.
-`nativeWindowsTested` is true for this installer on the strength of those
-user-performed checks. No native Windows 10 results were supplied.
+and its publisher is **not verified**. The product has not been publicly
+released. The MP4-capable candidate replaces the preceding candidate in place;
+no older installer is retained. `1.0.0` is a fixed internal packaging value,
+not a new release or a claim of public release history.
+
+`nativeWindowsTested` is **false** for the rebuilt installer. Earlier
+user-performed Windows 11 checks covered different installer bytes and do not
+validate the new MP4 decoder path. Fresh Windows 10/11 x64 checks are pending.
+Cross-version update testing is not applicable because there is no publicly
+released predecessor; same-version reinstall/retention still requires checking.
 Windows may show an unknown-publisher or SmartScreen warning; functional
 testing does not establish a verified publisher or guarantee download reliability.
 
@@ -103,7 +105,7 @@ each item is **blocked / not run**, not passing:
 
 - Fresh per-user installation on supported Windows; for signed candidates,
   verify installed app and uninstaller signatures and publisher.
-- Disconnect networking, launch the installed app, import WAV/RF64 and FLAC,
+- Disconnect networking, launch the installed app, import WAV/RF64, FLAC and AAC MP4,
   edit/play back and export playable audio plus reports.
 - Hash original input files before/after editing and export. Confirm exports
   cannot overwrite an original, including when the source folder is selected.
@@ -123,72 +125,33 @@ not-applicable result. Signing alone, Linux browser tests, NSIS compilation and
 inspection of bundled files do not satisfy this gate. Each new installer build
 resets the flag to false; prior evidence does not transfer to new bytes.
 
-## Verification record — 2026-10-04
+## MP4 pre-release candidate
 
-Candidate: `Field-Restore-1.0.0-Windows-x64-Setup.exe` (version 1.0.0).
-SHA-256 of the current installer bytes:
-`450306122cc53387f0bd9a49286813ad4cb38884f9f55379ec86c3def989c142`.
+MP4 import reads the primary mono/stereo audio track locally using a bounded
+Blob reader and the runtime's codec support. AAC is covered by browser tests.
+There is no server upload, remote codec fetch, full-video JavaScript buffer,
+video editing, or MP4 re-export. All MP4 recordings stay file-backed, including
+short recordings. Edited audio exports as 32-bit float WAV. Lossy source audio
+does not become lossless merely by exporting it as WAV.
 
-The installer hash was computed in the Linux workspace and matches both
-`windows-release.json` and `SHA256SUMS.txt`. This checks file consistency only;
-it is not evidence that the installer works on Windows.
+Container timestamps are retained, with negative AAC priming excluded and
+declared presentation duration respected. Range reads warm the decoder before
+the requested range. Import verifies the beginning and end of the audio track;
+this is not a complete integrity scan of every compressed packet. Unsupported
+codecs/layouts and import failures leave the current project intact.
 
-Published-download check: the normal full-file GET returned HTTP 500 even
-though HEAD returned HTTP 200. Downloading all 111,770,380 bytes using 4 MiB
-HTTP range requests succeeded and produced the expected SHA-256 above.
-The user subsequently reported that downloading and testing on Windows worked.
-The earlier full-response failure has not been independently shown to be
-resolved; the ranged-download check is not native Windows acceptance evidence.
+Synthetic fixtures and automated tests cover AAC video and audio-only MP4,
+WAV export, saved-project verification/relinking, unsupported/no-audio/damaged
+inputs, cancellation, bounded reads and sample-aligned ranged decoding.
+The production offline test also imports and relinks MP4 while disconnected.
 
-The user performed testing on their own machine and identified the operating
-system as Windows 11. They selected all four acceptance groups as passing:
-fresh installation/offline audio workflow, original-source protection,
-persistence across offline restarts, and update/uninstall retention.
-Their additional update evidence was: “Tested update and passed.”
-No failures or skipped checks were reported.
+The build regenerates `windows-release.json` and `SHA256SUMS.txt` from the exact
+new installer bytes. Those files are the checksum authority; no historical
+checksum is reused here. A complete workspace download must match that hash.
+Workspace/browser checks are not native Windows acceptance.
 
-These are user-reported results, not tests executed or observed by the agent.
-The Windows edition/build was not provided. The user subsequently supplied a
-Windows PowerShell screenshot hashing
-`Field-Restore-1.0.0-Windows-x64-Setup.exe` with SHA-256. The displayed hash
-matches the candidate hash above (hexadecimal case is immaterial), tying the
-reported tests to this exact installer. No personal filesystem path is retained
-in this record.
-
-In response to the request for the earlier installed version, the user supplied
-“1.0.0”. This is recorded as a same-version reinstall with reported retention,
-not a confirmed update from a distinct earlier release. Cross-version update
-testing was not performed; the earlier grouped PASS report is not evidence of
-cross-version updating.
-
-The user then clarified: “There is not earlier installer. 1.0.0 is the only one
-released.” This establishes that it is the first released installer, rather
-than an older release merely being unavailable to the tester. The cross-version
-update check is therefore **not applicable** to 1.0.0. No further tests are
-requested for this release. A future release must verify updating from 1.0.0.
-
-The candidate is unsigned; signer, signing-certificate thumbprint
-and signing timestamp are not applicable to this unsigned-preview test.
-Signature verification remains a separate requirement for a signed release.
-
-| Required check | Actual result |
-| --- | --- |
-| Native Windows installation and launch | Reported PASS by user on Windows 11; installer SHA-256 confirmed by PowerShell screenshot |
-| Offline WAV/RF64 and FLAC import, editing, playback, audio/report export | Reported PASS by user |
-| Original-source hashes unchanged; source overwrite prevented | Reported PASS by user |
-| Project, edits, settings and source access/relinking across offline restarts | Reported PASS by user |
-| Same-version reinstall; project/settings retention | Reported PASS by user for 1.0.0 over 1.0.0 |
-| Update from a distinct earlier installed release; project/settings retention | NOT APPLICABLE — 1.0.0 is the first and only released installer; no predecessor exists |
-| Uninstall removes shipped files, shortcuts and registration while retaining projects/settings, originals and unrelated files | Reported PASS by user |
-
-`nativeWindowsTested` is **true** for the exact candidate hash above, based on
-user-reported native Windows 11 passes for every applicable acceptance check
-and the supplied checksum evidence. Windows 10 has not been tested in this
-record. Signing remains deferred; the installer remains unsigned.
-
-For the next genuine release, save a project/settings in 1.0.0, close the app,
-install the new candidate, and verify retention plus offline source access,
-playback and export. Record both release identities and actual results before
-marking that new installer tested. Do not fabricate a predecessor or label a
-same-version reinstall a cross-version update. Do not substitute Wine or Linux
-browser results, upload binaries or attach a remote runner without approval.
+Native Windows installation, offline AAC import/playback/export, source
+protection, saved-project relinking, same-version reinstall and uninstall
+retention remain **not run** for these new bytes. Do not set
+`nativeWindowsTested` true until those checks pass on the exact rebuilt binary.
+Signing and publication remain separate, deferred actions.

@@ -14,7 +14,7 @@ function rf64() {
   for (let i = 0; i < frames; i++) wav.writeInt16LE(Math.round(2000 * Math.sin(i * .24)), header + i * 2);
   return wav;
 }
-test('complete production setup survives offline reload, FLAC/RF64 editing, relink and downloads', async ({ page, context }) => {
+test('complete production setup survives offline reload, FLAC/MP4/RF64 editing, relink and downloads', async ({ page, context }) => {
   // Exercise the real picker-free streaming route; native pickers are checked separately.
   await page.addInitScript(() => Object.defineProperty(window, 'showSaveFilePicker', { configurable: true, value: undefined }));
   await page.goto('/');
@@ -42,6 +42,25 @@ test('complete production setup survives offline reload, FLAC/RF64 editing, reli
   await expect(page.locator('.topbar .chip').first()).toContainText('Project saved');
   await page.reload();
   await expect(page.getByTestId('text-source-name')).toHaveText('offline.flac');
+  const mp4 = await readFile(new URL('./fixtures/mp4-aac-stereo.mp4', import.meta.url));
+  await page.getByTestId('input-import-wav').setInputFiles({ name: 'offline.mp4', mimeType: 'video/mp4', buffer: mp4 });
+  await expect(page.getByTestId('text-source-name')).toHaveText('offline.mp4');
+  await page.getByTestId('nav-save').click();
+  await expect(page.locator('.topbar .chip').first()).toContainText('Project saved');
+  await page.reload();
+  await expect(page.locator('.topbar .chip').first()).toContainText('relink source audio');
+  await page.getByTestId('input-import-wav').setInputFiles({ name: 'offline.mp4', mimeType: 'video/mp4', buffer: mp4 });
+  await expect(page.locator('.topbar .chip').first()).toContainText('Source relinked');
+  await expect(page.getByTestId('status-error')).toHaveCount(0);
+  const mp4Download = page.waitForEvent('download', item => item.suggestedFilename().endsWith('.wav'));
+  const mp4Report = page.waitForEvent('download', item => item.suggestedFilename().endsWith('.txt'));
+  await page.getByTestId('nav-export').click();
+  await page.getByTestId('button-confirm-export').click();
+  const mp4Wav = await readFile((await (await mp4Download).path())!);
+  expect(mp4Wav.readUInt32LE(24)).toBe(48000);
+  expect(mp4Wav.readUInt16LE(22)).toBe(2);
+  expect(mp4Wav.length).toBe(44 + 96000 * 2 * 4);
+  await (await mp4Report).path();
   await page.getByTestId('input-import-wav').setInputFiles({ name: 'offline-rf64.wav', mimeType: 'audio/wav', buffer: rf64() });
   await expect(page.getByTestId('text-source-name')).toHaveText('offline-rf64.wav');
   await page.getByTestId('nav-save').click();

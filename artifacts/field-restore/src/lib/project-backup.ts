@@ -16,7 +16,7 @@ const sourceSchema = z.object({
   channels: z.number().int().min(1).max(64),
   size: z.number().int().nonnegative().optional(),
   lastModified: time.optional(),
-  format: z.enum(['WAV', 'RIFF', 'RF64', 'FLAC']).optional(),
+  format: z.enum(['WAV', 'RIFF', 'RF64', 'FLAC', 'MP4']).optional(),
   bitsPerSample: z.number().int().min(1).max(64).optional(),
   frameCount: z.number().int().positive().optional(),
 }).strict();
@@ -101,7 +101,7 @@ export function serializeProjectBackup(input: ProjectInput): string {
 }
 
 export async function readProjectBackup(file: Blob): Promise<ProjectBackup> {
-  if (file.size > MAX_BACKUP_BYTES) throw new Error('Project backup exceeds the 8 MB metadata limit. Audio must remain in a separate WAV or FLAC file.');
+  if (file.size > MAX_BACKUP_BYTES) throw new Error('Project backup exceeds the 8 MB metadata limit. Audio must remain in a separate WAV, FLAC, or MP4 file.');
   return parseProjectBackup(await file.text());
 }
 

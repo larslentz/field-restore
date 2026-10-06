@@ -25,15 +25,15 @@ If security policy blocks this unsigned installer, record that result rather tha
 <ol>
 <li>Record Windows 10 or 11 edition, version/build and x64 architecture from Settings → System → About. Record the test date.</li>
 <li>Download <code>Field-Restore-1.0.0-Windows-x64-Setup.exe</code> from the app's Install dialog.
-Keep these instructions and any earlier installer locally before disconnecting.</li>
+Keep these instructions and the current checksum locally before disconnecting. This is an unreleased candidate, not an update from a released predecessor.</li>
 <li>In PowerShell, adjust the path below if needed, then compute the hash:
 <pre>$installer = Join-Path $HOME 'Downloads\Field-Restore-1.0.0-Windows-x64-Setup.exe'
 Get-FileHash -Algorithm SHA256 -LiteralPath $installer</pre>
-Expected SHA-256:
-<pre>450306122cc53387f0bd9a49286813ad4cb38884f9f55379ec86c3def989c142</pre>
+Expected SHA-256: copy the value from the current Install dialog or <code>SHA256SUMS.txt</code> supplied with this exact candidate.
+Do not reuse the checksum of an earlier build with the same filename.
 Stop if it differs. This candidate has no verified signer, certificate thumbprint or signing timestamp.</li>
-<li>Prepare short, playable WAV, RF64 and FLAC test recordings in a folder outside the installation directory.
-Use a separate export folder. Missing RF64 or FLAC coverage must be marked NOT RUN, not PASS.</li>
+<li>Prepare short, playable WAV, RF64, FLAC and AAC MP4 test recordings in a folder outside the installation directory.
+Use a separate export folder. Missing coverage for any format must be marked NOT RUN, not PASS.</li>
 <li>Record hashes before testing. Change this path to your test recordings folder:
 <pre>$sources = 'C:\Users\YOUR_TEST_ACCOUNT\Documents\FieldRestoreTest\Sources'
 Get-ChildItem -LiteralPath $sources -File |
@@ -51,7 +51,7 @@ Confirm the complete interface loads without networking. Keep networking disconn
 </ol>
 <h2>3. Offline import, editing, export and source protection</h2>
 <ol>
-<li>For each WAV, RF64 and FLAC source: import it, play it, apply an audible restoration edit, compare original/processed playback,
+<li>For each WAV, RF64, FLAC and AAC MP4 source: import it, play it, apply an audible restoration edit, compare original/processed playback,
 and export processed WAV audio and a report. Record the actual edit and output paths.</li>
 <li>Play each exported WAV in an independent local audio player. Check duration, channels and audible result.
 Open each report in a local text viewer and confirm it contains the expected recording/edit information.</li>
@@ -114,7 +114,7 @@ Redact personal usernames and unrelated file paths. Do not send credentials or p
 <tr><td>Candidate version and computed installer SHA-256</td><td></td></tr>
 <tr><td>Fresh per-user install, registration and shortcuts</td><td></td></tr>
 <tr><td>Launch with Wi-Fi/Ethernet disconnected</td><td></td></tr>
-<tr><td>Offline WAV / RF64 / FLAC import, editing, playback (each format)</td><td></td></tr>
+<tr><td>Offline WAV / RF64 / FLAC / AAC MP4 import, editing, playback (each format)</td><td></td></tr>
 <tr><td>Playable audio and readable report exports (each format)</td><td></td></tr>
 <tr><td>Original overwrite rejected; new-name export in source folder succeeds</td><td></td></tr>
 <tr><td>Before/after source hash comparison</td><td></td></tr>

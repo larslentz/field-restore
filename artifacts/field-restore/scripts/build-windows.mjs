@@ -20,6 +20,9 @@ const filename = `Field-Restore-${pkg.version}-Windows-x64-Setup.exe`;
 const installer = path.join(root, 'release', filename);
 // Delete only shipped files on uninstall, not any recordings or other user files in that folder.
 const appDir = path.join(root, 'release/win-unpacked');
+// Keep the media reader's license/source notice readable beside the installed app,
+// as well as in the offline web bundle.
+await cp(path.join(root, 'public/THIRD-PARTY-NOTICES.txt'), path.join(appDir, 'THIRD-PARTY-NOTICES.txt'));
 const directories = [];
 const deletes = [];
 const escape = name => name.replaceAll('$', '$$').replaceAll('"', '$\\"').replaceAll('/', '\\');

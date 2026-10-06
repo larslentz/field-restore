@@ -17,3 +17,5 @@
 - [Windows release status](windows-first-release.md) — Field Restore has not yet been publicly released; the 1.0.0 installer is a pre-release candidate.
 - [Published installer downloads](published-installer-downloads.md) — verify complete GET and checksum; successful HEAD responses can hide full-download failures.
 - [Project backup boundaries](project-backup-boundaries.md) — portable local backups are explicit; independent storage, external audio, and draft-recovery boundaries remain intact.
+- [MP4 audio scope](mp4-audio-scope.md) — WAV-only output preserves the video; failed relinks must not silently replace the waiting workspace.
+- [Workspace dependency installation](workspace-dependency-installation.md) — the install callback cannot target a pnpm artifact; respect package maturity checks.

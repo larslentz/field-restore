@@ -35,7 +35,7 @@ export async function verifyBackupSource(
   if (!isVerifiedRelink(expected.fingerprint, fingerprint) ||
       metadata.sampleRate !== expected.sampleRate || metadata.channels !== expected.channels ||
       Math.abs(metadata.frameCount / metadata.sampleRate - expected.duration) > 1e-6) {
-    throw new Error('This recording does not match the backup. Choose the original WAV or FLAC. No saved projects were changed.');
+    throw new Error('This recording does not match the backup. Choose the original WAV, FLAC, or MP4. No saved projects were changed.');
   }
   return { file, metadata, fingerprint };
 }

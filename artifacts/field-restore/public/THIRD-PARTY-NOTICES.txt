@@ -1,0 +1,16 @@
+Field Restore — additional media-reader notice
+
+Mediabunny 1.61.1
+Copyright (c) 2026-present, Vanilagy and contributors
+Licensed under the Mozilla Public License, version 2.0 (MPL-2.0).
+Field Restore uses the unmodified Mediabunny library for local MP4 reading.
+
+The corresponding source, including the full license, is available at:
+https://registry.npmjs.org/mediabunny/-/mediabunny-1.61.1.tgz
+https://github.com/Vanilagy/mediabunny
+
+The full MPL-2.0 license is also available at:
+https://www.mozilla.org/en-US/MPL/2.0/
+
+MP4 media decoding uses the browser/desktop runtime's local codec support.
+No online decoding service or runtime codec download is used.

@@ -4,7 +4,7 @@ import { FLAC_SINE_BASE64 } from './fixtures/flac-sine';
 
 test('lossless FLAC imports, saves and exports as 32-bit float WAV', async ({ page }) => {
   await page.goto('/');
-  await expect(page.getByTestId('nav-import')).toContainText('WAV or FLAC');
+  await expect(page.getByTestId('nav-import')).toContainText('WAV, FLAC or MP4');
   await expect(page.locator('#import-format-note')).toContainText('32-bit floating point WAV recommended');
   await page.getByTestId('input-import-wav').setInputFiles({
     name: 'field-sine.flac', mimeType: 'audio/flac', buffer: Buffer.from(FLAC_SINE_BASE64, 'base64'),

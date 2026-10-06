@@ -410,6 +410,8 @@ function App() {
   const spectrogramGenerationRef = useRef(0);
   const backgroundPausedRef = useRef(false);
   const exportJobRef = useRef<AbortController | null>(null);
+  const importJobRef = useRef<AbortController | null>(null);
+  const newImportRef = useRef(false);
   const memoryJobRef = useRef<{ source: AudioSource; chain: EditModule[]; job: MemoryRenderJob } | null>(null);
   const spectralPatchCacheRef = useRef<{
     source: LargeSource; chain: EditModule[]; patches?: SpectralRepairPatches; pending?: Promise<SpectralRepairPatches>;
@@ -1559,28 +1561,36 @@ function App() {
     setUndoStack((stack) => [...stack, modules]); setModules(next); setRedoStack((stack) => stack.slice(0, -1));
   };
 
-  const importAudioFile = useCallback(async (file: File, fileHandle?: FileSystemFileHandle) => {
-    if (!/\.(wav|flac)$/i.test(file.name) && !['audio/wav', 'audio/x-wav', 'audio/wave', 'audio/flac', 'audio/x-flac'].includes(file.type)) {
-      setError('Choose an uncompressed WAV or lossless FLAC recording to begin editing.');
+  const importAudioFile = useCallback(async (file: File, fileHandle?: FileSystemFileHandle, asNew = false) => {
+    if (!/\.(wav|flac|mp4)$/i.test(file.name) && !['audio/wav', 'audio/x-wav', 'audio/wave', 'audio/flac', 'audio/x-flac', 'video/mp4', 'audio/mp4', 'application/mp4'].includes(file.type)) {
+      setError('Choose a WAV, FLAC, or MP4 recording to begin editing.');
       return;
     }
+    importJobRef.current?.abort();
+    const controller = new AbortController();
+    importJobRef.current = controller;
+    const active = () => importJobRef.current === controller && !controller.signal.aborted;
     bootstrapInterruptedRef.current = true;
     try {
       setError('');
       setOperationStatus('Reading audio metadata');
       await window.fieldRestoreDesktop?.protectSource(file);
-      const metadata = await parseAudioMetadata(file, { name: file.name });
-      const fingerprint = await fingerprintAudio(file, metadata);
-      const savedProject = pendingRelink ?? pendingPermission;
+      const metadata = await parseAudioMetadata(file, { name: file.name, signal: controller.signal });
+      const fingerprint = await fingerprintAudio(file, metadata, controller.signal);
+      if (!active()) return;
+      const savedProject = asNew ? null : pendingRelink ?? pendingPermission;
       const relinkMatches = savedProject && isVerifiedRelink(savedProject.source.fingerprint, fingerprint);
+      if (savedProject && !relinkMatches) {
+        throw new Error('This file does not match the saved project. Relink the original source, or choose “Open a different recording” to start a new project.');
+      }
       // Embedded project saves serialize decoded samples; keep FLAC in memory only while that
       // serialized project can still fit reliably in browser storage.
       // A restored portable project remains in its project database even for a small WAV.
       // Switching it back to legacy localStorage would leave a stale database save on reload.
-      const useFileBackedPath = relinkMatches || file.size >= 64 * 1024 * 1024 || metadata.format === 'RF64' ||
+      const useFileBackedPath = relinkMatches || file.size >= 64 * 1024 * 1024 || metadata.format === 'RF64' || metadata.format === 'MP4' ||
         (metadata.format === 'FLAC' && metadata.frameCount * metadata.channels * 4 >= 512 * 1024);
-      stopPlayback();
       if (useFileBackedPath) {
+        stopPlayback();
         const next: AudioSource = { channels: [], sampleRate: metadata.sampleRate, duration: metadata.frameCount / metadata.sampleRate, name: file.name };
         setLargeSource({ file, metadata, fingerprint, fileHandle });
         setSourceFingerprint(fingerprint);
@@ -1592,6 +1602,8 @@ function App() {
         setSavedStatus(`File-backed ${metadata.format} · not saved`);
       } else {
         const parsed = metadata.format === 'FLAC' ? await decodeFlac(file, metadata) : parseWav(await file.arrayBuffer(), file.name);
+        if (!active()) return;
+        stopPlayback();
         setLargeSource(null);
         setSourceFingerprint(fingerprint);
         setSource(parsed);
@@ -1614,29 +1626,38 @@ function App() {
          setRestoredProject(false);
          setUndoStack([]);
          setRedoStack([]);
-        setModules(makeDefaultChain()); setMarkers([]); setRegions([]); setTitle(file.name.replace(/\.(wav|flac)$/i, '')); setWhat3wordsAddress(''); setDescriptiveWords([]); setProjectId(null);
+        setModules(makeDefaultChain()); setMarkers([]); setRegions([]); setTitle(file.name.replace(/\.(wav|flac|mp4)$/i, '')); setWhat3wordsAddress(''); setDescriptiveWords([]); setProjectId(null);
         openDescription(sourceDescriptionKey(file.name, fingerprint));
          setPendingPermission(null);
          setPendingRelink(null);
          restoreTrim(null, metadata.frameCount / metadata.sampleRate);
       }
-      selectionRef.current = [0, 0]; setSelection([0, 0]); setOperationStatus('');
+      selectionRef.current = [0, 0]; setSelection([0, 0]);
     } catch (caught) {
-      setOperationStatus('');
-      setError(caught instanceof Error ? caught.message : 'Unable to read this audio file.');
+      if (active() && !(caught instanceof Error && caught.name === 'AbortError')) {
+        setError(caught instanceof Error ? caught.message : 'Unable to read this audio file.');
+      }
+    } finally {
+      if (importJobRef.current === controller) {
+        importJobRef.current = null;
+        setOperationStatus('');
+      }
     }
   }, [pendingPermission, pendingRelink, restoreTrim, stopPlayback, openDescription]);
 
-  const pickAudioFile = useCallback(async () => {
+  const pickAudioFile = useCallback(async (asNew = false) => {
+    newImportRef.current = asNew;
     if (window.fieldRestoreDesktop) { fileRef.current?.click(); return; }
     const picker = (window as typeof window & {
       showOpenFilePicker?: (options?: unknown) => Promise<FileSystemFileHandle[]>;
     }).showOpenFilePicker;
     if (!picker) { fileRef.current?.click(); return; }
     try {
-      const [handle] = await picker({ multiple: false, types: [{ description: 'WAV or FLAC audio', accept: { 'audio/wav': ['.wav'], 'audio/flac': ['.flac'] } }] });
-      if (handle) void importAudioFile(await handle.getFile(), handle);
+      const [handle] = await picker({ multiple: false, types: [{ description: 'WAV, FLAC, or MP4 media', accept: { 'audio/wav': ['.wav'], 'audio/flac': ['.flac'], 'video/mp4': ['.mp4'] } }] });
+      newImportRef.current = false;
+      if (handle) void importAudioFile(await handle.getFile(), handle, asNew);
     } catch (caught) {
+      newImportRef.current = false;
       if ((caught as Error).name !== 'AbortError') setError(caught instanceof Error ? caught.message : 'Unable to open this audio file.');
     }
   }, [importAudioFile]);
@@ -1659,7 +1680,7 @@ function App() {
         setPendingPermission(null);
         setPendingRelink(record);
         setSavedStatus('Saved source changed · relink source audio');
-        setError('The saved file no longer matches this project. Relink the original WAV or FLAC recording to restore its edits.');
+        setError('The saved file no longer matches this project. Relink the original WAV, FLAC, or MP4 recording to restore its edits.');
       }
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Unable to renew access to the saved audio file.');
@@ -1670,7 +1691,9 @@ function App() {
 
   const importFile = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-    if (file) void importAudioFile(file);
+    const asNew = newImportRef.current;
+    newImportRef.current = false;
+    if (file) void importAudioFile(file, undefined, asNew);
     event.target.value = '';
   };
 
@@ -1768,7 +1791,7 @@ function App() {
     if (descriptionDraft.pending) throw new Error('Restore or discard the recovered description draft in Project before backing up.');
     const pending = pendingRelink ?? pendingPermission;
     const fingerprint = sourceFingerprint ?? pending?.source.fingerprint;
-    if (!fingerprint) throw new Error('Import the original WAV or FLAC recording before backing up. This source has no verifiable fingerprint.');
+    if (!fingerprint) throw new Error('Import the original WAV, FLAC, or MP4 recording before backing up. This source has no verifiable fingerprint.');
     backupOwnerRef.current = descriptionDraft.capture();
     return {
       id: projectId ?? pending?.id ?? crypto.randomUUID(),
@@ -2373,7 +2396,7 @@ function App() {
           <div className="wav-drop-card">
             <FileAudio size={34} strokeWidth={1.5} />
             <div>
-              <div className="wav-drop-title">Drop WAV or FLAC to open</div>
+              <div className="wav-drop-title">Drop WAV, FLAC, or MP4 to open</div>
               <div className="wav-drop-copy">Your recording stays on this device. The original will remain unchanged.</div>
             </div>
           </div>
@@ -2483,8 +2506,9 @@ function App() {
         </section>
         <div className="px-3 mt-5 sidebar-title eyebrow text-[#91a69d]">Session</div>
         <div className="px-3 mt-2 space-y-1">
-          <button type="button" className="nav-item" onClick={() => void pickAudioFile()} data-testid="nav-import" aria-describedby="import-format-note"><FileAudio size={15} /><span className="nav-label">Import WAV or FLAC</span></button>
-          <p id="import-format-note" className="px-3 pb-2 text-[10px] leading-relaxed text-[#abbdb4]">32-bit floating point WAV recommended for maximum editing headroom. Lossless FLAC is also supported; lossy formats are not.</p>
+          <button type="button" className="nav-item" onClick={() => void pickAudioFile()} data-testid="nav-import" aria-describedby="import-format-note"><FileAudio size={15} /><span className="nav-label">{pendingRelink || pendingPermission ? 'Relink source audio' : 'Import WAV, FLAC or MP4'}</span></button>
+          {(pendingRelink || pendingPermission) && <button type="button" className="nav-item" onClick={() => void pickAudioFile(true)} data-testid="nav-import-new-source"><FileAudio size={15} /><span className="nav-label">Open a different recording</span></button>}
+          <p id="import-format-note" className="px-3 pb-2 text-[10px] leading-relaxed text-[#abbdb4]">32-bit floating point WAV recommended for maximum editing headroom. Lossless FLAC and supported MP4 audio can also be edited. MP4 audio may be lossy; export saves WAV audio only and leaves video unchanged.</p>
           <button type="button" className="nav-item" onClick={(event) => openModal(event, 'export')} aria-label="Export 32-bit WAV" data-testid="nav-export"><Download size={15} /><span className="nav-label">Export 32-bit WAV</span></button>
           <button type="button" className="nav-item" onClick={save} aria-label="Save project" aria-describedby="sidebar-save-project-description" data-testid="nav-save"><Save size={15} /><span className="nav-label">Save project</span></button>
           <p id="sidebar-save-project-description" className="sidebar-save-note">{SAVE_PROJECT_DESCRIPTION}</p>
@@ -2515,11 +2539,12 @@ function App() {
              <span className="dc-status hidden lg:inline-flex" data-testid="status-dc-removal"><Check size={12} />DC offset removed automatically</span>
           </div>
           {(analysisStatus || spectrogramStatus || operationStatus) && (() => {
-            const backgroundStatus = analysisStatus || spectrogramStatus;
+            const importing = operationStatus === 'Reading audio metadata';
+            const backgroundStatus = importing ? '' : analysisStatus || spectrogramStatus;
             const visibleStatus = backgroundStatus || operationStatus;
-            const visibleProgress = analysisStatus ? analysisProgress : spectrogramStatus ? spectrogramProgress : operationProgress;
+            const visibleProgress = importing ? 0 : analysisStatus ? analysisProgress : spectrogramStatus ? spectrogramProgress : operationProgress;
             const measuredProgress = Boolean(backgroundStatus || operationStatus.startsWith('Exporting'));
-            const title = analysisStatus ? 'Analyzing recording' : spectrogramStatus ? 'Building spectrogram' : operationStatus === 'Reading audio metadata' ? 'Opening recording' : operationStatus;
+            const title = importing ? 'Opening recording' : analysisStatus ? 'Analyzing recording' : spectrogramStatus ? 'Building spectrogram' : operationStatus;
             return <div className="work-banner" role="status" data-testid="status-background-work" data-progress={visibleProgress}>
               <LoaderCircle size={18} className={`work-banner-spinner ${operationPaused && backgroundStatus ? 'paused' : ''}`} aria-hidden="true" />
               <div className="work-banner-copy"><strong>{title}{operationPaused && backgroundStatus ? ' · paused' : ''}</strong><span>{visibleStatus} · Your recording is still being processed.</span></div>
@@ -2528,6 +2553,7 @@ function App() {
                 <span className="font-mono-value">{measuredProgress ? `${Math.round(visibleProgress * 100)}%` : 'Working…'}</span>
               </div>
               {backgroundStatus && <div className="work-banner-actions"><button type="button" className="quiet-btn" onClick={operationPaused ? resumeBackgroundWork : pauseBackgroundWork} aria-label={operationPaused ? 'Resume analysis' : 'Pause analysis'} title={operationPaused ? 'Resume analysis' : 'Pause analysis'} data-testid="button-analysis-pause">{operationPaused ? <Play size={12} /> : <Pause size={12} />}</button><button type="button" className="icon-btn" onClick={cancelBackgroundWork} aria-label="Cancel background analysis" title="Cancel background analysis" data-testid="button-analysis-cancel"><X size={13} /></button></div>}
+              {importing && <div className="work-banner-actions"><button type="button" className="icon-btn" onClick={() => { importJobRef.current?.abort(); setError('Import cancelled. Your current recording is unchanged.'); }} aria-label="Cancel import" title="Cancel import" data-testid="button-import-cancel"><X size={13} /></button></div>}
             </div>;
           })()}
           <div className="topbar-actions flex items-center gap-1.5">
@@ -2761,7 +2787,7 @@ function App() {
           </section>
         </div>}
       </section>
-      <input ref={fileRef} type="file" accept=".wav,.flac,audio/wav,audio/flac" onChange={importFile} className="hidden" inert={!!modal || presetDialogOpen} aria-hidden={modal || presetDialogOpen ? true : undefined} data-testid="input-import-wav" />
+      <input ref={fileRef} type="file" accept=".wav,.flac,.mp4,audio/wav,audio/flac,video/mp4,audio/mp4" onChange={importFile} className="hidden" inert={!!modal || presetDialogOpen} aria-hidden={modal || presetDialogOpen ? true : undefined} data-testid="input-import-wav" />
       {modal === 'export' && <ExportModal onClose={() => setModal(null)} onExport={exportAudio} title={title} />}
       {modal === 'help' && <HelpModal onClose={() => setModal(null)} />}
       {modal === 'settings' && <SettingsModal onClose={() => setModal(null)} spectrogramPalette={spectrogramPalette} onSpectrogramPaletteChange={(palette) => { setSpectrogramPalette(palette); localStorage.setItem('field-restore-spectrogram-palette', palette); }} />}
