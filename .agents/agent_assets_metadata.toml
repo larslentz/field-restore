@@ -14,3 +14,17 @@ mtime_ms = 1791137865468
 storage_uri = "gcs://replit-rams-assets-kirk/rams/assets/repl:8a9e2605-9f1a-4420-9d32-d3ac3d57cef0/cdf4ac2b-6b75-4fc1-b8b1-39713c42099a/77337088-d53c-4311-85c3-502707e36b9e"
 storage_version_token = "1791137879972332"
 content_type = "text/html"
+
+[[outputs]]
+id = "fCabYi8af-SV0beNZ7RJp"
+uri = "file://artifacts/field-restore/public/Field-Restore-Operators-Manual.pdf"
+type = "pdf"
+title = "Field Restore Operator’s Manual (PDF)"
+description = "Six-page printable manual covering import, editing, project backups, WAV export, MP4 audio, privacy, and troubleshooting."
+logical_id = "fc95311f-e543-494b-8c29-a109a83e2bcc"
+content_hash = "sha256:ff86bfe8a6782d76de32e4dc5e3116bad35a38e3996ed15003da9a4b344619d3"
+size = 134962
+mtime_ms = 1791615994196
+storage_uri = "gcs://replit-rams-assets-kirk/rams/assets/repl:8a9e2605-9f1a-4420-9d32-d3ac3d57cef0/fc95311f-e543-494b-8c29-a109a83e2bcc/033bf195-00b9-4736-9b2b-3a8153fe40d1"
+storage_version_token = "1791616039083011"
+content_type = "application/pdf"

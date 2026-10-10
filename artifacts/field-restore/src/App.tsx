@@ -3294,7 +3294,39 @@ function ExportModal({ onClose, onExport, title }: { onClose: () => void; onExpo
 }
 
 function HelpModal({ onClose }: { onClose: () => void }) {
-  return <div className="modal-backdrop"><div className="modal-card" role="dialog" aria-modal="true" aria-labelledby="help-title"><div className="modal-header"><div><div className="eyebrow">Field notes</div><h2 id="help-title" className="text-[17px] font-bold mt-1">A quiet tool for noisy places</h2></div><button type="button" className="icon-btn" onClick={onClose} aria-label="Close help" data-testid="button-close-help"><X size={16} /></button></div><div className="modal-body"><p className="text-[12px] leading-relaxed text-muted-foreground">Field Restore intentionally favors small, reversible moves. Import a WAV, select a moment, listen against the original, and keep an ear on the source—not just the meters.</p><div className="mt-4"><div className="eyebrow mb-2">Keyboard</div><div className="help-row"><span className="keycap">Space</span><span>Play / pause</span></div><div className="help-row"><span className="keycap">⌘ Z</span><span>Undo chain edit</span></div><div className="help-row"><span className="keycap">⇧⌘ Z</span><span>Redo chain edit</span></div><div className="help-row"><span className="keycap">Esc</span><span>Close a dialog or menu</span></div></div><div className="mt-5 p-3 bg-[hsl(var(--muted))] rounded text-[11px] leading-relaxed"><Keyboard size={14} className="inline mr-2 -mt-0.5" />For critical work, verify the exported WAV in a second application. Browser DSP here is conservative and deliberately labeled as an estimate.</div></div><div className="modal-footer"><button type="button" className="primary-btn" onClick={onClose} data-testid="button-done-help">Back to work</button></div></div></div>;
+  const base = import.meta.env.BASE_URL;
+  return (
+    <div className="modal-backdrop">
+      <div className="modal-card" role="dialog" aria-modal="true" aria-labelledby="help-title">
+        <div className="modal-header">
+          <div>
+            <div className="eyebrow">Field notes</div>
+            <h2 id="help-title" className="text-[17px] font-bold mt-1">A quiet tool for noisy places</h2>
+          </div>
+          <button type="button" className="icon-btn" onClick={onClose} aria-label="Close help" data-testid="button-close-help"><X size={16} /></button>
+        </div>
+        <div className="modal-body">
+          <p className="text-[12px] leading-relaxed text-muted-foreground">Field Restore intentionally favors small, reversible moves. Import a supported recording, select a moment, listen against the original, and keep an ear on the source—not just the meters.</p>
+          <div className="mt-4">
+            <div className="eyebrow mb-2">Keyboard</div>
+            <div className="help-row"><span className="keycap">Space</span><span>Play / pause</span></div>
+            <div className="help-row"><span className="keycap">⌘ Z</span><span>Undo chain edit</span></div>
+            <div className="help-row"><span className="keycap">⇧⌘ Z</span><span>Redo chain edit</span></div>
+            <div className="help-row"><span className="keycap">Esc</span><span>Close a dialog or menu</span></div>
+          </div>
+          <div className="mt-5 p-3 bg-[hsl(var(--muted))] rounded text-[11px] leading-relaxed">
+            <Keyboard size={14} className="inline mr-2 -mt-0.5" />
+            For critical work, verify the exported WAV in a second application. Browser DSP here is conservative and deliberately labeled as an estimate.
+          </div>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <a className="quiet-btn" href={`${base}operator-manual.html`} target="_blank" rel="noopener noreferrer" data-testid="link-operator-manual">Read operator’s manual</a>
+            <a className="quiet-btn" href={`${base}Field-Restore-Operators-Manual.pdf`} download="Field-Restore-Operators-Manual.pdf" data-testid="link-operator-manual-pdf">Download manual PDF</a>
+          </div>
+        </div>
+        <div className="modal-footer"><button type="button" className="primary-btn" onClick={onClose} data-testid="button-done-help">Back to work</button></div>
+      </div>
+    </div>
+  );
 }
 
 function SettingsModal({ onClose, spectrogramPalette, onSpectrogramPaletteChange }: { onClose: () => void; spectrogramPalette: SpectrogramPaletteId; onSpectrogramPaletteChange: (palette: SpectrogramPaletteId) => void }) {

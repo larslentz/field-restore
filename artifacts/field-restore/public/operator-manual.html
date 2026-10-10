@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Field Restore operator's manual: import, inspect, edit, save, and export field recordings locally." />
+    <meta name="theme-color" content="#18332e" />
+    <title>Field Restore — Operator's Manual</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --ink: #17332e;
+        --muted: #586b66;
+        --line: #d8e2dc;
+        --paper: #f7f7f0;
+        --card: #ffffff;
+        --green: #244b42;
+        --lime: #d8ed55;
+        --caution: #fff4dd;
+        --caution-line: #c58a2b;
+      }
+      * { box-sizing: border-box; }
+      html { scroll-behavior: smooth; }
+      body {
+        margin: 0;
+        color: var(--ink);
+        background: var(--paper);
+        font: 16px/1.62 Figtree, "Segoe UI", Arial, sans-serif;
+      }
+      a { color: #155b50; }
+      a:focus-visible, button:focus-visible { outline: 3px solid #cf5b39; outline-offset: 3px; }
+      .topbar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 1rem;
+        padding: 1rem max(1.25rem, calc((100vw - 1120px) / 2));
+        color: #f8fbf4;
+        background: var(--ink);
+      }
+      .brand { font-size: .8rem; font-weight: 800; letter-spacing: .12em; }
+      .topbar-actions { display: flex; flex-wrap: wrap; gap: .55rem; }
+      .topbar a {
+        display: inline-block;
+        border: 1px solid #78918a;
+        border-radius: 999px;
+        padding: .48rem .82rem;
+        color: #f8fbf4;
+        font-size: .85rem;
+        font-weight: 650;
+        text-decoration: none;
+      }
+      .topbar a.primary { border-color: var(--lime); color: var(--ink); background: var(--lime); }
+      .hero {
+        padding: 4.6rem max(1.25rem, calc((100vw - 1120px) / 2)) 3.8rem;
+        color: white;
+        background:
+          radial-gradient(ellipse at 87% 3%, rgba(216,237,85,.18), transparent 33rem),
+          linear-gradient(135deg, #17332e, #315c50);
+      }
+      .eyebrow { color: #d8ed55; font: 700 .72rem/1.3 "Space Mono", Consolas, monospace; letter-spacing: .12em; text-transform: uppercase; }
+      h1 { max-width: 760px; margin: .7rem 0 1rem; font-size: clamp(2.5rem, 7vw, 5.3rem); line-height: .99; letter-spacing: -.055em; }
+      .hero p { max-width: 720px; margin: 0; color: #e0ebe5; font-size: clamp(1.05rem, 2vw, 1.27rem); }
+      .hero-note { margin-top: 1.6rem; color: #d8ed55; font: .76rem "Space Mono", Consolas, monospace; }
+      .layout { display: grid; grid-template-columns: 230px minmax(0, 760px); gap: 3rem; max-width: 1120px; margin: 0 auto; padding: 2.5rem 1.25rem 5rem; }
+      .toc { position: sticky; top: 1rem; align-self: start; max-height: calc(100vh - 2rem); overflow: auto; padding: 1rem; border: 1px solid var(--line); border-radius: 14px; background: var(--card); }
+      .toc strong { display: block; margin-bottom: .7rem; font-size: .85rem; }
+      .toc a { display: block; padding: .27rem 0; color: var(--muted); font-size: .82rem; text-decoration: none; }
+      .toc a:hover { color: var(--ink); text-decoration: underline; }
+      main { min-width: 0; }
+      .quickstart {
+        margin-bottom: 2rem;
+        padding: 1.35rem 1.5rem;
+        border: 1px solid #c9d8c9;
+        border-radius: 16px;
+        background: #edf3e9;
+      }
+      .quickstart h2 { margin-top: 0; }
+      .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: .8rem; counter-reset: step; }
+      .step { padding: 1rem; border: 1px solid #d5e1d5; border-radius: 12px; background: white; }
+      .step::before { counter-increment: step; content: "0" counter(step); display: block; margin-bottom: .45rem; color: #477165; font: 700 .78rem "Space Mono", Consolas, monospace; }
+      section { margin: 2.6rem 0; scroll-margin-top: 1rem; }
+      h2 { margin: 0 0 .8rem; font-size: 1.65rem; line-height: 1.2; letter-spacing: -.025em; }
+      h3 { margin: 1.5rem 0 .4rem; font-size: 1.08rem; line-height: 1.3; }
+      p { margin: .55rem 0; }
+      ul, ol { padding-left: 1.35rem; }
+      li { margin: .36rem 0; }
+      .callout { margin: 1rem 0; padding: 1rem 1.15rem; border-left: 4px solid #579274; border-radius: 0 10px 10px 0; background: #eaf2eb; }
+      .caution { border-left-color: var(--caution-line); background: var(--caution); }
+      .callout strong { display: block; margin-bottom: .2rem; }
+      .table-wrap { overflow-x: auto; margin: 1rem 0; border: 1px solid var(--line); border-radius: 12px; background: white; }
+      table { width: 100%; border-collapse: collapse; font-size: .93rem; }
+      th, td { padding: .75rem .85rem; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+      th { color: var(--ink); background: #edf2ed; font-size: .8rem; letter-spacing: .03em; }
+      tr:last-child td { border-bottom: 0; }
+      kbd { padding: .15rem .4rem; border: 1px solid #bdcbc5; border-bottom-width: 2px; border-radius: 5px; background: white; font: .82rem "Space Mono", Consolas, monospace; white-space: nowrap; }
+      .small { color: var(--muted); font-size: .9rem; }
+      footer { padding: 2rem 1.25rem; color: #dce9e3; background: var(--ink); text-align: center; font-size: .88rem; }
+      @media (max-width: 760px) {
+        .layout { display: block; padding-top: 1rem; }
+        .toc { position: static; max-height: none; margin-bottom: 1.3rem; }
+        .steps { grid-template-columns: 1fr; }
+        .hero { padding-top: 3rem; padding-bottom: 2.7rem; }
+        .topbar { align-items: flex-start; flex-direction: column; }
+      }
+      @page { size: letter; margin: 0.62in; }
+      @media print {
+        :root { --paper: white; }
+        body { font-size: 10.5pt; line-height: 1.48; background: white; }
+        .topbar { padding: 0 0 .2in; color: var(--ink); border-bottom: 1px solid var(--line); background: white; }
+        .topbar-actions, .toc { display: none !important; }
+        .hero { padding: .45in 0 .35in; color: var(--ink); background: white; border-bottom: 4px solid var(--lime); }
+        .hero .eyebrow, .hero-note { color: var(--green); }
+        .hero p { color: var(--muted); }
+        h1 { font-size: 38pt; }
+        .layout { display: block; max-width: none; margin: 0; padding: .22in 0 0; }
+        .quickstart, .step, .callout, .table-wrap { break-inside: avoid; }
+        section { margin: .27in 0; }
+        h2, h3 { break-after: avoid; }
+        a { color: inherit; text-decoration: none; }
+        footer { margin: .3in -0.62in -0.62in; padding: .18in; color: var(--ink); background: white; border-top: 1px solid var(--line); }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="topbar">
+      <div class="brand">FIELD RESTORE <span style="color:#91a69d">/ OPERATOR'S MANUAL</span></div>
+      <div class="topbar-actions">
+        <a href="#quick-start">Quick start</a>
+        <a class="primary" href="Field-Restore-Operators-Manual.pdf" download>Download PDF</a>
+      </div>
+    </div>
+    <header class="hero">
+      <div class="eyebrow">Field recording workflow</div>
+      <h1>Operator’s<br />manual</h1>
+      <p>A practical guide to opening a recording, making careful reversible edits, saving project information, and exporting restored audio.</p>
+      <div class="hero-note">LOCAL PROCESSING · ORIGINAL AUDIO PRESERVED · WAV OUTPUT</div>
+    </header>
+    <div class="layout">
+      <nav class="toc" aria-label="Manual contents">
+        <strong>In this guide</strong>
+        <a href="#quick-start">Quick start</a>
+        <a href="#workspace">Workspace tour</a>
+        <a href="#import">Import a recording</a>
+        <a href="#inspect">Inspect and compare</a>
+        <a href="#edit">Build an edit chain</a>
+        <a href="#save">Save and back up</a>
+        <a href="#export">Export audio</a>
+        <a href="#mp4">Working with MP4</a>
+        <a href="#privacy">Privacy and limits</a>
+        <a href="#troubleshoot">Troubleshooting</a>
+        <a href="#shortcuts">Keyboard shortcuts</a>
+      </nav>
+      <main>
+        <section class="quickstart" id="quick-start">
+          <h2>Quick start</h2>
+          <div class="steps">
+            <div class="step"><strong>Open audio</strong><br />Choose <em>Import WAV, FLAC or MP4</em>, or drop a supported file onto the app.</div>
+            <div class="step"><strong>Listen and adjust</strong><br />Play the source, make small edits, and switch between Original and Edited while listening.</div>
+            <div class="step"><strong>Save, then export</strong><br />Save project information in this browser. Export creates a new WAV and a restoration report.</div>
+          </div>
+        </section>
+
+        <section id="workspace">
+          <h2>Workspace tour</h2>
+          <p>Field Restore keeps the main controls in a left sidebar, with the recording view and playback controls in the work area.</p>
+          <div class="table-wrap"><table>
+            <thead><tr><th>Area</th><th>What it is for</th></tr></thead>
+            <tbody>
+              <tr><td><strong>Edit chain</strong></td><td>Review, enable or bypass, select, and reorder the processing modules.</td></tr>
+              <tr><td><strong>Analyze</strong></td><td>Compare signal measurements for the original and edited recording, including the current selection.</td></tr>
+              <tr><td><strong>Project</strong></td><td>Edit project title, location, descriptive words, track description, and field notes; access editable project backup controls.</td></tr>
+              <tr><td><strong>Session controls</strong></td><td>Import or relink audio, save the project, load the demo, and open the export dialog.</td></tr>
+              <tr><td><strong>Top bar</strong></td><td>Check current recording and status, undo or redo edits, open Help and settings, and export audio.</td></tr>
+              <tr><td><strong>Transport</strong></td><td>Play, pause, seek, and monitor the current recording. Use the timeline to make a time selection.</td></tr>
+            </tbody>
+          </table></div>
+          <p>Audio operations are performed in the browser on this device; audio is not uploaded for server-side processing. The What3Words location link is external and sends the address you enter to that service when opened.</p>
+        </section>
+
+        <section id="import">
+          <h2>Import a recording</h2>
+          <ol>
+            <li>Select <strong>Import WAV, FLAC or MP4</strong> in the sidebar, or drag a file onto the app.</li>
+            <li>Choose a local recording. The original file is read for playback and editing; Field Restore does not overwrite it.</li>
+            <li>Wait for import and analysis to finish. Progress and any errors appear in the work banner.</li>
+          </ol>
+          <p>Supported inputs include uncompressed PCM or 32-bit floating-point WAV, lossless FLAC, and MP4 files with supported audio codecs. MP4 import reads its audio track; it does not edit video. Unsupported codecs or files without a supported audio track will fail with an error.</p>
+          <div class="callout"><strong>Protect the original</strong>Keep the source recording in its original location and make a separate copy before critical work. Edits remain a reversible chain until export.</div>
+        </section>
+
+        <section id="inspect">
+          <h2>Inspect and compare</h2>
+          <ul>
+            <li>Use the main plot to inspect the recording over time. Drag across the timeline to select a passage for focused listening and analysis.</li>
+            <li>Use the <strong>Original</strong> and <strong>Edited</strong> views to compare the untouched source with the current processing chain.</li>
+            <li>Play the full recording and selected passages. Listen for wanted details that might be reduced, not only for quieter background noise.</li>
+            <li>Open <strong>Analyze</strong> to compare full-file and selection readings, including true-peak estimates, loudness, and loudness range.</li>
+          </ul>
+          <div class="callout caution"><strong>Measurements are estimates</strong>These browser-local readings are useful for comparison and review, but are not certified compliance-meter results. Verify critical deliverables in a separate audio application.</div>
+        </section>
+
+        <section id="edit">
+          <h2>Build an edit chain</h2>
+          <p>Edits are ordered, reversible instructions. Use the <strong>+</strong> control beside the chain or open <strong>Modules</strong> to add an edit. Select a module to see its controls. You can bypass a module for comparison, duplicate or remove it, and drag its handle to change its order.</p>
+          <p>Undo and redo operate on chain changes. Make one modest adjustment at a time, replay the same passage, and compare it with the original before continuing.</p>
+          <div class="table-wrap"><table>
+            <thead><tr><th>Module</th><th>Use and caution</th></tr></thead>
+            <tbody>
+              <tr><td><strong>Automatic DC correction</strong></td><td>Applied first as a required baseline stage; it is not an optional edit.</td></tr>
+              <tr><td><strong>Gain</strong></td><td>Adjusts output level. Watch for clipping and compare at similar listening volume.</td></tr>
+              <tr><td><strong>Fade In/Out</strong></td><td>Softens the beginning or ending. Check that the fade does not hide wanted sounds.</td></tr>
+              <tr><td><strong>Low Rumble Removal</strong></td><td>Reduces low-frequency rumble. It can also remove wanted bass, thunder, or low calls.</td></tr>
+              <tr><td><strong>Hum Removal</strong></td><td>Targets sustained tones. Adaptive mode can also reduce wanted held sounds, calls, and insects; bypass it to compare.</td></tr>
+              <tr><td><strong>Wind Removal</strong></td><td>Approximate low-frequency cleanup. Severe microphone overload cannot be recovered; wanted bass may be reduced and some wind may remain.</td></tr>
+              <tr><td><strong>Noise Reduction</strong></td><td>Use Automatic estimation or select a steady noise-only passage as a sample. Speech, calls, or other wanted audio in a sample may be softened throughout the recording.</td></tr>
+              <tr><td><strong>Click &amp; Pop Removal</strong></td><td>Targets short, isolated clicks and pops. Longer or overlapping sounds may remain; wanted transients can be softened.</td></tr>
+              <tr><td><strong>Short Sound Repair</strong></td><td>Make a localized repair in the selected spectrogram area. Preview the result carefully; it is not a guarantee of perfect reconstruction.</td></tr>
+            </tbody>
+          </table></div>
+          <p>Processing settings are linked across channels by default to help preserve stereo timing and spatial coherence. Do not judge a repair by its meters alone; listen to the result.</p>
+        </section>
+
+        <section id="save">
+          <h2>Save and back up a project</h2>
+          <h3>Save project</h3>
+          <p>Select <strong>Save project</strong> to store the edit chain, trim, markers, regions, and notes in this browser. This does <strong>not</strong> download a WAV. Saved projects and their source-file permissions are local to this browser and device; reopening may require you to select or relink the original recording.</p>
+          <h3>Back up editable project</h3>
+          <p>In the <strong>Project</strong> workspace, choose <strong>Back up editable project</strong> to download a <code>.fieldrestore</code> metadata backup. The backup does not contain audio. Keep it with the original WAV, FLAC, or MP4 file.</p>
+          <p>To restore, choose <strong>Import project backup</strong> and select the original recording when prompted. Field Restore verifies that the source matches the backup. If it offers <strong>Replace saved project and open</strong>, that replaces the open workspace; back up unsaved work first. Choose <strong>Restore as a copy</strong> if you want to keep the existing saved project.</p>
+          <div class="callout caution"><strong>Do not substitute another recording</strong>If a project is waiting for its source, relink the original file. If you intend to edit a different recording, open it as a separate recording rather than replacing a pending source unintentionally.</div>
+        </section>
+
+        <section id="export">
+          <h2>Export audio</h2>
+          <ol>
+            <li>Review the current chain and listen to the edited result, including important quiet and loud passages.</li>
+            <li>Select <strong>Export 32-bit WAV</strong> and confirm the export.</li>
+            <li>Save both generated files: the restored WAV and its plain-text restoration report.</li>
+            <li>Open the WAV in another player or audio editor to verify playback and channel content.</li>
+          </ol>
+          <p>Export creates 32-bit IEEE-float WAV at the source sample rate and channel count. It does not normalize or apply dither. The original file is not replaced. For MP4 input, only the edited audio is exported as WAV; the video is unchanged.</p>
+          <p>If a browser download appears stalled or is missing, check the browser’s download list and the chosen download location. Do not overwrite the source recording with an export.</p>
+        </section>
+
+        <section id="mp4">
+          <h2>Working with MP4</h2>
+          <ol>
+            <li>Import or drop a supported MP4 file as you would a WAV or FLAC.</li>
+            <li>Field Restore reads the supported audio track locally; video remains unchanged.</li>
+            <li>Edit and compare audio using the same workflow as other recordings.</li>
+            <li>Export produces a WAV containing the edited audio only. It does not replace, modify, or re-encode the MP4.</li>
+          </ol>
+          <p>Some source audio is lossy. Exporting it as WAV does not restore information that was lost in the original encoding. If the codec or track layout is unsupported, use an audio-only file in a supported format and keep the original MP4 unchanged.</p>
+        </section>
+
+        <section id="privacy">
+          <h2>Privacy, offline use, and limits</h2>
+          <ul>
+            <li>Audio parsing, playback, analysis, editing, project persistence, and export run locally in the browser. Audio is not uploaded for server-side processing.</li>
+            <li>Saved project information is stored in the browser. Clearing site data or using another browser/device can make those local projects unavailable. Keep external backups and original audio.</li>
+            <li>Browser memory and local storage limit practical recording size and project persistence. Large recordings can take longer to open, analyze, and export.</li>
+            <li>Noise, hum, wind, click/pop, and short-sound repair are conservative approximations. Wanted sounds can be reduced, and some unwanted sound may remain.</li>
+            <li>Field Restore does not claim sample-rate conversion, certified loudness compliance, or perfect reconstruction.</li>
+          </ul>
+          <div class="callout caution"><strong>Windows installer notice</strong>The available Windows installer is unsigned and has not been natively validated for this build. Windows may show an unknown-publisher warning. Do not treat that warning as proof of malware or proof of safety; obtain the installer only from the official Field Restore site and review its published checksum.</div>
+        </section>
+
+        <section id="troubleshoot">
+          <h2>Troubleshooting</h2>
+          <div class="table-wrap"><table>
+            <thead><tr><th>What you see</th><th>What to do</th></tr></thead>
+            <tbody>
+              <tr><td>Import fails or the codec is unsupported</td><td>Confirm the file opens in another player. Try a supported WAV or FLAC copy. Keep the original unchanged.</td></tr>
+              <tr><td>A project asks for its source file</td><td>Select the original matching WAV, FLAC, or MP4. Do not choose a different recording to satisfy a relink prompt.</td></tr>
+              <tr><td>A sound becomes dull, thin, or unnatural</td><td>Bypass the most recent module, compare Original and Edited at similar volume, then reduce or remove the edit.</td></tr>
+              <tr><td>A download is not visible</td><td>Open the browser’s download history and check its save location and blocked-download notices. Export again only after confirming the first file is not still being written.</td></tr>
+              <tr><td>Saved project information is missing on another device</td><td>Project saves are browser-local. Transfer the `.fieldrestore` backup and original recording manually, then restore with the matching source.</td></tr>
+              <tr><td>Playback or export is slow</td><td>Wait for the progress banner to finish. Large files use more memory and may take longer; avoid reloading the page during an active operation.</td></tr>
+            </tbody>
+          </table></div>
+        </section>
+
+        <section id="shortcuts">
+          <h2>Keyboard shortcuts</h2>
+          <div class="table-wrap"><table>
+            <thead><tr><th>Shortcut</th><th>Action</th></tr></thead>
+            <tbody>
+              <tr><td><kbd>Space</kbd></td><td>Play or pause</td></tr>
+              <tr><td><kbd>⌘ Z</kbd> / <kbd>Ctrl Z</kbd></td><td>Undo the last edit-chain change</td></tr>
+              <tr><td><kbd>⇧ ⌘ Z</kbd> / <kbd>Ctrl Shift Z</kbd></td><td>Redo</td></tr>
+              <tr><td><kbd>Esc</kbd></td><td>Close an open dialog or menu</td></tr>
+            </tbody>
+          </table></div>
+          <p class="small">For a critical restoration, keep the source and exported files, review the restoration report, and verify the WAV in a second audio application.</p>
+        </section>
+      </main>
+    </div>
+    <footer>Field Restore · Local-first audio restoration · Keep the original recording unchanged</footer>
+  </body>
+</html>
