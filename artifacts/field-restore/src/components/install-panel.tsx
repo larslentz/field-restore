@@ -58,7 +58,13 @@ export function InstallPanel() {
   const desktop = state.phase === 'desktop';
   const dev = state.phase === 'development';
   const preparing = state.phase === 'preparing' || busy;
-  const label = desktop ? 'Desktop' : state.phase === 'ready' ? 'Offline ready' : 'Install';
+  const label = desktop
+    ? 'Desktop'
+    : state.updateAvailable
+      ? 'Update ready'
+      : state.phase === 'ready'
+        ? 'Offline ready'
+        : 'Install';
 
   return (
     <>

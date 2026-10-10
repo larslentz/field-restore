@@ -82,7 +82,25 @@ self.addEventListener('fetch', (event) => {
     const root = new URL(self.registration.scope);
     const target = resource.href === root.href ? new URL('index.html', root).href : resource.href;
     if (!assetURLs.has(target)) return;
-    event.respondWith((async () => (await (await caches.open(cacheName)).match(target)) || fetch(event.request))());
+    event.respondWith((async () => {
+      const cache = await caches.open(cacheName);
+      try {
+        // Prefer the current published file while online, but keep refreshing
+        // the offline copy so an old shell cannot mask a successful deployment.
+        const response = await fetch(event.request, { cache: 'no-cache' });
+        if (response.ok && response.type !== 'opaque') {
+          try { await cache.put(target, response.clone()); } catch { /* Keep the network response usable if storage is full. */ }
+          return response;
+        }
+      } catch {
+        // Offline use falls back to the last complete local copy.
+      }
+      const cached = await cache.match(target);
+      return cached || new Response('This Field Restore file is not available offline. Reconnect and reload.', {
+        status: 503,
+        headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+      });
+    })());
     return;
   }
   const id = url.pathname.slice(prefix.length);

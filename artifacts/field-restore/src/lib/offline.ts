@@ -34,6 +34,30 @@ export async function requestPersistentStorage() {
   set({ persistent });
 }
 let preparing: Promise<void> | null = null;
+const monitoredRegistrations = new WeakSet<ServiceWorkerRegistration>();
+
+function monitorForUpdates(registration: ServiceWorkerRegistration) {
+  if (monitoredRegistrations.has(registration)) return;
+  monitoredRegistrations.add(registration);
+
+  const noticeUpdate = () => set({ updateAvailable: Boolean(registration.waiting) });
+  registration.addEventListener('updatefound', () => {
+    registration.installing?.addEventListener('statechange', noticeUpdate);
+  });
+  noticeUpdate();
+
+  const check = () => {
+    if (navigator.onLine && document.visibilityState === 'visible') {
+      void registration.update().catch(() => {
+        // A transient update-check failure does not affect the active offline copy.
+      });
+    }
+  };
+  window.addEventListener('online', check);
+  document.addEventListener('visibilitychange', check);
+  window.setInterval(check, 30 * 60 * 1000);
+}
+
 export async function prepareOffline(): Promise<void> {
   if (preparing) return preparing;
   if (window.fieldRestoreDesktop) { set({ phase: 'desktop', message: 'Bundled desktop app · works offline' }); return; }
@@ -51,10 +75,7 @@ export async function prepareOffline(): Promise<void> {
       const registration = existing?.active?.scriptURL === workerURL.href
         ? existing
         : await navigator.serviceWorker.register(workerURL, { scope: base.pathname, updateViaCache: 'none' });
-      const noticeUpdate = () => set({ updateAvailable: Boolean(registration.waiting) });
-      registration.addEventListener('updatefound', () => {
-        registration.installing?.addEventListener('statechange', noticeUpdate);
-      });
+      monitorForUpdates(registration);
       if (existing === registration && navigator.onLine) {
         void registration.update().catch(() => {
           // Readiness is checked from the existing complete cache, not an update request.
@@ -73,7 +94,7 @@ export async function prepareOffline(): Promise<void> {
           check();
         });
       }
-      noticeUpdate();
+      set({ updateAvailable: Boolean(registration.waiting) });
       const ready = await new Promise<boolean>((resolve) => {
         const channel = new MessageChannel();
         const timer = setTimeout(() => { channel.port1.close(); resolve(false); }, 5000);

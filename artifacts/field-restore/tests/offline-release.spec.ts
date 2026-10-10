@@ -110,6 +110,7 @@ test('queued worker updates do not activate or reload an open unsaved project', 
   await expect.poll(() => page.evaluate(async () => Boolean((await navigator.serviceWorker.getRegistration())?.waiting))).toBe(true);
   expect(await page.evaluate(() => navigator.serviceWorker.controller?.scriptURL)).toBe(controller);
   await expect(field).toHaveValue('Unsaved text must survive a queued update.');
+  await expect(page.getByTestId('button-install')).toHaveText('Update ready');
   await page.getByTestId('button-install').click();
   await expect(page.getByTestId('dialog-install')).toContainText('Update queued');
 });
