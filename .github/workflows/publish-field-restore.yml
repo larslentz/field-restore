@@ -1,0 +1,117 @@
+name: Publish Field Restore to GitHub Pages
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Deploy the completed site to GitHub Pages
+        type: boolean
+        required: true
+        default: false
+      base_path:
+        description: Optional site path override; use / for a custom domain
+        type: string
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: field-restore-pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build site and Windows installer
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install native NSIS compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y nsis
+
+      - name: Build unsigned Windows installer
+        working-directory: artifacts/field-restore
+        env:
+          PORT: "4173"
+          BASE_PATH: /
+          NODE_ENV: production
+        run: pnpm run build:windows
+
+      - name: Determine the Pages base path
+        id: pages-path
+        shell: bash
+        env:
+          OVERRIDE: ${{ inputs.base_path }}
+        run: |
+          if [[ -n "$OVERRIDE" ]]; then
+            base="$OVERRIDE"
+          elif [[ "${GITHUB_REPOSITORY,,}" == "${GITHUB_REPOSITORY_OWNER,,}.github.io" ]]; then
+            base="/"
+          else
+            base="/${GITHUB_REPOSITORY#*/}/"
+          fi
+
+          if [[ "$base" != /* || ( "$base" != "/" && "$base" != */ ) || "$base" == *".."* ]]; then
+            echo "Invalid base path: $base. Use / or a path like /repository-name/." >&2
+            exit 1
+          fi
+
+          echo "value=$base" >> "$GITHUB_OUTPUT"
+          echo "Building with Vite base path: $base"
+
+      - name: Build the Pages site
+        working-directory: artifacts/field-restore
+        env:
+          PORT: "4173"
+          BASE_PATH: ${{ steps.pages-path.outputs.value }}
+          NODE_ENV: production
+        run: pnpm run build
+
+      - name: Add the generated installer to the site
+        shell: bash
+        run: |
+          mkdir -p artifacts/field-restore/dist/public/releases
+          cp -a artifacts/field-restore/public/releases/. artifacts/field-restore/dist/public/releases/
+          cd artifacts/field-restore/dist/public/releases
+          sha256sum --check SHA256SUMS.txt
+          test -s "$(node -p "require('./windows-release.json').filename")"
+
+      - name: Package GitHub Pages site
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: artifacts/field-restore/dist/public
+
+  deploy:
+    name: Deploy approved Pages artifact
+    if: ${{ inputs.publish }}
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
