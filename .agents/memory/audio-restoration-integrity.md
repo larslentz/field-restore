@@ -57,6 +57,12 @@ Time-positioned hum history is an observation of audible processed playback, not
 
 **How to apply:** Retain only audible-playhead decisions in local bounded history, preserve gaps across seeks and loops, and reset the history whenever its source or edit chain changes.
 
+Restoration reports must derive wind intervals from confirmed detector events emitted by the export render, not from bounded heard-playback history.
+
+**Why:** Playback history contains visit gaps, loop repeats, and evictions, so it cannot describe the exported range as if it were scanned continuously.
+
+**How to apply:** Summarize only the export's source-time range; mark time before confirmation as unconfirmed and do not imply that unexported time was scanned.
+
 Automatic broadband cleanup must be judged against wanted audio *inside noise*, not just isolated clean tones and noise-only clips. Preserve short onsets after the estimate has settled, and check high-sample-rate recordings.
 
 **Why:** An estimate learned from steady hiss can attenuate the first milliseconds of a wanted sound; a tone protected in silence can still be softened when mixed with hiss. Broad frequency-band ratios change with the recording's Nyquist frequency and can mistake high-rate white noise for a tonal signal.

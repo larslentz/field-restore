@@ -159,6 +159,58 @@ test('restoration reports format as a readable text summary with the edit chain 
   assert.doesNotMatch(text, /^\s*\{/m);
 });
 
+test('restoration report separates confirmed wind, idle, and unconfirmed exported time', () => {
+  const wind = { ...makeModule('wind'), id: 'wind-report', enabled: true };
+  const report = makeRestorationReport({
+    source: 'field.wav',
+    sampleRate: 100,
+    channels: 1,
+    duration: 6,
+    sourceDuration: 8,
+    trim: [0, 6],
+    container: 'RIFF',
+    modules: [wind],
+    selection: [0, 0],
+    windActivity: {
+      startFrame: 0,
+      endFrame: 600,
+      events: [
+        { moduleId: 'wind-report', frame: 100, active: true },
+        { moduleId: 'wind-report', frame: 300, active: false },
+        { moduleId: 'unrelated', frame: 400, active: true },
+      ],
+    },
+  });
+  const text = formatRestorationReport(report);
+
+  assert.match(text, /WIND REMOVAL ACTIVITY\n-+\nSource-time coverage: 00:00\.000 – 00:06\.000 \(exported range only\)\./);
+  assert.match(text, /Active: 00:01\.000–00:03\.000/);
+  assert.match(text, /Idle: 00:03\.000–00:06\.000/);
+  assert.match(text, /Unconfirmed: 00:00\.000–00:01\.000/);
+  assert.match(text, /This is not a full-recording scan\./);
+  assert.doesNotMatch(text, /audio data|base64|Float32Array/i);
+});
+
+test('restoration report marks detector-unobserved time unconfirmed and identifies bypassed wind', () => {
+  const input = {
+    source: 'field.wav',
+    sampleRate: 100,
+    channels: 1,
+    duration: 2,
+    container: 'RIFF',
+    modules: [{ ...makeModule('wind'), id: 'wind-report' }],
+    selection: [0, 0],
+  };
+  const unobserved = formatRestorationReport(makeRestorationReport(input));
+  assert.match(unobserved, /Unconfirmed: 00:00\.000–00:02\.000/);
+
+  const bypassed = formatRestorationReport(makeRestorationReport({
+    ...input,
+    modules: [{ ...input.modules[0], enabled: false }],
+  }));
+  assert.match(bypassed, /No enabled automatic Wind Removal with reduction above 0%; no confirmed processing activity to report\./);
+});
+
 test('restoration report includes original, edited, and selected signal statistics without altering report sections', () => {
   const stats = {
     truePeakDbtp: -1.3,

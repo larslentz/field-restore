@@ -1812,6 +1812,7 @@ function App() {
   const exportAudio = async () => {
     const filenames = exportFilenames(title, source.name, descriptiveWords);
     setError('');
+    let windActivityEvents = memoryRender?.windEvents ?? [];
     let browserDownloadStarted = false;
     let relay: ExportRelay | null = null;
     if (largeSource) {
@@ -1839,7 +1840,9 @@ function App() {
           const spectralPatches = await getSpectralPatches(controller.signal);
           const initialHumFrequencies = await analyzeFileInitialHum(file, metadata, processingModules, controller.signal);
           const processor = createStreamingEditChain(processingModules, metadata.sampleRate, metadata.frameCount, warmStart,
-            initialHumFrequencies, undefined, undefined, undefined, spectralPatches);
+            initialHumFrequencies, undefined,
+            (moduleId, frame, active) => windActivityEvents.push({ moduleId, frame, active }),
+            undefined, spectralPatches);
           if (warmStart < firstFrame) {
             setOperationStatus('Preparing trimmed export');
             await warmFileProcessor(file, metadata, processor, warmStart, firstFrame, controller.signal);
@@ -1884,6 +1887,7 @@ function App() {
         setOperationStatus('Preparing edited audio');
         try {
           rendered = await pending.job.promise;
+          windActivityEvents = rendered.windEvents;
         } catch (caught) {
           setOperationStatus('');
           setError(caught instanceof Error ? `Unable to render edited audio: ${caught.message}` : 'Unable to render edited audio.');
@@ -1915,6 +1919,11 @@ function App() {
       modules,
       selection: [selectionStart, selectionEnd],
       trackDescription,
+      windActivity: {
+        events: windActivityEvents,
+        startFrame: Math.floor(trimStart * source.sampleRate),
+        endFrame: Math.ceil(trimEnd * source.sampleRate),
+      },
       signalStatistics: statisticsPending ? { unavailable: true } : {
         original: originalStats,
         edited: currentStats,

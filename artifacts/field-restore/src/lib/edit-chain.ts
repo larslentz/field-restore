@@ -6,6 +6,7 @@ import { ClickPopProcessor } from './click-pop-removal';
 import { renderSpectralRepair } from './spectral-repair';
 import { normalizeTrackDescription, TRACK_DESCRIPTION_FIELDS, type TrackDescription } from './track-description';
 import type { LoudnessStats } from './loudness';
+import type { WindActivityEvent } from './wind-history';
 
 export type ModuleType = 'gain' | 'fade' | 'eq' | 'dc' | 'hum' | 'wind' | 'noise' | 'click-pop' | 'spectral-repair' | 'region' | 'ambient';
 export interface EditModule {
@@ -170,6 +171,11 @@ export interface RestorationReportInput {
     editedSelection?: LoudnessStats;
     editedSelectionUnavailable?: boolean;
   };
+  windActivity?: {
+    events: WindActivityEvent[];
+    startFrame: number;
+    endFrame: number;
+  };
 }
 
 export function makeRestorationReport(input: RestorationReportInput) {
@@ -190,6 +196,11 @@ export function makeRestorationReport(input: RestorationReportInput) {
     exportedAt: input.exportedAt ?? new Date().toISOString(),
     trackDescription: normalizeTrackDescription(input.trackDescription),
     signalStatistics: input.signalStatistics,
+    windActivity: summarizeWindActivity(input.modules, input.windActivity ?? {
+      events: [],
+      startFrame: Math.floor((input.trim?.[0] ?? 0) * input.sampleRate),
+      endFrame: Math.ceil((input.trim?.[1] ?? input.duration) * input.sampleRate),
+    }, input.sampleRate),
     limitations: [
       'Automatic DC offset removal is always applied before editable modules.',
       'Previously saved projects may sound different when reprocessed with the updated DC correction; original recordings remain untouched.',
@@ -264,6 +275,62 @@ const reportTime = (seconds: number) => {
   return `${hours ? `${hours}:` : ''}${String(minutes).padStart(2, '0')}:${String(wholeSeconds).padStart(2, '0')}.${String(fraction).padStart(3, '0')}`;
 };
 
+type WindReportStatus = 'active' | 'idle' | 'unconfirmed';
+type WindReportInterval = { startFrame: number; endFrame: number; status: WindReportStatus };
+
+function summarizeWindActivity(
+  modules: EditModule[],
+  activity: RestorationReportInput['windActivity'],
+  sampleRate: number,
+) {
+  const windModules = modules.filter((module) =>
+    module.enabled && module.type === 'wind' && !isFixedLowRumble(module) &&
+    windReductionPercent(module.params.reduction, module.params.removal) > 0);
+  if (!windModules.length) return { enabled: false, sampleRate, intervals: [] as WindReportInterval[] };
+
+  const startFrame = Math.max(0, Math.floor(activity?.startFrame ?? 0));
+  const endFrame = Math.max(startFrame, Math.floor(activity?.endFrame ?? 0));
+  const moduleIds = new Set(windModules.map((module) => module.id));
+  const events = (activity?.events ?? [])
+    .filter((event) => moduleIds.has(event.moduleId) && Number.isFinite(event.frame))
+    .sort((a, b) => a.frame - b.frame);
+  const state = new Map<string, boolean>();
+  let eventIndex = 0;
+  while (eventIndex < events.length && events[eventIndex].frame <= startFrame) {
+    const frame = events[eventIndex].frame;
+    while (eventIndex < events.length && events[eventIndex].frame === frame) {
+      state.set(events[eventIndex].moduleId, events[eventIndex].active);
+      eventIndex++;
+    }
+  }
+
+  const statusAt = (): WindReportStatus => {
+    if ([...state.values()].some(Boolean)) return 'active';
+    return windModules.every((module) => state.has(module.id)) ? 'idle' : 'unconfirmed';
+  };
+  const intervals: WindReportInterval[] = [];
+  const append = (start: number, end: number) => {
+    if (end <= start) return;
+    const status = statusAt();
+    const previous = intervals.at(-1);
+    if (previous?.status === status && previous.endFrame === start) previous.endFrame = end;
+    else intervals.push({ startFrame: start, endFrame: end, status });
+  };
+
+  let cursor = startFrame;
+  while (eventIndex < events.length && events[eventIndex].frame < endFrame) {
+    const frame = Math.max(cursor, events[eventIndex].frame);
+    append(cursor, frame);
+    while (eventIndex < events.length && events[eventIndex].frame === frame) {
+      state.set(events[eventIndex].moduleId, events[eventIndex].active);
+      eventIndex++;
+    }
+    cursor = frame;
+  }
+  append(cursor, endFrame);
+  return { enabled: true, sampleRate, intervals };
+}
+
 function reportMeasurement(value: number, unit: string, digits = 1) {
   if (Number.isNaN(value)) return 'N/A';
   if (value === Number.NEGATIVE_INFINITY) return `-∞ ${unit}`;
@@ -298,6 +365,28 @@ export function formatRestorationReport(report: ReturnType<typeof makeRestoratio
       ...Object.entries(module.params).map(([key, value]) => humanizeReportSetting(module, key, value, report.sampleRate)),
     ].join('\n')).join('\n')
     : 'No editable modules.';
+  const windActivity = report.windActivity.enabled
+    ? [
+      'WIND REMOVAL ACTIVITY',
+      '---------------------',
+      `Source-time coverage: ${reportTime(report.trim[0])} – ${reportTime(report.trim[1])} (exported range only).`,
+      'Confirmed detector states are approximate. Time before a decision is unconfirmed; source time outside this range is not characterized by this report. This is not a full-recording scan.',
+      ...(['active', 'idle', 'unconfirmed'] as const).map((status) => {
+        const intervals = report.windActivity.intervals.filter((interval) => interval.status === status);
+        const shown = intervals.slice(0, 12).map((interval) =>
+          `${reportTime(interval.startFrame / report.windActivity.sampleRate)}–${reportTime(interval.endFrame / report.windActivity.sampleRate)}`);
+        const omitted = intervals.length - shown.length;
+        const text = shown.length ? `${shown.join('; ')}${omitted ? `; +${omitted} more interval${omitted === 1 ? '' : 's'}` : ''}` : 'none observed';
+        return `${status[0].toUpperCase()}${status.slice(1)}: ${text}`;
+      }),
+      '',
+    ]
+    : [
+      'WIND REMOVAL ACTIVITY',
+      '---------------------',
+      'No enabled automatic Wind Removal with reduction above 0%; no confirmed processing activity to report.',
+      '',
+    ];
   return [
     'FIELD RESTORE — RESTORATION REPORT',
     '==================================',
@@ -313,6 +402,7 @@ export function formatRestorationReport(report: ReturnType<typeof makeRestoratio
     `Selection: ${reportTime(report.selection[0])} – ${reportTime(report.selection[1])}`,
     `Automatic DC offset removal: ${report.automaticDcOffsetRemoval ? 'Applied' : 'Not applied'}`,
     '',
+    ...windActivity,
     ...(report.signalStatistics ? [
       'SIGNAL STATISTICS',
       '-----------------',
