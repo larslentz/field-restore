@@ -3,3 +3,6 @@
 
 # No need to store the pnpm store twice.
 .local
+# Full source upload and regression-only audio do not belong in deployment images.
+/attached_assets/0_261003_0040_excerpt_1791885104230.wav
+/artifacts/field-restore/src/lib/fixtures/

@@ -1,1 +1,2 @@
 artifacts/field-restore/public/releases/Field-Restore-1.0.0-Windows-x64-Setup.exe filter=lfs diff=lfs merge=lfs -text
+attached_assets/0_261003_0040_excerpt_1791885104230.wav filter=lfs diff=lfs merge=lfs -text
