@@ -1915,6 +1915,16 @@ function App() {
       modules,
       selection: [selectionStart, selectionEnd],
       trackDescription,
+      signalStatistics: statisticsPending ? { unavailable: true } : {
+        original: originalStats,
+        edited: currentStats,
+        ...(hasSelection ? {
+          originalSelection: selectionOriginalStats,
+          ...(Math.min(selectionEnd, committedTrimEnd) <= Math.max(selectionStart, committedTrimStart)
+            ? { editedSelectionUnavailable: true }
+            : { editedSelection: selectionCurrentStats }),
+        } : {}),
+      },
     });
     if (relay) {
       try { await relay.downloadReport(formatRestorationReport(report), filenames.report); }

@@ -49,6 +49,7 @@ for (const rf64 of [false, true]) {
     const upload = { name: 'draft-source.wav', mimeType: 'audio/wav', buffer: recording(rf64) };
     await page.getByTestId('input-import-wav').setInputFiles(upload);
     await expect(page.getByTestId('text-source-name')).toHaveText(upload.name);
+    await expect(page.getByTestId('panel-signal-statistics')).not.toContainText('Calculating statistics');
     await page.getByTestId('nav-project').click();
     for (const [key, value] of Object.entries(description)) await field(page, key).fill(value);
     await page.reload();
@@ -259,6 +260,15 @@ for (const rf64 of [false, true]) {
     expect(path).not.toBeNull();
     const text = await readFile(path!, 'utf8');
     expect(text).toContain('TRACK DESCRIPTION');
+    expect(text).toContain('SIGNAL STATISTICS');
+    expect(text).toContain('Original / full file');
+    expect(text).toContain('Edited / kept range');
+    expect(text).toContain('True peak estimate');
+    expect(text).toContain('Integrated loudness');
+    expect(text).toContain('Loudness range (LRA)');
+    expect(text).toContain('Max short-term');
+    expect(text).toContain('PLR · Peak-to-loudness ratio');
+    expect(text).toContain('Loud-Block Peak-to-RMS (LBPR)');
     for (const value of Object.values(description)) expect(text).toContain(value);
     expect(text).not.toContain('Handling notes — not for the description report.');
     // A different recording must not inherit the previous description.

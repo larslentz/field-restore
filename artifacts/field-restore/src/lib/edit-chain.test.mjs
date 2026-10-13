@@ -159,6 +159,46 @@ test('restoration reports format as a readable text summary with the edit chain 
   assert.doesNotMatch(text, /^\s*\{/m);
 });
 
+test('restoration report includes original, edited, and selected signal statistics without altering report sections', () => {
+  const stats = {
+    truePeakDbtp: -1.3,
+    integratedLufs: -26.4,
+    loudnessRangeLu: 12,
+    maxShortTermLufs: -23.5,
+    plrLu: 13.3,
+    lbpr: {
+      valueDb: 14.5,
+      channels: [{ differenceDb: 14.54 }, { differenceDb: 14.46 }],
+    },
+  };
+  const text = formatRestorationReport(makeRestorationReport({
+    source: 'field.wav',
+    sampleRate: 48_000,
+    channels: 2,
+    duration: 12,
+    container: 'RIFF',
+    modules: [gain],
+    selection: [2, 4],
+    signalStatistics: {
+      original: stats,
+      edited: { ...stats, truePeakDbtp: -2.1 },
+      originalSelection: stats,
+      editedSelection: { ...stats, integratedLufs: -28.1 },
+    },
+  }));
+
+  assert.match(text, /SIGNAL STATISTICS\n-+\nOriginal \/ full file/);
+  assert.match(text, /True peak estimate: -1\.3 dBTP/);
+  assert.match(text, /Edited \/ kept range\n  True peak estimate: -2\.1 dBTP/);
+  assert.match(text, /Original \/ selection/);
+  assert.match(text, /Edited \/ selection within kept range\n  True peak estimate: -1\.3 dBTP\n  Integrated loudness: -28\.1 LUFS/);
+  assert.match(text, /Loud-Block Peak-to-RMS \(LBPR\): 14\.50 \(15\)\n    Left: 14\.54\n    Right: 14\.46/);
+  assert.doesNotMatch(text, /LBPR\): 14\.50 dB/);
+  assert.ok(text.indexOf('SIGNAL STATISTICS') < text.indexOf('TRACK DESCRIPTION'));
+  assert.match(text, /EDIT CHAIN\n-+\n1\. Gain — Enabled/);
+  assert.match(text, /PROCESSING NOTES\n-+\n- Automatic DC offset removal/);
+});
+
 test('text reports include the three sentences and continuation with line breaks intact', () => {
   const trackDescription = {
     sentence1: 'Insects continue as a car passes.',

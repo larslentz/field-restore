@@ -5,6 +5,7 @@ import { NoiseReductionProcessor, noiseProfileFromParams } from './noise-reducti
 import { ClickPopProcessor } from './click-pop-removal';
 import { renderSpectralRepair } from './spectral-repair';
 import { normalizeTrackDescription, TRACK_DESCRIPTION_FIELDS, type TrackDescription } from './track-description';
+import type { LoudnessStats } from './loudness';
 
 export type ModuleType = 'gain' | 'fade' | 'eq' | 'dc' | 'hum' | 'wind' | 'noise' | 'click-pop' | 'spectral-repair' | 'region' | 'ambient';
 export interface EditModule {
@@ -161,6 +162,14 @@ export interface RestorationReportInput {
   sourceDuration?: number;
   exportedAt?: string;
   trackDescription?: TrackDescription;
+  signalStatistics?: {
+    unavailable?: boolean;
+    original?: LoudnessStats;
+    edited?: LoudnessStats;
+    originalSelection?: LoudnessStats;
+    editedSelection?: LoudnessStats;
+    editedSelectionUnavailable?: boolean;
+  };
 }
 
 export function makeRestorationReport(input: RestorationReportInput) {
@@ -180,6 +189,7 @@ export function makeRestorationReport(input: RestorationReportInput) {
     selection: input.selection,
     exportedAt: input.exportedAt ?? new Date().toISOString(),
     trackDescription: normalizeTrackDescription(input.trackDescription),
+    signalStatistics: input.signalStatistics,
     limitations: [
       'Automatic DC offset removal is always applied before editable modules.',
       'Previously saved projects may sound different when reprocessed with the updated DC correction; original recordings remain untouched.',
@@ -254,6 +264,30 @@ const reportTime = (seconds: number) => {
   return `${hours ? `${hours}:` : ''}${String(minutes).padStart(2, '0')}:${String(wholeSeconds).padStart(2, '0')}.${String(fraction).padStart(3, '0')}`;
 };
 
+function reportMeasurement(value: number, unit: string, digits = 1) {
+  if (Number.isNaN(value)) return 'N/A';
+  if (value === Number.NEGATIVE_INFINITY) return `-∞ ${unit}`;
+  if (value === Number.POSITIVE_INFINITY) return `∞ ${unit}`;
+  return `${value > 0 ? '+' : ''}${value.toFixed(digits)} ${unit}`;
+}
+
+function formatSignalStatistics(stats: LoudnessStats, label: string) {
+  const lbpr = stats.lbpr?.valueDb;
+  const lbprValue = typeof lbpr === 'number' && Number.isFinite(lbpr) ? `${lbpr.toFixed(2)} (${Math.round(lbpr)})` : 'N/A';
+  const channels = stats.lbpr?.channels ?? [];
+  return [
+    label,
+    `  True peak estimate: ${reportMeasurement(stats.truePeakDbtp, 'dBTP')}`,
+    `  Integrated loudness: ${reportMeasurement(stats.integratedLufs, 'LUFS')}`,
+    `  Loudness range (LRA): ${reportMeasurement(stats.loudnessRangeLu, 'LU')}`,
+    `  Max short-term: ${reportMeasurement(stats.maxShortTermLufs, 'LUFS')}`,
+    `  PLR · Peak-to-loudness ratio: ${reportMeasurement(stats.plrLu, 'LU')}`,
+    `  Loud-Block Peak-to-RMS (LBPR): ${lbprValue}`,
+    ...channels.map((channel, index) =>
+      `    ${channels.length === 2 ? (index === 0 ? 'Left' : 'Right') : `Channel ${index + 1}`}: ${Number.isFinite(channel.differenceDb) ? channel.differenceDb.toFixed(2) : 'N/A'}`),
+  ];
+}
+
 export function formatRestorationReport(report: ReturnType<typeof makeRestorationReport>): string {
   const channelLabel = report.channels === 1 ? 'Mono'
     : report.channels === 2 ? 'Stereo'
@@ -279,6 +313,22 @@ export function formatRestorationReport(report: ReturnType<typeof makeRestoratio
     `Selection: ${reportTime(report.selection[0])} – ${reportTime(report.selection[1])}`,
     `Automatic DC offset removal: ${report.automaticDcOffsetRemoval ? 'Applied' : 'Not applied'}`,
     '',
+    ...(report.signalStatistics ? [
+      'SIGNAL STATISTICS',
+      '-----------------',
+      ...(report.signalStatistics.unavailable
+        ? ['Statistics were still calculating at export; no readings were captured.']
+        : [
+          ...(report.signalStatistics.original ? formatSignalStatistics(report.signalStatistics.original, 'Original / full file') : []),
+          ...(report.signalStatistics.edited ? formatSignalStatistics(report.signalStatistics.edited, 'Edited / kept range') : []),
+          ...(report.signalStatistics.originalSelection ? formatSignalStatistics(report.signalStatistics.originalSelection, 'Original / selection') : []),
+          ...(report.signalStatistics.editedSelection
+            ? formatSignalStatistics(report.signalStatistics.editedSelection, 'Edited / selection within kept range')
+            : report.signalStatistics.editedSelectionUnavailable ? ['Edited / selection within kept range: unavailable (selection is outside the kept range).'] : []),
+        ]),
+      'Local BS.1770-style estimates with 4× true-peak interpolation; not certified meter readings.',
+      '',
+    ] : []),
     'TRACK DESCRIPTION',
     '-----------------',
     ...TRACK_DESCRIPTION_FIELDS.flatMap(({ key, label }) => [
