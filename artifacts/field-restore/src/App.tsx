@@ -4,7 +4,7 @@ import { Activity, ArrowDown, ArrowUp, Check, ChevronDown, CircleHelp, Download,
 import { createDemoAudio, downloadBlob, encodeWav, parseWav, type AudioSource } from '@/lib/audio';
 import { decodeChannels, loadProject, projectFromSource, saveProject } from '@/lib/persistence';
 import { AUTOMATIC_DC_REMOVAL, formatRestorationReport, humOpeningReadout, isFixedLowRumble, isLegacyWind, lowEndShelfEnabled, lowEndShelfFollowsWind, makeCommonFieldChain, makeDefaultChain, makeLowRumbleRemoval, makeModule, makeProcessingChain, makeRestorationReport, MODULE_LABELS, restoreSavedChain, toggleEditableModules, withFadeRange, type EditModule, type HumScanState } from '@/lib/edit-chain';
-import { WIND_COMPENSATION_TIMING, WIND_SHELF_SCOPE_DETECTED, WIND_SHELF_SCOPE_WHOLE, windCompensationTiming } from '@/lib/wind-reduction';
+import { WIND_COMPENSATION_TIMING, WIND_SHELF_SCOPE_DETECTED, WIND_SHELF_SCOPE_WHOLE, windCompensationTiming, windCrossoverFrequency, windReductionPercent, windSmoothing } from '@/lib/wind-reduction';
 import { analyzeLoudness, type LoudnessStats } from '@/lib/loudness';
 import { createPlaybackRangePlan, playbackPositionAtElapsed } from '@/lib/playback-range';
 import type { SpectrogramData } from '@/lib/spectrogram';
@@ -123,7 +123,7 @@ function moduleSummary(module: EditModule, humReadout?: ReturnType<typeof humOpe
   return module.type === 'gain' ? `${p.db} dB`
     : module.type === 'spectral-repair' ? `${p.mode} · ${Number(p.start).toFixed(2)}–${Number(p.end).toFixed(2)} s · ${Math.round(Number(p.low))}–${Math.round(Number(p.high))} Hz`
     : module.type === 'hum' ? humReadout?.summary ?? `${p.mode} · ${p.frequency} Hz`
-      : module.type === 'wind' ? `${isFixedLowRumble(module) ? `HPF ${p.cutoff} Hz` : `Auto · ${p.detection ?? 'Medium'} detection · ${p.removal ?? 'Medium'} removal`} · ${lowEndShelfEnabled(p) ? `Low end ${Number(p.lowEndGain) >= 0 ? '+' : ''}${p.lowEndGain} dB · ${lowEndShelfFollowsWind(p) ? 'detected wind only' : 'whole recording'}` : 'Low end off'}`
+      : module.type === 'wind' ? `${isFixedLowRumble(module) ? `HPF ${p.cutoff} Hz` : `Auto · ${p.detection ?? 'Medium'} detection · ${windReductionPercent(p.reduction, p.removal)}% reduction · ${windCrossoverFrequency(p.crossoverHz)} Hz crossover · ${windSmoothing(p.smoothing)}% smoothing`} · ${lowEndShelfEnabled(p) ? `Low end ${Number(p.lowEndGain) >= 0 ? '+' : ''}${p.lowEndGain} dB · ${lowEndShelfFollowsWind(p) ? 'detected wind only' : 'whole recording'}` : 'Low end off'}`
         : module.type === 'noise' ? `${p.mode === 'Sample' ? 'Noise-only sample' : 'Auto'} · ${p.strength ?? 50}% strength`
         : module.type === 'click-pop' ? `Automatic · ${p.strength ?? 50}% strength`
         : module.type === 'eq' && p.mode === 'low-shelf' ? `${p.gain} dB · ${p.frequency} Hz`
@@ -3047,11 +3047,14 @@ function ModuleCard({ module, humReadout, liveFrequencies, windActive, windHisto
           </div>
          : <div className="space-y-2">
            <div className="grid grid-cols-2 gap-3">
-             {([['detection', 'Detection sensitivity'], ['removal', 'Removal strength']] as const).map(([key, label]) =>
-               <label key={key}><span className="field-label">{label}</span><select className="select-field" value={String(p[key] ?? 'Medium')} onChange={(event) => updateParams(module.id, key, event.target.value)} data-testid={`select-wind-${key}-${module.id}`}>
+              <label><span className="field-label">Detection sensitivity</span><select className="select-field" value={String(p.detection ?? 'Medium')} onChange={(event) => updateParams(module.id, 'detection', event.target.value)} data-testid={`select-wind-detection-${module.id}`}>
                  <option>Low</option><option>Medium</option><option>High</option>
-               </select></label>)}
+                </select></label>
+              {numberInput('reduction', 'Reduction', 0, 100, 1, '%', { resetValue: 72, wheelStep: 5 })}
+              {numberInput('crossoverHz', 'Crossover frequency', 40, Math.min(1600, Math.floor(sampleRate * .45)), 1, ' Hz', { resetValue: 140, wheelStep: 10 })}
+              {numberInput('smoothing', 'Smoothing', 0, 100, 1, '%', { resetValue: 50, wheelStep: 5 })}
            </div>
+            <p className="text-[10px] leading-relaxed text-muted-foreground">Higher Reduction removes more low-frequency signal when wind is detected. A higher Crossover frequency affects a wider low-frequency range. More Smoothing makes changes ramp more slowly. These controls are approximate; compare with bypass to protect wanted bass and low calls.</p>
            <p role="status" className="text-[11px] leading-relaxed" data-testid={`wind-activity-${module.id}`}>
               {!module.enabled ? 'Bypassed · no wind reduction applied.' : windActive === null || windActive === undefined ? 'Play edited audio to check this position; the timeline below keeps recent confirmed observations.' : windActive ? 'Now playing · low-frequency interference detected; reduction active.' : 'Now playing · no interference confirmed here; reduction idle.'}
            </p>

@@ -27,6 +27,29 @@ test('named chain presets retain order, settings, and bypass state across reads'
   ]);
 });
 
+test('wind controls persist in presets and legacy removal settings migrate to equivalent reduction', () => {
+  const storage = memoryStorage();
+  const tunedWind = {
+    ...makeModule('wind'),
+    params: { ...makeModule('wind').params, reduction: 84, crossoverHz: 760, smoothing: 68 },
+  };
+  saveChainPreset(storage, 'Wind tune', [tunedWind]);
+  const saved = readChainPresets(storage)[0].modules[0].params;
+  assert.equal(saved.reduction, 84);
+  assert.equal(saved.crossoverHz, 760);
+  assert.equal(saved.smoothing, 68);
+
+  const oldWind = {
+    ...tunedWind,
+    params: { mode: 'Automatic', detection: 'High', removal: 'Low' },
+  };
+  const legacy = parseChainPresets(JSON.stringify([{ name: 'Old wind', modules: [oldWind] }]))[0];
+  const migrated = preparePresetModules(legacy, null).modules[0].params;
+  assert.equal(migrated.reduction, 38);
+  assert.equal(migrated.detection, 'High');
+  assert.equal(migrated.removal, undefined);
+});
+
 test('duplicate names and corrupt stored data never overwrite saved presets', () => {
   const storage = memoryStorage();
   saveChainPreset(storage, 'Clean', [makeModule('gain')]);

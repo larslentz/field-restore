@@ -3,7 +3,7 @@ import test from 'node:test';
 import { isFixedLowRumble, isLegacyWind, makeDefaultChain, makeLowRumbleRemoval, makeModule, renderChain, withoutLegacyDcModules } from './edit-chain.ts';
 import { parseChainPresets } from './chain-presets.ts';
 import { createStreamingEditChain } from './streaming-edit-chain.ts';
-import { WIND_COMPENSATION_TIMING, WindProcessor, windCompensationTiming } from './wind-reduction.ts';
+import { WIND_COMPENSATION_TIMING, WindProcessor, windCompensationTiming, windCrossoverFrequency, windReductionPercent, windSmoothing } from './wind-reduction.ts';
 
 const sampleRate = 24000;
 const count = sampleRate * 4;
@@ -189,10 +189,39 @@ test('detection and removal levels are independent and bypass leaves input untou
   assert.deepEqual(createStreamingEditChain([{ ...wind(), enabled: false }], sampleRate, count).process([input], 0)[0], input);
 });
 
+test('continuous wind controls change reduction, crossover and envelope smoothing', () => {
+  const input = sampleInput();
+  const makeTuned = (params) => ({
+    ...makeModule('wind'),
+    params: { mode: 'Automatic', detection: 'High', reduction: 72, crossoverHz: 140, smoothing: 50,
+      lowEndEnabled: 1, lowEndScope: 'Detected wind only', lowEndFrequency: 55, lowEndQ: .4, lowEndGain: 6, ...params },
+  });
+  const render = (params) => renderChain([input], [makeTuned(params)], sampleRate)[0];
+  const none = render({ reduction: 0 });
+  const gentle = render({ reduction: 30 });
+  const strong = render({ reduction: 90 });
+  assert.deepEqual(none, input, 'zero reduction must preserve the input and avoid invalid compensation envelopes');
+  const change = (audio) => rms(Float32Array.from(audio, (sample, i) => sample - input[i]), sampleRate * 2, sampleRate * 2.5);
+  assert.ok(change(gentle) < change(strong), 'higher reduction should apply more of the high-pass');
+  assert.notDeepEqual(render({ crossoverHz: 700 }), render({ crossoverHz: 140 }),
+    'crossover should change the reducer frequency boundary');
+  assert.notDeepEqual(render({ smoothing: 0 }), render({ smoothing: 100 }),
+    'smoothing should change how quickly the reduction envelope moves');
+  assert.deepEqual(windReductionPercent(undefined, 'Low'), 38);
+  assert.deepEqual(windReductionPercent(undefined, 'Medium'), 72);
+  assert.deepEqual(windReductionPercent(undefined, 'High'), 96);
+  assert.deepEqual(windReductionPercent(140), 100);
+  assert.deepEqual(windCrossoverFrequency(2000, 24000), 1600);
+  assert.deepEqual(windSmoothing(-10), 0);
+});
+
 test('memory, chunks, stereo, and restored loops have identical detector state and audio', () => {
   const input = sampleInput();
   const channels = [input, Float32Array.from(input, (value, i) => value * .65 + .01 * Math.sin(i * .23))];
-  const module = wind();
+  const module = {
+    ...wind(),
+    params: { mode: 'Automatic', detection: 'Medium', reduction: 84, crossoverHz: 680, smoothing: 72 },
+  };
   const whole = renderChain(channels, [module], sampleRate);
   const processor = createStreamingEditChain([module], sampleRate, count);
   const chunked = channels.map(() => new Float32Array(count));
@@ -284,14 +313,17 @@ test('legacy projects and presets convert Wind / Rumble but retain fixed Low Rum
   assert.ok(isLegacyWind(oldWind));
   assert.deepEqual(normalized.slice(0, 2).map((module) => module.params),
     Array(2).fill({
-      mode: 'Automatic', detection: 'Medium', removal: 'Medium',
+      mode: 'Automatic', detection: 'Medium', reduction: 72, crossoverHz: 140, smoothing: 50,
       compensationAttackMs: 25, compensationReleaseMs: 180,
     }));
   assert.equal(makeModule('wind').name, 'Wind Removal');
   assert.equal(normalized[0].name, 'Wind Removal');
   assert.equal(normalized[1].name, 'Gust cleanup');
-  assert.equal(withoutLegacyDcModules([{ ...oldWind, params: { mode: 'Automatic', detection: 'Low', removal: 'High' } }])[0].name,
-    'Wind Removal');
+  const migratedHigh = withoutLegacyDcModules([{ ...oldWind, params: { mode: 'Automatic', detection: 'Low', removal: 'High' } }])[0];
+  assert.equal(migratedHigh.name, 'Wind Removal');
+  assert.equal(migratedHigh.params.reduction, 96);
+  assert.equal(migratedHigh.params.detection, 'Low');
+  assert.equal(migratedHigh.params.removal, undefined);
   assert.equal(withoutLegacyDcModules([{ ...oldWind, name: 'Wind / Rumble Removal', params: { mode: 'Automatic', detection: 'Low', removal: 'High' } }])[0].name,
     'Wind Removal');
   assert.equal(isFixedLowRumble({ ...oldWind, name: 'Wind / Rumble Removal', params: { cutoff: 55.5, q: .38 } }), false);
