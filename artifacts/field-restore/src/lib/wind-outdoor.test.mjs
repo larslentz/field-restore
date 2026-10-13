@@ -3,7 +3,8 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { encodeWav } from './audio.ts';
-import { makeModule, renderChain } from './edit-chain.ts';
+import { AUTOMATIC_DC_REMOVAL, makeModule, renderChain } from './edit-chain.ts';
+import { controlledClippedWind } from './fixtures/controlled-clipped-wind.mjs';
 import { parseWavMetadata, readFrames } from './large-wav.ts';
 import { createStreamingEditChain } from './streaming-edit-chain.ts';
 
@@ -58,16 +59,180 @@ function render(input, module) {
   return { output, events };
 }
 
-async function renderFile(file, metadata, module, chunkFrames) {
+async function renderFile(file, metadata, module, chunkFrames, prefixModules = []) {
   const events = [];
-  const processor = createStreamingEditChain([module], rate, frames, 0, [], undefined,
+  const processor = createStreamingEditChain([...prefixModules, module], rate, frames, 0, [], undefined,
     (_id, frame, active) => events.push({ frame, active }));
   const output = [new Float32Array(frames), new Float32Array(frames)];
   for (let start = 0; start < frames; start += chunkFrames) {
     const chunk = await readFrames(file, metadata, start, Math.min(chunkFrames, frames - start));
+    const original = chunk.map((channel) => channel.slice());
     processor.process(chunk, start).forEach((channel, c) => output[c].set(channel, start));
+    assert.deepEqual(chunk, original, 'processing must not mutate bounded source reads');
   }
-  return { output, events };
+  return { output, events, snapshot: processor.snapshot() };
+}
+
+// First differences, not second differences or an audibility claim. Subtract
+// aligned differences BEFORE taking absolute values to isolate the correction.
+function discontinuities(source, baseline, output, from, until, selected) {
+  const metrics = { sourceJump: 0, dcJump: 0, outputJump: 0, correctionJump: 0, excessJump: 0 };
+  for (let c = 0; c < source.length; c++) {
+    for (let i = Math.max(1, from); i < Math.min(source[c].length, until); i++) {
+      if (selected && !selected.has(i)) continue;
+      const raw = source[c][i] - source[c][i - 1];
+      const dc = baseline[c][i] - baseline[c][i - 1];
+      const processed = output[c][i] - output[c][i - 1];
+      metrics.sourceJump = Math.max(metrics.sourceJump, Math.abs(raw));
+      metrics.dcJump = Math.max(metrics.dcJump, Math.abs(dc));
+      metrics.outputJump = Math.max(metrics.outputJump, Math.abs(processed));
+      metrics.correctionJump = Math.max(metrics.correctionJump, Math.abs(processed - dc));
+      metrics.excessJump = Math.max(metrics.excessJump, Math.abs(processed) - Math.abs(dc));
+    }
+  }
+  return metrics;
+}
+
+test('jump measurements distinguish pre-existing clipping edges from processor-added edges', () => {
+  const source = [Float32Array.of(-1, 1, 1, 1)];
+  const unchanged = discontinuities(source, source, source, 1, 4);
+  assert.equal(unchanged.sourceJump, 2);
+  assert.equal(unchanged.outputJump, 2);
+  assert.equal(unchanged.correctionJump, 0);
+  assert.equal(unchanged.excessJump, 0);
+  const changed = discontinuities(source, source, [Float32Array.of(-1, 1, .5, 1)], 1, 4);
+  assert.equal(changed.sourceJump, 2);
+  assert.equal(changed.outputJump, 2, 'global output maximum alone would miss the injected edge');
+  assert.equal(changed.correctionJump, .5);
+  assert.equal(changed.excessJump, .5);
+});
+
+const aroundFrames = (positions, radius) => {
+  const selected = new Set();
+  for (const position of positions) {
+    for (let i = position - radius; i <= position + radius; i++) selected.add(i);
+  }
+  return selected;
+};
+
+// Fixture-specific first-difference regression ceilings in normalized amplitude.
+// Higher crossovers remove more fast-varying content from the hard-clipped signal.
+// These budgets allow that expected filter response, not arbitrary new clicks;
+// they are NOT audibility thresholds. See the baseline measurements in README.md.
+const correctionBudgets = {
+  8: { 40: .010, 140: .025, 300: .050, 700: .115, 1600: .270 },
+  24: { 40: .018, 140: .055, 300: .110, 700: .250, 1600: .560 },
+};
+const detectorBudgets = {
+  8: { 40: .004, 140: .008, 300: .016, 700: .035, 1600: .080 },
+  24: { 40: .003, 140: .003, 300: .003, 700: .003, 1600: .003 },
+};
+const clippedIdentities = {
+  8: { hash: '607ca3a398538802df688a5a5bb6b48378db1d28af171bba27bcfd696d3c87f6', rails: [8419, 838] },
+  24: { hash: '570764dffd067e85a026f0f542c529f4372ac704acdf830f6f00db5ab6cc2332', rails: [31859, 19434] },
+};
+
+for (const gain of [8, 24]) {
+  test(`controlled digitally clipped outdoor wind (${gain}x, not microphone overload)`, async (t) => {
+    const recordedBefore = recorded.map((channel) => channel.slice());
+    const input = controlledClippedWind(recorded, rate, gain);
+    const original = input.map((channel) => channel.slice());
+    const railEdges = [];
+    for (const [c, channel] of input.entries()) {
+      const clipped = channel.filter((sample) => Math.abs(sample) === 1);
+      assert.equal(clipped.length, clippedIdentities[gain].rails[c], 'derivation must retain its rail occupancy');
+      assert.ok(clipped.length > rate * .02, 'both microphones must actually saturate');
+      assert.ok(clipped.some((sample) => sample === 1) && clipped.some((sample) => sample === -1),
+        'the derivative must reach both clipping rails');
+      for (let i = 1; i < channel.length; i++) {
+        if ((Math.abs(channel[i]) === 1) !== (Math.abs(channel[i - 1]) === 1)) railEdges.push(i);
+      }
+      assert.ok(channel.subarray(0, rate).every((sample) => sample === 0));
+      assert.ok(channel.subarray(3 * rate).every((sample) => sample === 0));
+    }
+    assert.ok(railEdges.length > 100, 'exercise repeated entry into and release from saturation');
+    const baseline = renderChain(input, [AUTOMATIC_DC_REMOVAL], rate);
+    const file = encodeWav({ channels: input, sampleRate: rate, duration: 6,
+      name: `controlled-digital-clipping-${gain}x.wav` });
+    const fileBytes = new Uint8Array(await file.arrayBuffer());
+    assert.equal(fileBytes.length, 1152044);
+    assert.equal(createHash('sha256').update(fileBytes).digest('hex'), clippedIdentities[gain].hash,
+      'controlled derivative must retain its documented identity');
+    const metadata = await parseWavMetadata(file);
+    assert.equal(metadata.audioFormat, 3, 'float WAV preserves the staged rails exactly');
+    assert.equal(metadata.frameCount, frames);
+    assert.equal(metadata.channels, 2);
+    assert.equal(metadata.sampleRate, rate);
+
+    const railProbes = aroundFrames(railEdges, 2);
+    const seams = [257, 4093].flatMap((size) => {
+      const positions = [];
+      for (let i = size; i < frames; i += size) positions.push(i);
+      return positions;
+    });
+    const seamProbes = aroundFrames(seams, 2);
+    let firstHistory;
+    for (const crossoverHz of [40, 140, 300, 700, 1600]) {
+      const module = { ...makeModule('wind'),
+        params: { mode: 'Automatic', detection: 'Medium', reduction: 72, crossoverHz, smoothing: 50 } };
+      const events = [];
+      const output = renderChain(input, [AUTOMATIC_DC_REMOVAL, module], rate, {}, undefined, undefined,
+        (_id, frame, active) => events.push({ frame, active }));
+      assert.ok(events.some(({ active, frame }) => active && frame >= rate && frame < 2 * rate),
+        'clipped gust must engage the detector');
+      assert.ok(events.some(({ active, frame }) => !active && frame >= 3 * rate && frame < 4 * rate),
+        'detector must release after the clipped gust');
+      if (firstHistory) assert.deepEqual(events, firstHistory, 'crossover must not change detector history');
+      firstHistory = events;
+      assert.ok(output.every((channel) => channel.every((sample) =>
+        Number.isFinite(sample) && Math.abs(sample) < (gain === 8 ? .9 : 1.4))),
+      'output must be finite and bounded (not a promise of unclipped export headroom)');
+
+      // Compare the independent memory path to a one-shot streaming state, then
+      // compare that complete state to both non-detector-aligned read schedules.
+      const single = createStreamingEditChain([AUTOMATIC_DC_REMOVAL, module], rate, frames);
+      assert.deepEqual(single.process(input, 0), output);
+      for (const chunkFrames of [257, 4093]) {
+        const streamed = await renderFile(file, metadata, module, chunkFrames, [AUTOMATIC_DC_REMOVAL]);
+        assert.deepEqual(streamed.output, output, `${crossoverHz} Hz / ${chunkFrames} frames: sample parity`);
+        assert.deepEqual(streamed.events, events, 'complete detector history must match, including idle blips');
+        assert.deepEqual(streamed.snapshot, single.snapshot(),
+          'filter, partial-window, detector, and fade history must survive chunk boundaries');
+      }
+
+      const probes = [
+        ['whole', 1, frames],
+        ['onset', rate, Math.round(1.2 * rate)],
+        ['release', Math.round(2.8 * rate), 4 * rate],
+      ];
+      const metrics = Object.fromEntries(probes.map(([name, from, until]) =>
+        [name, discontinuities(input, baseline, output, from, until)]));
+      for (const [name, selected] of [
+        ['railEdges', railProbes],
+        ['detectorTransitions', aroundFrames(events.map(({ frame }) => frame), Math.round(.002 * rate))],
+        ['wavSeams', seamProbes],
+      ]) metrics[name] = discontinuities(input, baseline, output, 1, frames, selected);
+      // Global bounds cover every rail edge, detector transition, and read seam.
+      // Explicit local probes keep onset/release failures easy to identify.
+      for (const [name, measured] of Object.entries(metrics)) {
+        const budget = name === 'detectorTransitions'
+          ? detectorBudgets[gain][crossoverHz] : correctionBudgets[gain][crossoverHz];
+        assert.ok(measured.correctionJump < budget,
+          `${crossoverHz} Hz ${name}: Wind-added difference ${measured.correctionJump}`);
+        assert.ok(measured.excessJump < budget,
+          `${crossoverHz} Hz ${name}: jump enlargement over DC-only ${measured.excessJump}`);
+      }
+      assert.ok(metrics.whole.sourceJump > .05, 'source must contain non-trivial pre-existing jumps');
+      assert.ok(output.every((channel) => channel.subarray(5 * rate).every((sample) => Math.abs(sample) < .0001)),
+        'late post-gust silence must settle after detector and envelope release');
+      const peak = output.reduce((max, channel) =>
+        channel.reduce((value, sample) => Math.max(value, Math.abs(sample)), max), 0);
+      t.diagnostic(JSON.stringify({ gain, crossoverHz, peak, metrics }));
+      assert.deepEqual(input, original, 'all rendering paths must leave staged source samples immutable');
+    }
+    assert.deepEqual(recorded, recordedBefore, 'derivation must not alter the permission-cleared original');
+    assert.deepEqual(new Uint8Array(await file.arrayBuffer()), fileBytes, 'clipped WAV bytes must remain immutable');
+  });
 }
 
 function component(samples, reference, fromSeconds, toSeconds) {
