@@ -8,6 +8,8 @@ import {
   makeProcessingChain,
   makeRestorationReport,
   formatRestorationReport,
+  formatWindActivitySummary,
+  summarizeWindActivity,
   renderChain,
   restoreSavedChain,
   toggleEditableModules,
@@ -319,6 +321,19 @@ test('file-backed WAV export reports match memory across chunks, trims, and pref
         assert.deepEqual(channel, memory[index].slice(startFrame, endFrame)));
 
       const report = reportFor(events, startFrame, endFrame);
+      // The preview discards all rendered samples in one bounded prefix pass;
+      // export splits that same processing at the trim boundary.
+      const previewEvents = [];
+      const previewProcessor = createStreamingEditChain(processingModules, sampleRate, totalFrames, 0, [], undefined,
+        (moduleId, frame, active) => previewEvents.push({ moduleId, frame, active }));
+      for (let frame = 0; frame < endFrame; frame += sampleRate * 2) {
+        previewProcessor.process(await readFrames(file, metadata, frame, Math.min(sampleRate * 2, endFrame - frame)), frame);
+      }
+      const preview = summarizeWindActivity(modules, { events: previewEvents, startFrame, endFrame }, sampleRate);
+      assert.deepEqual(preview, report.windActivity, 'discard-only preview must match saved export-range activity');
+      assert.ok(formatRestorationReport(report).includes(
+        formatWindActivitySummary(preview, [startFrame / sampleRate, endFrame / sampleRate]).join('\n'),
+      ), 'the downloaded report includes the exact preview text');
       assert.deepEqual(report, reportFor(memoryEvents, startFrame, endFrame),
         'streamed report must match the full memory render even when later events are not collected');
       assert.deepEqual(Object.keys(report.windActivity).sort(), ['enabled', 'intervals', 'sampleRate']);
@@ -343,6 +358,29 @@ test('file-backed WAV export reports match memory across chunks, trims, and pref
       assert.doesNotMatch(text, /audio data|base64|Float32Array/i);
       assert.doesNotMatch(JSON.stringify(report), /"events"|"audio"|"samples"|"data"|base64|Float32Array/i);
     });
+  }
+});
+
+test('shared wind preview keeps unconfirmed coverage, bypasses, and interval limits explicit', () => {
+  const wind = { ...makeModule('wind'), id: 'preview-wind', enabled: true };
+  const events = Array.from({ length: 30 }, (_, index) => ({
+    moduleId: wind.id, frame: index + 1, active: index % 2 === 0,
+  }));
+  const activity = { events, startFrame: 0, endFrame: 31 };
+  const summary = summarizeWindActivity([wind], activity, 100);
+  const text = formatWindActivitySummary(summary, [0, .31]).join('\n');
+  assert.match(text, /Active: .*;\s\+3 more intervals/);
+  assert.match(text, /Idle: .*;\s\+3 more intervals/);
+  assert.match(text, /Unconfirmed: 00:00\.000–00:00\.010/);
+  assert.match(text, /exported range only/);
+  for (const module of [
+    { ...wind, enabled: false },
+    { ...wind, params: { ...wind.params, reduction: 0 } },
+    makeLowRumbleRemoval(),
+  ]) {
+    const disabled = summarizeWindActivity([module], activity, 100);
+    assert.equal(disabled.enabled, false);
+    assert.match(formatWindActivitySummary(disabled, [0, .31]).join('\n'), /No enabled automatic Wind Removal/);
   }
 });
 

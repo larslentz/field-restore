@@ -14,3 +14,9 @@ Automated export-and-navigation checks must wait for all generated downloads, in
 **Why:** An offline reload stalled when a test navigated after only the WAV completed; waiting for both generated files resolved the stall.
 
 **How to apply:** Synchronize all output files before a test changes sources or reloads. This testing capability does not justify stronger save-confirmation wording in the ordinary app.
+
+Prepare any report-review analysis before the final export confirmation, rather than awaiting a long preview scan inside the save button handler.
+
+**Why:** File pickers and the first-party download relay depend on browser user activation. A long asynchronous analysis before opening them can lose that activation; review should also not create an output destination.
+
+**How to apply:** Keep preview preparation separate and cancellable, then open the save destination from the listener's explicit confirmation click.

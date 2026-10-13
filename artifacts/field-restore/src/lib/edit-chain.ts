@@ -278,7 +278,7 @@ const reportTime = (seconds: number) => {
 type WindReportStatus = 'active' | 'idle' | 'unconfirmed';
 type WindReportInterval = { startFrame: number; endFrame: number; status: WindReportStatus };
 
-function summarizeWindActivity(
+export function summarizeWindActivity(
   modules: EditModule[],
   activity: RestorationReportInput['windActivity'],
   sampleRate: number,
@@ -355,26 +355,21 @@ function formatSignalStatistics(stats: LoudnessStats, label: string) {
   ];
 }
 
-export function formatRestorationReport(report: ReturnType<typeof makeRestorationReport>): string {
-  const channelLabel = report.channels === 1 ? 'Mono'
-    : report.channels === 2 ? 'Stereo'
-      : `${report.channels} channels`;
-  const chain = report.modules.length
-    ? report.modules.map((module, index) => [
-      `${index + 1}. ${module.name} — ${module.enabled ? 'Enabled' : 'Bypassed'}`,
-      ...Object.entries(module.params).map(([key, value]) => humanizeReportSetting(module, key, value, report.sampleRate)),
-    ].join('\n')).join('\n')
-    : 'No editable modules.';
-  const windActivity = report.windActivity.enabled
+/** Shared source-time summary for the export preview and downloaded report. */
+export function formatWindActivitySummary(
+  activity: ReturnType<typeof summarizeWindActivity>,
+  trim: readonly [number, number],
+): string[] {
+  return activity.enabled
     ? [
       'WIND REMOVAL ACTIVITY',
       '---------------------',
-      `Source-time coverage: ${reportTime(report.trim[0])} – ${reportTime(report.trim[1])} (exported range only).`,
+      `Source-time coverage: ${reportTime(trim[0])} – ${reportTime(trim[1])} (exported range only).`,
       'Confirmed detector states are approximate. Time before a decision is unconfirmed; source time outside this range is not characterized by this report. This is not a full-recording scan.',
       ...(['active', 'idle', 'unconfirmed'] as const).map((status) => {
-        const intervals = report.windActivity.intervals.filter((interval) => interval.status === status);
+        const intervals = activity.intervals.filter((interval) => interval.status === status);
         const shown = intervals.slice(0, 12).map((interval) =>
-          `${reportTime(interval.startFrame / report.windActivity.sampleRate)}–${reportTime(interval.endFrame / report.windActivity.sampleRate)}`);
+          `${reportTime(interval.startFrame / activity.sampleRate)}–${reportTime(interval.endFrame / activity.sampleRate)}`);
         const omitted = intervals.length - shown.length;
         const text = shown.length ? `${shown.join('; ')}${omitted ? `; +${omitted} more interval${omitted === 1 ? '' : 's'}` : ''}` : 'none observed';
         return `${status[0].toUpperCase()}${status.slice(1)}: ${text}`;
@@ -387,6 +382,19 @@ export function formatRestorationReport(report: ReturnType<typeof makeRestoratio
       'No enabled automatic Wind Removal with reduction above 0%; no confirmed processing activity to report.',
       '',
     ];
+}
+
+export function formatRestorationReport(report: ReturnType<typeof makeRestorationReport>): string {
+  const channelLabel = report.channels === 1 ? 'Mono'
+    : report.channels === 2 ? 'Stereo'
+      : `${report.channels} channels`;
+  const chain = report.modules.length
+    ? report.modules.map((module, index) => [
+      `${index + 1}. ${module.name} — ${module.enabled ? 'Enabled' : 'Bypassed'}`,
+      ...Object.entries(module.params).map(([key, value]) => humanizeReportSetting(module, key, value, report.sampleRate)),
+    ].join('\n')).join('\n')
+    : 'No editable modules.';
+  const windActivity = formatWindActivitySummary(report.windActivity, report.trim);
   return [
     'FIELD RESTORE — RESTORATION REPORT',
     '==================================',
