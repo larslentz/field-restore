@@ -3064,7 +3064,7 @@ function ModuleCard({ module, humReadout, liveFrequencies, windActive, windHisto
               {numberInput('crossoverHz', 'Crossover frequency', 40, Math.min(1600, Math.floor(sampleRate * .45)), 1, ' Hz', { resetValue: 140, wheelStep: 10 })}
               {numberInput('smoothing', 'Smoothing', 0, 100, 1, '%', { resetValue: 50, wheelStep: 5 })}
            </div>
-            <p className="text-[10px] leading-relaxed text-muted-foreground">Higher Reduction removes more low-frequency signal when wind is detected. A higher Crossover frequency affects a wider low-frequency range. More Smoothing makes changes ramp more slowly. These controls are approximate; compare with bypass to protect wanted bass and low calls.</p>
+            <p className="text-[10px] leading-relaxed text-muted-foreground">Higher Reduction removes more low-frequency signal when wind is detected. A higher Crossover frequency affects a wider low-frequency range and can attenuate wanted bass or low calls below or near that frequency while wind is detected. That lost detail cannot be restored by the low-end compensation; lower the crossover or compare with bypass. More Smoothing makes changes ramp more slowly. These controls are approximate.</p>
            <p role="status" className="text-[11px] leading-relaxed" data-testid={`wind-activity-${module.id}`}>
               {!module.enabled ? 'Bypassed · no wind reduction applied.' : windActive === null || windActive === undefined ? 'Play edited audio to check this position; the timeline below keeps recent confirmed observations.' : windActive ? 'Now playing · low-frequency interference detected; reduction active.' : 'Now playing · no interference confirmed here; reduction idle.'}
            </p>

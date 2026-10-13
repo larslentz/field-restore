@@ -19,3 +19,4 @@
 - [Project backup boundaries](project-backup-boundaries.md) — portable local backups are explicit; independent storage, external audio, and draft-recovery boundaries remain intact.
 - [MP4 audio scope](mp4-audio-scope.md) — WAV-only output preserves the video; failed relinks must not silently replace the waiting workspace.
 - [Workspace dependency installation](workspace-dependency-installation.md) — the install callback cannot target a pnpm artifact; respect package maturity checks.
+- [Wind crossover test timing](wind-crossover-test-timing.md) — measure idle low-frequency preservation after both detector state and the release envelope have settled.

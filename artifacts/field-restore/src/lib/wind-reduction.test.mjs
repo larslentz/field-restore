@@ -59,6 +59,75 @@ function toneLevel(samples, frequency, from, to) {
   return 2 * Math.hypot(sine, cosine) / (to - from);
 }
 
+function crossoverPassage(crossoverHz, kind, channel, withWind) {
+  const frames = sampleRate * 6;
+  const gain = channel === 0 ? 1 : .72;
+  const phaseOffset = channel * .23;
+  const lowFrequency = crossoverHz * .65;
+  const callStart = crossoverHz * .78;
+  const callEnd = crossoverHz * .98;
+  const callDuration = .4;
+  const callStarts = [.5, 1.5, 4.8];
+  const samples = new Float32Array(frames);
+  const referenceSine = new Float32Array(frames);
+  const referenceCosine = new Float32Array(frames);
+  let seed = 9871;
+  let low = 0;
+  let slow = 0;
+
+  for (let i = 0; i < frames; i++) {
+    let wanted = 0;
+    let sine = 0;
+    let cosine = 0;
+    if (kind === 'tone') {
+      const phase = 2 * Math.PI * lowFrequency * i / sampleRate;
+      sine = Math.sin(phase);
+      cosine = Math.cos(phase);
+      wanted = .035 * sine;
+    } else {
+      const callStartFrame = callStarts.find((start) =>
+        i >= start * sampleRate && i < (start + callDuration) * sampleRate);
+      if (callStartFrame !== undefined) {
+        const elapsed = i / sampleRate - callStartFrame;
+        const phase = 2 * Math.PI * (callStart * elapsed
+          + (callEnd - callStart) * elapsed * elapsed / (2 * callDuration)) + phaseOffset;
+        const envelope = Math.sin(Math.PI * elapsed / callDuration) ** 2;
+        sine = envelope * Math.sin(phase);
+        cosine = envelope * Math.cos(phase);
+        wanted = .05 * sine + .012 * envelope * Math.sin(2 * phase);
+      }
+    }
+    referenceSine[i] = sine;
+    referenceCosine[i] = cosine;
+
+    seed = (1664525 * seed + 1013904223) >>> 0;
+    const random = (seed / 0xffffffff - .5) * 2;
+    low += .035 * (random - low);
+    slow += .001 * (low - slow);
+    const gust = withWind && channel === 1 && i >= sampleRate && i < sampleRate * 3
+      ? (low - slow) * 1.4 : 0;
+    samples[i] = gain * wanted + gust;
+  }
+  return { samples, referenceSine, referenceCosine, gain };
+}
+
+function componentLevel(samples, referenceSine, referenceCosine, from, to) {
+  let ss = 0; let sc = 0; let cc = 0; let ys = 0; let yc = 0;
+  for (let i = from; i < to; i++) {
+    const sine = referenceSine[i];
+    const cosine = referenceCosine[i];
+    ss += sine * sine;
+    sc += sine * cosine;
+    cc += cosine * cosine;
+    ys += samples[i] * sine;
+    yc += samples[i] * cosine;
+  }
+  const determinant = ss * cc - sc * sc;
+  const sineGain = (ys * cc - yc * sc) / determinant;
+  const cosineGain = (yc * ss - ys * sc) / determinant;
+  return Math.hypot(sineGain, cosineGain);
+}
+
 test('wind bursts engage only where detected, spare quiet passages and wanted upper tones', () => {
   const input = sampleInput();
   const events = [];
@@ -170,6 +239,73 @@ test('persistent broadband rumble is reduced, while a single wanted bass tone is
   const cleaned = createStreamingEditChain([wind()], sampleRate, count).process([bass], 0)[0];
   assert.ok(toneLevel(cleaned, 80, sampleRate * 2, sampleRate * 3) >
     toneLevel(bass, 80, sampleRate * 2, sampleRate * 3) * .98, 'steady wanted bass should be protected');
+});
+
+test('raised crossovers attenuate wanted bass and low calls only during linked wind reduction', () => {
+  for (const crossoverHz of [140, 300, 700]) {
+    for (const kind of ['tone', 'call']) {
+      const left = crossoverPassage(crossoverHz, kind, 0, true);
+      const right = crossoverPassage(crossoverHz, kind, 1, true);
+      const input = [left.samples, right.samples];
+      const module = {
+        ...wind(),
+        params: { mode: 'Automatic', detection: 'Medium', reduction: 72, crossoverHz, smoothing: 50 },
+      };
+      const memoryEvents = [];
+      const memory = renderChain(input, [module], sampleRate, {}, undefined, undefined,
+        (_id, frame, active) => memoryEvents.push({ frame, active }));
+      const streamedEvents = [];
+      const frames = input[0].length;
+      const streamedProcessor = createStreamingEditChain([module], sampleRate, frames, 0, [], undefined,
+        (_id, frame, active) => streamedEvents.push({ frame, active }));
+      const streamed = input.map(() => new Float32Array(frames));
+      for (let start = 0; start < frames; start += 257) {
+        const end = Math.min(frames, start + 257);
+        streamedProcessor.process(input.map((channel) => channel.slice(start, end)), start)
+          .forEach((channel, index) => streamed[index].set(channel, start));
+      }
+
+      assert.deepEqual(streamed, memory,
+        `${kind} near ${crossoverHz} Hz must match between memory and streamed rendering`);
+      assert.deepEqual(streamedEvents, memoryEvents,
+        `${kind} near ${crossoverHz} Hz must have matching detector decisions`);
+      assert.ok(memoryEvents.some(({ active, frame }) => active && frame >= sampleRate && frame < sampleRate * 3),
+        `right-channel gust should activate linked reduction for ${kind} near ${crossoverHz} Hz`);
+      assert.ok(memoryEvents.some(({ active, frame }) => !active && frame > sampleRate * 3),
+        'the detector should release after the gust');
+      assert.ok(memory.every((channel) => channel.every(Number.isFinite)), 'stereo output must remain finite');
+      assert.ok(memory.every((channel) => channel.every((value) => Math.abs(value) < 1)),
+        'the crossover response must remain bounded without clipping');
+
+      const componentAt = (channel, fromSeconds, toSeconds) => {
+        const source = channel === 0 ? left : right;
+        return componentLevel(memory[channel], source.referenceSine, source.referenceCosine,
+          Math.round(fromSeconds * sampleRate), Math.round(toSeconds * sampleRate)) / source.gain;
+      };
+      const cleanLevel = kind === 'tone'
+        ? componentAt(0, 5, 5.8)
+        : componentAt(0, 4.88, 5.02);
+      const cleanInputLevel = kind === 'tone'
+        ? componentLevel(left.samples, left.referenceSine, left.referenceCosine,
+          sampleRate * 5, sampleRate * 5.8)
+        : componentLevel(left.samples, left.referenceSine, left.referenceCosine,
+          sampleRate * 4.88, sampleRate * 5.02);
+      assert.ok(Math.abs(cleanLevel - cleanInputLevel) < cleanInputLevel * .01,
+        `clean ${kind} should remain unchanged when the detector is idle at ${crossoverHz} Hz ` +
+          `(processed ${cleanLevel}, input ${cleanInputLevel}; events ${JSON.stringify(memoryEvents)})`);
+
+      const windFrom = kind === 'tone' ? 1.5 : 1.58;
+      const windTo = kind === 'tone' ? 2.5 : 1.72;
+      const leftWindLevel = componentAt(0, windFrom, windTo);
+      const rightWindLevel = componentAt(1, windFrom, windTo);
+      assert.ok(leftWindLevel > 0 && leftWindLevel < .95,
+        `wanted ${kind} below or near ${crossoverHz} Hz should be attenuated, not erased or amplified`);
+      assert.ok(rightWindLevel > 0 && rightWindLevel < .95,
+        `the clean channel should receive the same linked ${kind} attenuation during a right-channel gust`);
+      assert.ok(Math.abs(leftWindLevel - rightWindLevel) < .12,
+        'stereo-linked reduction should not create an unexpected left/right level split');
+    }
+  }
 });
 
 test('detection and removal levels are independent and bypass leaves input untouched', () => {
