@@ -1,0 +1,201 @@
+format: "replit.sdm"
+version: 1
+size:
+  width: 1080
+  height: 1350
+background:
+  kind: "solid"
+  color:
+    kind: "token"
+    token: "background"
+theme:
+  colors:
+    background: "#F5F3EF"
+    foreground: "#1F2833"
+    accent: "#86AA13"
+    surface: "#FBFAF9"
+    muted: "#636E79"
+    slate: "#2B3746"
+    orange: "#EF762A"
+  fonts:
+    display: "Figtree"
+    body: "Figtree"
+    mono: "Space Mono"
+assets:
+  product:
+    src: "images/workspace.jpg"
+elements:
+  -
+    id: "topAccent"
+    type: "shape"
+    frame:
+      x: 72
+      y: 60
+      width: 66
+      height: 8
+    geometry:
+      kind: "preset"
+      preset: "rect"
+    fill:
+      kind: "solid"
+      color:
+        kind: "token"
+        token: "orange"
+  -
+    id: "brand"
+    type: "text"
+    frame:
+      x: 158
+      y: 44
+      width: 620
+      height: 48
+    body:
+      paragraphs:
+        -
+          runs:
+            -
+              text: "FIELD RESTORE"
+          defaultRunStyle:
+            font:
+              kind: "token"
+              token: "mono"
+            sizePt: 15
+            weight: 700
+            color:
+              kind: "token"
+              token: "muted"
+          lineHeight: 1.24
+          spaceAfterPt: 0
+  -
+    id: "page"
+    type: "text"
+    frame:
+      x: 864
+      y: 44
+      width: 144
+      height: 48
+    body:
+      paragraphs:
+        -
+          runs:
+            -
+              text: "01 / 10"
+          defaultRunStyle:
+            font:
+              kind: "token"
+              token: "mono"
+            sizePt: 15
+            weight: 400
+            color:
+              kind: "token"
+              token: "muted"
+          lineHeight: 1.24
+          spaceAfterPt: 0
+  -
+    id: "imageMat"
+    type: "shape"
+    frame:
+      x: 64
+      y: 562
+      width: 952
+      height: 601
+    geometry:
+      kind: "preset"
+      preset: "rect"
+    fill:
+      kind: "solid"
+      color:
+        kind: "token"
+        token: "slate"
+  -
+    id: "productImage"
+    type: "image"
+    frame:
+      x: 72
+      y: 570
+      width: 936
+      height: 585
+    assetId: "product"
+    fit: "contain"
+  -
+    id: "headline"
+    type: "text"
+    frame:
+      x: 72
+      y: 178
+      width: 936
+      height: 180
+    body:
+      paragraphs:
+        -
+          runs:
+            -
+              text: "Field Restore"
+          defaultRunStyle:
+            font:
+              kind: "token"
+              token: "display"
+            sizePt: 64
+            weight: 800
+            color:
+              kind: "token"
+              token: "foreground"
+          lineHeight: 1.08
+          spaceAfterPt: 0
+  -
+    id: "subtitle"
+    type: "text"
+    frame:
+      x: 72
+      y: 340
+      width: 936
+      height: 240
+    body:
+      paragraphs:
+        -
+          runs:
+            -
+              text: "Local-first audio restoration for field recordings."
+          defaultRunStyle:
+            font:
+              kind: "token"
+              token: "body"
+            sizePt: 30
+            weight: 400
+            color:
+              kind: "token"
+              token: "foreground"
+          lineHeight: 1.24
+          spaceAfterPt: 0
+  -
+    id: "progressTrack"
+    type: "shape"
+    frame:
+      x: 72
+      y: 1290
+      width: 936
+      height: 5
+    geometry:
+      kind: "preset"
+      preset: "rect"
+    fill:
+      kind: "solid"
+      color:
+        kind: "token"
+        token: "surface"
+  -
+    id: "progress"
+    type: "shape"
+    frame:
+      x: 72
+      y: 1290
+      width: 93.6
+      height: 5
+    geometry:
+      kind: "preset"
+      preset: "rect"
+    fill:
+      kind: "solid"
+      color:
+        kind: "token"
+        token: "orange"

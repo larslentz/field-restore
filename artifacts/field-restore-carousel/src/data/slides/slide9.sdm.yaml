@@ -1,0 +1,282 @@
+format: "replit.sdm"
+version: 1
+size:
+  width: 1080
+  height: 1350
+background:
+  kind: "solid"
+  color:
+    kind: "token"
+    token: "background"
+theme:
+  colors:
+    background: "#F5F3EF"
+    foreground: "#1F2833"
+    accent: "#86AA13"
+    surface: "#FBFAF9"
+    muted: "#636E79"
+    slate: "#2B3746"
+    orange: "#EF762A"
+  fonts:
+    display: "Figtree"
+    body: "Figtree"
+    mono: "Space Mono"
+assets:
+  product:
+    src: "images/project.jpg"
+elements:
+  -
+    id: "topAccent"
+    type: "shape"
+    frame:
+      x: 72
+      y: 60
+      width: 66
+      height: 8
+    geometry:
+      kind: "preset"
+      preset: "rect"
+    fill:
+      kind: "solid"
+      color:
+        kind: "token"
+        token: "orange"
+  -
+    id: "brand"
+    type: "text"
+    frame:
+      x: 158
+      y: 44
+      width: 620
+      height: 48
+    body:
+      paragraphs:
+        -
+          runs:
+            -
+              text: "FIELD RESTORE"
+          defaultRunStyle:
+            font:
+              kind: "token"
+              token: "mono"
+            sizePt: 15
+            weight: 700
+            color:
+              kind: "token"
+              token: "muted"
+          lineHeight: 1.24
+          spaceAfterPt: 0
+  -
+    id: "page"
+    type: "text"
+    frame:
+      x: 864
+      y: 44
+      width: 144
+      height: 48
+    body:
+      paragraphs:
+        -
+          runs:
+            -
+              text: "09 / 10"
+          defaultRunStyle:
+            font:
+              kind: "token"
+              token: "mono"
+            sizePt: 15
+            weight: 400
+            color:
+              kind: "token"
+              token: "muted"
+          lineHeight: 1.24
+          spaceAfterPt: 0
+  -
+    id: "imageMat"
+    type: "shape"
+    frame:
+      x: 64
+      y: 382
+      width: 952
+      height: 266
+    geometry:
+      kind: "preset"
+      preset: "rect"
+    fill:
+      kind: "solid"
+      color:
+        kind: "token"
+        token: "slate"
+  -
+    id: "productImage"
+    type: "image"
+    frame:
+      x: 72
+      y: 390
+      width: 936
+      height: 250
+    assetId: "product"
+    fit: "contain"
+  -
+    id: "headline"
+    type: "text"
+    frame:
+      x: 72
+      y: 136
+      width: 936
+      height: 250
+    body:
+      paragraphs:
+        -
+          runs:
+            -
+              text: "Keep project information on your device."
+          defaultRunStyle:
+            font:
+              kind: "token"
+              token: "display"
+            sizePt: 34
+            weight: 700
+            color:
+              kind: "token"
+              token: "foreground"
+          lineHeight: 1.08
+          spaceAfterPt: 0
+  -
+    id: "body"
+    type: "text"
+    frame:
+      x: 72
+      y: 690
+      width: 936
+      height: 560
+    body:
+      paragraphs:
+        -
+          runs:
+            -
+              text: "Audio processing, playback, and export run locally; audio is not uploaded for server processing"
+          defaultRunStyle:
+            font:
+              kind: "token"
+              token: "body"
+            sizePt: 19
+            weight: 400
+            color:
+              kind: "token"
+              token: "foreground"
+          lineHeight: 1.24
+          spaceAfterPt: 8
+          bullet:
+            kind: "character"
+            character: "•"
+          indentPt: 19
+          hangingIndentPt: 19
+          markerStyle:
+            color:
+              kind: "token"
+              token: "accent"
+        -
+          runs:
+            -
+              text: "Save edits, trim, markers, and notes in this browser"
+          defaultRunStyle:
+            font:
+              kind: "token"
+              token: "body"
+            sizePt: 19
+            weight: 400
+            color:
+              kind: "token"
+              token: "foreground"
+          lineHeight: 1.24
+          spaceAfterPt: 8
+          bullet:
+            kind: "character"
+            character: "•"
+          indentPt: 19
+          hangingIndentPt: 19
+          markerStyle:
+            color:
+              kind: "token"
+              token: "accent"
+        -
+          runs:
+            -
+              text: "Back up project metadata separately; keep the original recording with it"
+          defaultRunStyle:
+            font:
+              kind: "token"
+              token: "body"
+            sizePt: 19
+            weight: 400
+            color:
+              kind: "token"
+              token: "foreground"
+          lineHeight: 1.24
+          spaceAfterPt: 8
+          bullet:
+            kind: "character"
+            character: "•"
+          indentPt: 19
+          hangingIndentPt: 19
+          markerStyle:
+            color:
+              kind: "token"
+              token: "accent"
+        -
+          runs:
+            -
+              text: "Prepare the app online for offline use"
+          defaultRunStyle:
+            font:
+              kind: "token"
+              token: "body"
+            sizePt: 19
+            weight: 400
+            color:
+              kind: "token"
+              token: "foreground"
+          lineHeight: 1.24
+          spaceAfterPt: 8
+          bullet:
+            kind: "character"
+            character: "•"
+          indentPt: 19
+          hangingIndentPt: 19
+          markerStyle:
+            color:
+              kind: "token"
+              token: "accent"
+  -
+    id: "progressTrack"
+    type: "shape"
+    frame:
+      x: 72
+      y: 1290
+      width: 936
+      height: 5
+    geometry:
+      kind: "preset"
+      preset: "rect"
+    fill:
+      kind: "solid"
+      color:
+        kind: "token"
+        token: "surface"
+  -
+    id: "progress"
+    type: "shape"
+    frame:
+      x: 72
+      y: 1290
+      width: 842.4
+      height: 5
+    geometry:
+      kind: "preset"
+      preset: "rect"
+    fill:
+      kind: "solid"
+      color:
+        kind: "token"
+        token: "orange"

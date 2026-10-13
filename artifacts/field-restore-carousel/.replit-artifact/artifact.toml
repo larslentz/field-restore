@@ -1,0 +1,28 @@
+kind = "slides"
+previewPath = "/field-restore-carousel/"
+title = "Field Restore — Social Carousel"
+description = "Ten editable 4:5 portrait slides introducing Field Restore, using approved copy and genuine application screenshots."
+version = "1.0.0"
+id = "artifacts/field-restore-carousel"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/field-restore-carousel/" ]
+localPort = 18324
+
+[services.development]
+run = "pnpm --filter @workspace/field-restore-carousel run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/field-restore-carousel", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/field-restore-carousel/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "18324"
+BASE_PATH = "/field-restore-carousel/"

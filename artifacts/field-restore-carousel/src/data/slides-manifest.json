@@ -1,0 +1,92 @@
+[
+  {
+    "id": "slide1",
+    "position": 1,
+    "kind": "sdm",
+    "filepath": "src/data/slides/slide1.sdm.yaml",
+    "title": "Field Restore",
+    "description": "Image: Actual Field Restore interface, with the spectrogram and product name visible.",
+    "speakerNotes": ""
+  },
+  {
+    "id": "slide2",
+    "position": 2,
+    "kind": "sdm",
+    "filepath": "src/data/slides/slide2.sdm.yaml",
+    "title": "Keep your source recording untouched.",
+    "description": "Image: Actual Original/Edited comparison from the app.",
+    "speakerNotes": ""
+  },
+  {
+    "id": "slide3",
+    "position": 3,
+    "kind": "sdm",
+    "filepath": "src/data/slides/slide3.sdm.yaml",
+    "title": "Open WAV, FLAC, or MP4 audio.",
+    "description": "Image: The app’s real import panel or drop area.",
+    "speakerNotes": ""
+  },
+  {
+    "id": "slide4",
+    "position": 4,
+    "kind": "sdm",
+    "filepath": "src/data/slides/slide4.sdm.yaml",
+    "title": "See sound across time and frequency.",
+    "description": "Image: Actual Field Restore spectrogram with a selected passage.",
+    "speakerNotes": ""
+  },
+  {
+    "id": "slide5",
+    "position": 5,
+    "kind": "sdm",
+    "filepath": "src/data/slides/slide5.sdm.yaml",
+    "title": "Shape the edit chain around the recording.",
+    "description": "Image: Actual edit-chain view showing the available modules.",
+    "speakerNotes": ""
+  },
+  {
+    "id": "slide6",
+    "position": 6,
+    "kind": "sdm",
+    "filepath": "src/data/slides/slide6.sdm.yaml",
+    "title": "Use focused tools for noise and local defects.",
+    "description": "Image: Actual module controls or selected spectrogram area.",
+    "speakerNotes": ""
+  },
+  {
+    "id": "slide7",
+    "position": 7,
+    "kind": "sdm",
+    "filepath": "src/data/slides/slide7.sdm.yaml",
+    "title": "Tune Wind Removal—and listen for wanted low sounds.",
+    "description": "Image: Actual Wind Removal controls.",
+    "speakerNotes": ""
+  },
+  {
+    "id": "slide8",
+    "position": 8,
+    "kind": "sdm",
+    "filepath": "src/data/slides/slide8.sdm.yaml",
+    "title": "Compare measurements as estimates, not verdicts.",
+    "description": "Image: Actual Signal Statistics panel.",
+    "speakerNotes": ""
+  },
+  {
+    "id": "slide9",
+    "position": 9,
+    "kind": "sdm",
+    "filepath": "src/data/slides/slide9.sdm.yaml",
+    "title": "Keep project information on your device.",
+    "description": "Image: Actual Project or offline-setup panel.",
+    "speakerNotes": ""
+  },
+  {
+    "id": "slide10",
+    "position": 10,
+    "kind": "sdm",
+    "filepath": "src/data/slides/slide10.sdm.yaml",
+    "title": "Export a new WAV and its restoration report.",
+    "description": "Image: Actual export view or a clean product screenshot.",
+    "speakerNotes": ""
+  }
+]

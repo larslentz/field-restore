@@ -28,3 +28,17 @@ mtime_ms = 1791615994196
 storage_uri = "gcs://replit-rams-assets-kirk/rams/assets/repl:8a9e2605-9f1a-4420-9d32-d3ac3d57cef0/fc95311f-e543-494b-8c29-a109a83e2bcc/033bf195-00b9-4736-9b2b-3a8153fe40d1"
 storage_version_token = "1791616039083011"
 content_type = "application/pdf"
+
+[[outputs]]
+id = "Q76njC9KmNo2rtceTV0wt"
+uri = "file://generated-artifacts/field-restore-carousel/Field-Restore-Social-Carousel.zip"
+type = "unspecified"
+title = "Field Restore — 10 carousel images"
+description = "Ten numbered, upload-ready PNG files at 1080 × 1350 pixels (4:5). Unzip and upload images 01–10 in order."
+logical_id = "c863b9d4-51d2-4429-8137-98d2c9a3032c"
+content_hash = "sha256:de59404dcb6a4455ef4d803eff2aa374959cfc0be1b5e8f65a79ab46d0592307"
+size = 2443289
+mtime_ms = 1791895955980
+storage_uri = "gcs://replit-rams-assets-kirk/rams/assets/repl:8a9e2605-9f1a-4420-9d32-d3ac3d57cef0/c863b9d4-51d2-4429-8137-98d2c9a3032c/d5d6d3e7-b96d-48d6-8376-aca366f0250d"
+storage_version_token = "1791896053991557"
+content_type = "application/octet-stream"

@@ -1,0 +1,96 @@
+[
+  {
+    "headline": "Field Restore",
+    "body": [
+      "Local-first audio restoration for field recordings."
+    ],
+    "imageNote": "Image: Actual Field Restore interface, with the spectrogram and product name visible."
+  },
+  {
+    "headline": "Keep your source recording untouched.",
+    "body": [
+      "- Build a reversible edit chain",
+      "- Compare Original and Edited while listening",
+      "- Export creates a separate file; it does not replace the source"
+    ],
+    "imageNote": "Image: Actual Original/Edited comparison from the app."
+  },
+  {
+    "headline": "Open WAV, FLAC, or MP4 audio.",
+    "body": [
+      "- Drop a supported recording into the app",
+      "- Import and edit audio locally on your device",
+      "- MP4 video stays unchanged; its audio is exported as WAV"
+    ],
+    "imageNote": "Image: The app’s real import panel or drop area."
+  },
+  {
+    "headline": "See sound across time and frequency.",
+    "body": [
+      "- Inspect the spectrogram and listen to the recording",
+      "- Select a passage for focused listening and analysis",
+      "- Compare the original with the edited result"
+    ],
+    "imageNote": "Image: Actual Field Restore spectrogram with a selected passage."
+  },
+  {
+    "headline": "Shape the edit chain around the recording.",
+    "body": [
+      "- Gain, EQ, and Fade In/Out adjust level and tone",
+      "- Low Rumble Removal and Hum Removal target steady interference",
+      "- Wind Removal follows changing low-frequency interference",
+      "- Processing stays stereo-linked by default"
+    ],
+    "imageNote": "Image: Actual edit-chain view showing the available modules."
+  },
+  {
+    "headline": "Use focused tools for noise and local defects.",
+    "body": [
+      "- Noise Reduction: automatic estimate or a steady noise-only sample",
+      "- Click & Pop Removal: short, isolated defects",
+      "- Short Sound Repair: selected time-frequency areas",
+      "- Region Attenuation and Ambient Patch: localized edits"
+    ],
+    "imageNote": "Image: Actual module controls or selected spectrogram area."
+  },
+  {
+    "headline": "Tune Wind Removal—and listen for wanted low sounds.",
+    "body": [
+      "- Set Detection, Reduction, Crossover frequency, and Smoothing",
+      "- Starting defaults: 72% Reduction · 140 Hz Crossover · 50% Smoothing",
+      "- Higher crossover can reduce wanted bass and low calls",
+      "- Compare with the module bypassed; no setting guarantees complete wind removal"
+    ],
+    "imageNote": "Image: Actual Wind Removal controls."
+  },
+  {
+    "headline": "Compare measurements as estimates, not verdicts.",
+    "body": [
+      "- Review true-peak estimate, integrated loudness, loudness range, and max short-term level",
+      "- Check PLR and separate Left/Right LBPR readings for stereo",
+      "- Compare full recordings or a selected passage",
+      "- Browser-local estimates are not certified meter readings"
+    ],
+    "imageNote": "Image: Actual Signal Statistics panel."
+  },
+  {
+    "headline": "Keep project information on your device.",
+    "body": [
+      "- Audio processing, playback, and export run locally; audio is not uploaded for server processing",
+      "- Save edits, trim, markers, and notes in this browser",
+      "- Back up project metadata separately; keep the original recording with it",
+      "- Prepare the app online for offline use"
+    ],
+    "imageNote": "Image: Actual Project or offline-setup panel."
+  },
+  {
+    "headline": "Export a new WAV and its restoration report.",
+    "body": [
+      "- 32-bit float WAV at the source sample rate and channel count",
+      "- The report lists the edit chain and signal statistics",
+      "- MP4 input exports edited audio only; the video remains unchanged",
+      "Try Field Restore: larslentz.github.io/field-restore/"
+    ],
+    "imageNote": "Image: Actual export view or a clean product screenshot."
+  }
+]
