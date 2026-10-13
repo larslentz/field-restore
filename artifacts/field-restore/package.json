@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite --config vite.config.ts --host 0.0.0.0",
-    "build": "vite build --config vite.config.ts && node scripts/build-offline.mjs",
+    "build": "pnpm run build:manual && vite build --config vite.config.ts && node scripts/build-offline.mjs",
+    "build:manual": "node scripts/build-manual.mjs",
+    "test:manual": "node --test tests/manual-build.test.mjs tests/manual-guidance.test.mjs",
     "build:windows": "node scripts/build-windows.mjs",
     "serve": "vite preview --config vite.config.ts --host 0.0.0.0",
     "test": "tsx --test src/lib/*.test.mjs tests/manual-guidance.test.mjs",

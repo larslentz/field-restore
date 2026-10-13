@@ -14,3 +14,9 @@ Respect the package release-age policy: pin a mature compatible release rather t
 **Why:** A registry's latest version can exist but still be intentionally ineligible for installation in this workspace.
 
 **How to apply:** Check publication times before selecting another version after a maturity rejection.
+
+Installing a Python inspection dependency into this Node workspace can scaffold an unrelated root Python project and add native libraries to the Replit configuration.
+
+**Why:** The package installer initializes a Python project when none exists, even when the package is needed only for temporary document inspection.
+
+**How to apply:** After one-off Python inspection, remove installer-created scaffolding and configuration changes that are not part of the deliverable. Do not make the web build depend on inspection-only packages.

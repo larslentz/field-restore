@@ -2,6 +2,13 @@
 
 Field Restore is a standalone, local-first browser editor for conservative cleanup of mono, stereo, and binaural field recordings. Audio stays on the device, the imported source remains immutable, and edits are stored as a reversible processing chain until a WAV is rendered.
 
+## Operator manual
+
+The downloadable PDF is generated from the online HTML guide during each build.
+See [manual build instructions](docs/operator-manual-build.md) for the original
+creation path, standalone regeneration command, browser setup, and download
+verification.
+
 ## Run
 
 From the workspace root:
