@@ -51,3 +51,5 @@ Thumbs.db
 # Replit
 .cache/
 .local/
+# Full uploaded field recording; only the compact regression excerpt is committed.
+/attached_assets/0_261003_0040_excerpt_1791885104230.wav
