@@ -114,7 +114,7 @@
         .hero p { color: var(--muted); }
         h1 { font-size: 38pt; }
         .layout { display: block; max-width: none; margin: 0; padding: .22in 0 0; }
-        .quickstart, .step, .callout, .table-wrap { break-inside: avoid; }
+        .quickstart, .step, .callout, .table-wrap, .wind-guidance { break-inside: avoid; }
         section { margin: .27in 0; }
         h2, h3 { break-after: avoid; }
         a { color: inherit; text-decoration: none; }
@@ -210,14 +210,25 @@
               <tr><td><strong>Automatic DC correction</strong></td><td>Applied first as a required baseline stage; it is not an optional edit.</td></tr>
               <tr><td><strong>Gain</strong></td><td>Adjusts output level. Watch for clipping and compare at similar listening volume.</td></tr>
               <tr><td><strong>Fade In/Out</strong></td><td>Softens the beginning or ending. Check that the fade does not hide wanted sounds.</td></tr>
-              <tr><td><strong>Low Rumble Removal</strong></td><td>Reduces low-frequency rumble. It can also remove wanted bass, thunder, or low calls.</td></tr>
+              <tr><td><strong>Low Rumble Removal</strong></td><td>A fixed high-pass filter: its cutoff applies throughout the recording rather than following automatic wind detection. Use it only for audible rumble; it can also remove wanted bass, thunder, or low calls.</td></tr>
               <tr><td><strong>Hum Removal</strong></td><td>Targets sustained tones. Adaptive mode can also reduce wanted held sounds, calls, and insects; bypass it to compare.</td></tr>
-              <tr><td><strong>Wind Removal</strong></td><td>Approximate low-frequency cleanup. Severe microphone overload cannot be recovered; wanted bass may be reduced and some wind may remain.</td></tr>
+              <tr><td><strong>Wind Removal</strong></td><td>Automatically applies approximate low-frequency reduction when wind-like interference is detected. Its response varies over time; wanted bass or low calls may be reduced, some wind may remain, and severe microphone overload cannot be recovered.</td></tr>
               <tr><td><strong>Noise Reduction</strong></td><td>Use Automatic estimation or select a steady noise-only passage as a sample. Speech, calls, or other wanted audio in a sample may be softened throughout the recording.</td></tr>
               <tr><td><strong>Click &amp; Pop Removal</strong></td><td>Targets short, isolated clicks and pops. Longer or overlapping sounds may remain; wanted transients can be softened.</td></tr>
               <tr><td><strong>Short Sound Repair</strong></td><td>Make a localized repair in the selected spectrogram area. Preview the result carefully; it is not a guarantee of perfect reconstruction.</td></tr>
             </tbody>
           </table></div>
+          <div class="wind-guidance">
+            <h3>Wind Removal controls</h3>
+            <p>Wind Removal estimates when low-frequency sound resembles wind and applies reduction at those times. Detection is approximate: it can miss wind or react to other low-frequency sounds, and it cannot repair severe microphone overload.</p>
+            <ul>
+              <li><strong>Reduction</strong> sets how much low-frequency signal is removed while wind is detected. Higher values remove more.</li>
+              <li><strong>Crossover frequency</strong> sets the upper edge of the affected low-frequency range. Raising it covers a wider range, but can remove more wanted bass and low calls.</li>
+              <li><strong>Smoothing</strong> controls how quickly reduction changes. Higher values make it ramp more slowly as detection starts and stops.</li>
+            </ul>
+            <p>Start with the defaults—72% Reduction, 140 Hz Crossover frequency, and 50% Smoothing—and listen to the same passage. Increase Reduction or Crossover only as needed; if bass or low calls lose weight, lower one or both. Adjust Smoothing if the change sounds abrupt, then compare with the module bypassed before exporting. No setting can guarantee that all wind is removed without affecting wanted sound.</p>
+            <p>Wind Removal is separate from <strong>Low Rumble Removal</strong>. Wind Removal is automatic and varies with detection; Low Rumble Removal is a fixed high-pass filter that acts throughout the recording at its selected cutoff. Use the fixed filter only when you want consistent low-frequency attenuation, and listen for wanted bass, thunder, or low calls that it may remove.</p>
+          </div>
           <p>Processing settings are linked across channels by default to help preserve stereo timing and spatial coherence. Do not judge a repair by its meters alone; listen to the result.</p>
         </section>
 
