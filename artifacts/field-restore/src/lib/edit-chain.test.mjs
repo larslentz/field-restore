@@ -13,6 +13,9 @@ import {
   toggleEditableModules,
   withoutLegacyDcModules,
 } from './edit-chain.ts';
+import { encodeWav } from './audio.ts';
+import { parseWavMetadata, readFrames, writeFloat32WavChunks } from './large-wav.ts';
+import { createStreamingEditChain } from './streaming-edit-chain.ts';
 
 const legacyDc = { id: 'legacy-dc', type: 'dc', name: 'DC Offset', enabled: true, params: { mode: 'Auto', amount: 0 } };
 const gain = { id: 'gain', type: 'gain', name: 'Gain', enabled: true, params: { db: 0 } };
@@ -209,6 +212,138 @@ test('restoration report marks detector-unobserved time unconfirmed and identifi
     modules: [{ ...input.modules[0], enabled: false }],
   }));
   assert.match(bypassed, /No enabled automatic Wind Removal with reduction above 0%; no confirmed processing activity to report\./);
+});
+
+test('file-backed WAV export reports match memory across chunks, trims, and prefix warming', async (t) => {
+  const sampleRate = 24_000;
+  const totalFrames = sampleRate * 4;
+  // Seeded, non-tonal gust between clean passages: all three report states
+  // must occur, rather than allowing an all-idle parity test to pass.
+  let seed = 12345;
+  let low = 0;
+  let slow = 0;
+  const left = Float32Array.from({ length: totalFrames }, (_, frame) => {
+    seed = (1664525 * seed + 1013904223) >>> 0;
+    const random = (seed / 0xffffffff - .5) * 2;
+    low += .035 * (random - low);
+    slow += .001 * (low - slow);
+    const gust = frame >= sampleRate && frame < sampleRate * 3 ? (low - slow) * 1.4 : 0;
+    return gust + .045 * Math.sin(2 * Math.PI * 530 * frame / sampleRate);
+  });
+  const channels = [left, Float32Array.from(left, (value) => value * .72)];
+  const modules = [{ ...makeModule('wind'), id: 'export-wind', enabled: true }];
+  const processingModules = makeProcessingChain(modules);
+  const memoryEvents = [];
+  const memory = renderChain(channels, processingModules, sampleRate, {}, undefined, undefined,
+    (moduleId, frame, active) => memoryEvents.push({ moduleId, frame, active }));
+  const firstConfirmation = memoryEvents[0].frame;
+  const activeFrame = memoryEvents.find((event) => event.active)?.frame;
+  const idleFrame = memoryEvents.find((event) => !event.active && event.frame > activeFrame)?.frame;
+  assert.equal(firstConfirmation, 2400);
+  assert.ok(activeFrame > firstConfirmation, 'fixture must contain confirmed wind');
+  assert.ok(idleFrame > activeFrame, 'fixture must return to confirmed idle');
+
+  const file = encodeWav({ name: 'field.wav', sampleRate, channels, duration: 4 });
+  const metadata = await parseWavMetadata(file);
+  const reportFor = (events, startFrame, endFrame) => makeRestorationReport({
+    source: 'field.wav',
+    sampleRate,
+    channels: channels.length,
+    duration: (endFrame - startFrame) / sampleRate,
+    sourceDuration: totalFrames / sampleRate,
+    trim: [startFrame / sampleRate, endFrame / sampleRate],
+    container: 'RIFF',
+    modules,
+    selection: [0, 0],
+    exportedAt: '2026-10-13T00:00:00.000Z',
+    windActivity: { events, startFrame, endFrame },
+  });
+  const cases = [
+    ...[257, 2399, 2400, 2401, 4093, sampleRate * 2].map((chunkFrames) => ({
+      name: `whole source in ${chunkFrames}-frame chunks`,
+      startFrame: 0, endFrame: totalFrames, chunkFrames, warmChunkFrames: chunkFrames,
+    })),
+    { name: 'trim starts before confirmation', startFrame: 317, endFrame: idleFrame + 713, chunkFrames: 257, warmChunkFrames: 113 },
+    { name: 'trim ends before confirmation', startFrame: 317, endFrame: firstConfirmation - 1, chunkFrames: 257, warmChunkFrames: 113 },
+    { name: 'trim ends exactly at confirmation', startFrame: 0, endFrame: firstConfirmation, chunkFrames: 257, warmChunkFrames: 113 },
+    { name: 'trim starts exactly at confirmation', startFrame: firstConfirmation, endFrame: totalFrames - 719, chunkFrames: 4093, warmChunkFrames: 257 },
+    { name: 'active state inherited from prefix', startFrame: activeFrame + 719, endFrame: idleFrame + 713, chunkFrames: 4093, warmChunkFrames: 257 },
+    { name: 'idle state inherited from prefix', startFrame: idleFrame + 719, endFrame: totalFrames - 113, chunkFrames: 257, warmChunkFrames: sampleRate * 2 },
+    { name: 'trim ends exactly at active transition', startFrame: 0, endFrame: activeFrame, chunkFrames: 2401, warmChunkFrames: 257 },
+    { name: 'trim starts exactly at active transition', startFrame: activeFrame, endFrame: idleFrame, chunkFrames: 2399, warmChunkFrames: 4093 },
+  ];
+
+  for (const { name, startFrame, endFrame, chunkFrames, warmChunkFrames } of cases) {
+    await t.test(name, async () => {
+      const events = [];
+      const processor = createStreamingEditChain(processingModules, sampleRate, totalFrames, 0, [], undefined,
+        (moduleId, frame, active) => events.push({ moduleId, frame, active }));
+      // Same ordering as exportAudio: retain the prefix's detector decisions,
+      // discard its samples, then translate writer-relative frames to source time.
+      for (let frame = 0; frame < startFrame; frame += warmChunkFrames) {
+        processor.process(await readFrames(file, metadata, frame, Math.min(warmChunkFrames, startFrame - frame)), frame);
+        if (frame + warmChunkFrames < firstConfirmation) {
+          assert.deepEqual(processor.trackedWindActivity(), {}, 'chunk boundaries must not invent confirmation');
+          assert.deepEqual(events, []);
+        }
+      }
+      const outputChunks = [];
+      let closed = false;
+      await writeFloat32WavChunks({
+        async write(chunk) { outputChunks.push(chunk); },
+        async close() { closed = true; },
+        async abort() { assert.fail('valid export must not abort'); },
+      }, {
+        channels: channels.length,
+        sampleRate,
+        frameCount: endFrame - startFrame,
+        chunkFrames,
+        readFrames: (start, count) => readFrames(file, metadata, startFrame + start, count),
+        processFrames: (input, start) => {
+          const output = processor.process(input, startFrame + start);
+          if (startFrame + start + input[0].length < firstConfirmation) {
+            assert.deepEqual(processor.trackedWindActivity(), {});
+            assert.deepEqual(events, [], 'multiple exported chunks must remain unconfirmed until the first window completes');
+          }
+          return output;
+        },
+      });
+      assert.equal(closed, true);
+      assert.deepEqual(events, memoryEvents.filter((event) => event.frame <= endFrame),
+        'prefix and kept-range events must use absolute source frames');
+      const exported = new Blob(outputChunks);
+      const exportedMetadata = await parseWavMetadata(exported);
+      assert.equal(exportedMetadata.frameCount, endFrame - startFrame);
+      const exportedChannels = await readFrames(exported, exportedMetadata, 0, exportedMetadata.frameCount);
+      exportedChannels.forEach((channel, index) =>
+        assert.deepEqual(channel, memory[index].slice(startFrame, endFrame)));
+
+      const report = reportFor(events, startFrame, endFrame);
+      assert.deepEqual(report, reportFor(memoryEvents, startFrame, endFrame),
+        'streamed report must match the full memory render even when later events are not collected');
+      assert.deepEqual(Object.keys(report.windActivity).sort(), ['enabled', 'intervals', 'sampleRate']);
+      assert.equal(report.windActivity.intervals[0].startFrame, startFrame);
+      assert.equal(report.windActivity.intervals.at(-1).endFrame, endFrame);
+      let cursor = startFrame;
+      for (const interval of report.windActivity.intervals) {
+        assert.deepEqual(Object.keys(interval).sort(), ['endFrame', 'startFrame', 'status']);
+        assert.equal(interval.startFrame, cursor, 'report coverage must be contiguous');
+        assert.ok(interval.endFrame > cursor);
+        cursor = interval.endFrame;
+      }
+      const first = report.windActivity.intervals[0];
+      if (startFrame < firstConfirmation) {
+        assert.equal(first.status, 'unconfirmed');
+        assert.equal(first.endFrame, Math.min(firstConfirmation, endFrame));
+      } else {
+        assert.notEqual(first.status, 'unconfirmed', 'prefix warming must preserve confirmed state at trim start');
+      }
+      const text = formatRestorationReport(report);
+      assert.equal(text, formatRestorationReport(reportFor(memoryEvents, startFrame, endFrame)));
+      assert.doesNotMatch(text, /audio data|base64|Float32Array/i);
+      assert.doesNotMatch(JSON.stringify(report), /"events"|"audio"|"samples"|"data"|base64|Float32Array/i);
+    });
+  }
 });
 
 test('restoration report includes original, edited, and selected signal statistics without altering report sections', () => {
