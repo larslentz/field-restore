@@ -1,6 +1,9 @@
 import { expect, test } from '@playwright/test';
 import { mkdir, open } from 'node:fs/promises';
 import path from 'node:path';
+import { makeModule } from '../src/lib/edit-chain';
+
+const windDefaults = makeModule('wind').params;
 
 async function createFileBackedWav() {
   const fixtureDir = path.join(import.meta.dirname, '.fixtures');
@@ -52,12 +55,12 @@ test('Wind Removal exposes adjustable reduction, crossover, and smoothing contro
 
   await expect(reduction).toHaveAttribute('min', '0');
   await expect(reduction).toHaveAttribute('max', '100');
-  await expect(reduction).toHaveValue('72');
+  await expect(reduction).toHaveValue(String(windDefaults.reduction));
   await expect(crossover).toHaveAttribute('min', '40');
-  await expect(crossover).toHaveValue('140');
+  await expect(crossover).toHaveValue(String(windDefaults.crossoverHz));
   await expect(smoothing).toHaveAttribute('min', '0');
   await expect(smoothing).toHaveAttribute('max', '100');
-  await expect(smoothing).toHaveValue('50');
+  await expect(smoothing).toHaveValue(String(windDefaults.smoothing));
 
   await reduction.fill('88');
   await crossover.fill('795');
