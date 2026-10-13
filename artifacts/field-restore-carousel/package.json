@@ -36,5 +36,9 @@
     "vite": "catalog:",
     "wouter": "catalog:",
     "yaml": "2.8.3"
+  },
+  "dependencies": {
+    "fflate": "^0.8.3",
+    "html-to-image": "^1.11.13"
   }
 }

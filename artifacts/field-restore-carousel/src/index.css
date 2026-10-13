@@ -46,3 +46,34 @@ body {
   user-select: none;
   -webkit-user-select: none;
 }
+
+/* Viewer chrome only: never part of a slide or /allslides export wrapper. */
+.carousel-download {
+  position: fixed;
+  z-index: 100;
+  right: 16px;
+  bottom: 16px;
+  width: min(330px, calc(100vw - 32px));
+  padding: 12px;
+  border: 1px solid #636e79;
+  border-radius: 8px;
+  background: #f5f3ef;
+  color: #1f2833;
+  font: 14px/1.4 Figtree, system-ui, sans-serif;
+  box-shadow: 0 4px 20px #0003;
+}
+
+.carousel-download button {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 5px;
+  background: #1f2833;
+  color: #fff;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.carousel-download button:disabled { opacity: .65; cursor: wait; }
+.carousel-download button:focus-visible { outline: 3px solid #86aa13; outline-offset: 3px; }
+.carousel-download p { margin: 8px 0 0; font-size: 12px; }
+.carousel-download .download-error { color: #a12718; }

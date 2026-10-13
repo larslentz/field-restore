@@ -27,13 +27,31 @@ are adapted locally. The editor, slide IDs, route handling, navigation effects,
 document loading, and `.slide[data-slide-id]` export wrappers are unchanged.
 No Field Restore application or manual files are modified.
 
-## Commands
+## Download from the carousel
+
+Open the carousel's root viewer (`/field-restore-carousel/`) and click
+**Download all PNGs (ZIP)**. In the slides editor, open the deck's viewer/preview
+to use this action. Finish saving edits first; the download renders a fresh copy
+of the saved deck on every click, not a cached image set.
+
+The browser waits for and embeds fonts and images, then creates
+`Field-Restore-Social-Carousel.zip` containing `Field-Restore-01.png` through
+`Field-Restore-10.png`, each at **1080 × 1350**. Progress appears below the
+button. Missing fonts, failed assets, invalid slides, and capture failures report
+an error without downloading a partial ZIP. Retry after fixing the issue.
+The editable SDM documents are never modified by downloading.
+
+This runs entirely in the browser, including from a static build; no export
+server, shell command, or previously generated PNGs are required.
+
+## Developer commands
 
 From the workspace root:
 
 ```sh
 pnpm --filter @workspace/field-restore-carousel validate-slides
 node artifacts/field-restore-carousel/scripts/export-carousel.cjs
+node artifacts/field-restore-carousel/scripts/test-browser-export.cjs
 ```
 
 The export command loads the running artifact, waits for fonts and imagery,

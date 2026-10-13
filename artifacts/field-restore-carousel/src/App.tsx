@@ -20,6 +20,7 @@ import {
   isSdmEditingActive,
 } from '@/.sdm/editingState';
 import { useLocation } from 'wouter';
+import { CarouselDownload } from './export/CarouselDownload';
 
 function getSlideIndex(pathname: string): number {
   const match = pathname.match(/^\/slide(\d+)$/);
@@ -376,7 +377,14 @@ export default function App() {
     return () => window.removeEventListener('message', onMessage);
   }, [location, navigate]);
 
-  if (location === '/') return <SlideViewer />;
+  if (location === '/') {
+    return (
+      <>
+        <SlideViewer />
+        <CarouselDownload />
+      </>
+    );
+  }
   if (location === '/allslides') return <AllSlides />;
   return <SlideEditor />;
 }
