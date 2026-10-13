@@ -33,6 +33,15 @@ export function windCrossoverFrequency(value: unknown, sampleRate = 48000) {
     Math.min(WIND_CONTROL_LIMITS.crossoverHz.max, sampleRate * .45));
 }
 
+export function windAlternativeCrossover(value: unknown, sampleRate = 48000) {
+  const current = windCrossoverFrequency(value, sampleRate);
+  const max = Math.min(WIND_CONTROL_LIMITS.crossoverHz.max, Math.floor(sampleRate * .45));
+  const step = 100;
+  return current + step <= max
+    ? current + step
+    : Math.max(WIND_CONTROL_LIMITS.crossoverHz.min, current - step);
+}
+
 export function windSmoothing(value: unknown) {
   return bounded(value, WIND_DEFAULTS.smoothing, WIND_CONTROL_LIMITS.smoothing.min, WIND_CONTROL_LIMITS.smoothing.max);
 }

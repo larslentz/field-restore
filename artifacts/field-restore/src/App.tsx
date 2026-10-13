@@ -4,7 +4,7 @@ import { Activity, ArrowDown, ArrowUp, Check, ChevronDown, CircleHelp, Download,
 import { createDemoAudio, downloadBlob, encodeWav, parseWav, type AudioSource } from '@/lib/audio';
 import { decodeChannels, loadProject, projectFromSource, saveProject } from '@/lib/persistence';
 import { AUTOMATIC_DC_REMOVAL, formatRestorationReport, humOpeningReadout, isFixedLowRumble, isLegacyWind, lowEndShelfEnabled, lowEndShelfFollowsWind, makeCommonFieldChain, makeDefaultChain, makeLowRumbleRemoval, makeModule, makeProcessingChain, makeRestorationReport, MODULE_LABELS, restoreSavedChain, toggleEditableModules, withFadeRange, type EditModule, type HumScanState } from '@/lib/edit-chain';
-import { WIND_COMPENSATION_TIMING, WIND_SHELF_SCOPE_DETECTED, WIND_SHELF_SCOPE_WHOLE, windCompensationTiming, windCrossoverFrequency, windReductionPercent, windSmoothing } from '@/lib/wind-reduction';
+import { WIND_COMPENSATION_TIMING, WIND_SHELF_SCOPE_DETECTED, WIND_SHELF_SCOPE_WHOLE, windAlternativeCrossover, windCompensationTiming, windCrossoverFrequency, windReductionPercent, windSmoothing } from '@/lib/wind-reduction';
 import { analyzeLoudness, type LoudnessStats } from '@/lib/loudness';
 import { createPlaybackRangePlan, playbackPositionAtElapsed } from '@/lib/playback-range';
 import type { SpectrogramData } from '@/lib/spectrogram';
@@ -49,6 +49,7 @@ import './index.css';
 type ViewTab = 'edit' | 'analyze' | 'project';
 type StatisticsOrientation = 'horizontal' | 'vertical';
 type MonitorMode = 'current' | 'original';
+type CrossoverComparison = { moduleId: string; currentHz: number; alternativeHz: number; side: 'A' | 'B' };
 type Marker = { id: string; time: number; label: string; color: string };
 type Region = { id: string; start: number; end: number; label: string };
 type SpectralBounds = { start: number; end: number; low: number; high: number };
@@ -134,6 +135,7 @@ function moduleSummary(module: EditModule, humReadout?: ReturnType<typeof humOpe
 function App() {
   const [source, setSource] = useState<AudioSource>(() => createDemoAudio());
   const [modules, setModules] = useState<EditModule[]>(makeDefaultChain);
+  const [crossoverComparison, setCrossoverComparison] = useState<CrossoverComparison | null>(null);
   const [undoStack, setUndoStack] = useState<EditModule[][]>([]);
   const [redoStack, setRedoStack] = useState<EditModule[][]>([]);
   const [selection, setSelection] = useState<[number, number]>([0, 0]);
@@ -434,11 +436,16 @@ function App() {
     setCommittedTrim(next);
   }, []);
 
+  const previewCrossover = crossoverComparison?.side === 'B' ? crossoverComparison : null;
   const processingModules = useMemo(() => withFadeRange(
-    makeProcessingChain(modules),
+    makeProcessingChain(previewCrossover
+      ? modules.map((module) => module.id === previewCrossover.moduleId && module.type === 'wind'
+        ? { ...module, params: { ...module.params, crossoverHz: previewCrossover.alternativeHz } }
+        : module)
+      : modules),
     Math.floor((committedTrim?.[0] ?? 0) * source.sampleRate),
     Math.min(Math.floor(source.duration * source.sampleRate), Math.ceil((committedTrim?.[1] ?? source.duration) * source.sampleRate)),
-  ), [modules, committedTrim, source.sampleRate, source.duration]);
+  ), [modules, committedTrim, source.sampleRate, source.duration, previewCrossover?.moduleId, previewCrossover?.alternativeHz]);
   const getSpectralPatches = useCallback(async (signal?: AbortSignal): Promise<SpectralRepairPatches> => {
     if (!largeSource) return {};
     const cached = spectralPatchCacheRef.current;
@@ -469,6 +476,9 @@ function App() {
     setFileRepairs(null);
     setSelectedRepair(null);
   }, [source, processingModules]);
+  useEffect(() => {
+    setCrossoverComparison(null);
+  }, [source]);
   useEffect(() => {
     setSpectralSelection(null);
     setSpectralError('');
@@ -1414,6 +1424,7 @@ function App() {
   useEffect(() => () => { stopPlayback(); audioContextRef.current?.close(); }, [stopPlayback]);
 
   const commitModules = useCallback((next: EditModule[]) => {
+    setCrossoverComparison(null);
     setUndoStack((stack) => [...stack.slice(-39), modules]);
     setRedoStack([]);
     setModules(next);
@@ -1461,6 +1472,44 @@ function App() {
     if (modules.length) commitModules(toggleEditableModules(modules));
   };
   const updateParams = (id: string, key: string, value: number | string) => commitModules(modules.map((module) => module.id === id ? { ...module, params: { ...module.params, [key]: value } } : module));
+  const startCrossoverComparison = (moduleId: string, currentHz: number) => {
+    monitorRef.current = 'current';
+    pendingMemoryPlaybackRef.current = false;
+    setMonitor('current');
+    setCrossoverComparison({
+      moduleId,
+      currentHz,
+      alternativeHz: windAlternativeCrossover(currentHz, source.sampleRate),
+      side: 'A',
+    });
+  };
+  const setCrossoverAlternative = (value: number) => {
+    setCrossoverComparison((comparison) => comparison
+      ? { ...comparison, alternativeHz: Math.max(40, Math.min(1600, Math.floor(source.sampleRate * .45), value)) }
+      : comparison);
+  };
+  const selectCrossoverSide = (side: 'A' | 'B') => {
+    monitorRef.current = 'current';
+    pendingMemoryPlaybackRef.current = false;
+    setMonitor('current');
+    setCrossoverComparison((comparison) => comparison ? { ...comparison, side } : comparison);
+  };
+  const cancelCrossoverComparison = () => setCrossoverComparison(null);
+  const acceptCrossoverComparison = (moduleId: string) => {
+    if (!crossoverComparison || crossoverComparison.moduleId !== moduleId ||
+      crossoverComparison.side !== 'B' || crossoverComparison.alternativeHz === crossoverComparison.currentHz) return;
+    commitModules(modules.map((module) => module.id === moduleId && module.type === 'wind'
+      ? { ...module, params: { ...module.params, crossoverHz: crossoverComparison.alternativeHz } }
+      : module));
+  };
+  const crossoverComparisonProps = {
+    crossoverComparison,
+    startCrossoverComparison,
+    setCrossoverAlternative,
+    selectCrossoverSide,
+    acceptCrossoverComparison,
+    cancelCrossoverComparison,
+  };
   const captureNoiseSample = async (id: string) => {
     const start = Math.max(0, Math.floor(selectionStart * source.sampleRate));
     const end = Math.min(Math.floor(duration * source.sampleRate), Math.ceil(selectionEnd * source.sampleRate),
@@ -1553,10 +1602,12 @@ function App() {
     setModuleDropTarget(null);
   };
   const undo = () => {
+    setCrossoverComparison(null);
     const previous = undoStack.at(-1); if (!previous) return;
     setRedoStack((stack) => [...stack, modules]); setModules(previous); setUndoStack((stack) => stack.slice(0, -1));
   };
   const redo = () => {
+    setCrossoverComparison(null);
     const next = redoStack.at(-1); if (!next) return;
     setUndoStack((stack) => [...stack, modules]); setModules(next); setRedoStack((stack) => stack.slice(0, -1));
   };
@@ -1731,6 +1782,10 @@ function App() {
   };
 
   const save = async () => {
+    if (crossoverComparison) {
+      setError('Accept or cancel the crossover comparison before saving the project.');
+      return;
+    }
     if (descriptionDraft.pending) {
       setError('Restore or discard the recovered description draft in Project before saving.');
       return;
@@ -1810,6 +1865,10 @@ function App() {
   };
 
   const exportAudio = async () => {
+    if (crossoverComparison) {
+      setError('Accept or cancel the crossover comparison before exporting audio.');
+      return;
+    }
     const filenames = exportFilenames(title, source.name, descriptiveWords);
     setError('');
     let windActivityEvents = memoryRender?.windEvents ?? [];
@@ -2528,8 +2587,8 @@ function App() {
           <button type="button" className="nav-item" onClick={() => void pickAudioFile()} data-testid="nav-import" aria-describedby="import-format-note"><FileAudio size={15} /><span className="nav-label">{pendingRelink || pendingPermission ? 'Relink source audio' : 'Import WAV, FLAC or MP4'}</span></button>
           {(pendingRelink || pendingPermission) && <button type="button" className="nav-item" onClick={() => void pickAudioFile(true)} data-testid="nav-import-new-source"><FileAudio size={15} /><span className="nav-label">Open a different recording</span></button>}
           <p id="import-format-note" className="px-3 pb-2 text-[10px] leading-relaxed text-[#abbdb4]">32-bit floating point WAV recommended for maximum editing headroom. Lossless FLAC and supported MP4 audio can also be edited. MP4 audio may be lossy; export saves WAV audio only and leaves video unchanged.</p>
-          <button type="button" className="nav-item" onClick={(event) => openModal(event, 'export')} aria-label="Export 32-bit WAV" data-testid="nav-export"><Download size={15} /><span className="nav-label">Export 32-bit WAV</span></button>
-          <button type="button" className="nav-item" onClick={save} aria-label="Save project" aria-describedby="sidebar-save-project-description" data-testid="nav-save"><Save size={15} /><span className="nav-label">Save project</span></button>
+          <button type="button" className="nav-item" onClick={(event) => openModal(event, 'export')} aria-label="Export 32-bit WAV" disabled={!!crossoverComparison} title={crossoverComparison ? 'Accept or cancel the crossover comparison first' : undefined} data-testid="nav-export"><Download size={15} /><span className="nav-label">Export 32-bit WAV</span></button>
+          <button type="button" className="nav-item" onClick={save} aria-label="Save project" aria-describedby="sidebar-save-project-description" disabled={!!crossoverComparison} title={crossoverComparison ? 'Accept or cancel the crossover comparison first' : undefined} data-testid="nav-save"><Save size={15} /><span className="nav-label">Save project</span></button>
           <p id="sidebar-save-project-description" className="sidebar-save-note">{SAVE_PROJECT_DESCRIPTION}</p>
           <button type="button" className="nav-item" onClick={() => {
             bootstrapInterruptedRef.current = true;
@@ -2582,7 +2641,7 @@ function App() {
             <span className="hidden lg:inline font-mono-value text-[10px] text-muted-foreground mx-2">⌘Z / ⌘⇧Z</span>
             <button type="button" className="quiet-btn" onClick={(event) => openModal(event, 'help')} data-testid="button-help"><CircleHelp size={14} /> <span className="hidden sm:inline">Help</span></button>
             <button type="button" className="quiet-btn" onClick={(event) => openModal(event, 'settings')} aria-label="Open settings" data-testid="button-settings"><Settings size={14} /></button>
-            <button type="button" className="primary-btn" onClick={(event) => openModal(event, 'export')} data-testid="button-export"><Download size={14} /> Export 32-bit WAV</button>
+            <button type="button" className="primary-btn" onClick={(event) => openModal(event, 'export')} disabled={!!crossoverComparison} title={crossoverComparison ? 'Accept or cancel the crossover comparison first' : undefined} data-testid="button-export"><Download size={14} /> Export 32-bit WAV</button>
           </div>
         </header>
         <main className={`main-content scrollbar-thin ${activeTab === 'edit' ? 'main-content-edit' : ''}`}>
@@ -2835,7 +2894,7 @@ function App() {
              <div className="relative"><button type="button" className="quiet-btn w-full" onClick={() => setModuleMenu(!moduleMenu)}><Plus size={13} /> Add module</button>{moduleMenu && <div className="drawer-module-menu">{MODULE_TYPES.map((type) => <button type="button" key={type} onClick={() => addModule(type)}>{moduleOptionLabel(type)}</button>)}</div>}</div>
           </div>
           <div className="chain-drawer-body">
-              {automaticDcSelected ? <AutomaticDcCard /> : selectedModule ? <ModuleCard module={selectedModule} humReadout={selectedModule.type === 'hum' ? humReadoutFor(selectedModule) : undefined} liveFrequencies={liveHumFrequencies?.[selectedModule.id]} windActive={windActivityFor(selectedModule.id)} windHistory={windHistoryFor(selectedModule.id)} sampleRate={source.sampleRate} duration={duration} index={modules.findIndex((module) => module.id === selectedModule.id)} total={modules.length} collapsed={false} updateModule={updateModule} updateParams={updateParams} captureNoiseSample={captureNoiseSample} selectionLength={selectionEnd - selectionStart} deleteModule={deleteModule} duplicateModule={duplicateModule} moveModule={moveModule} /> : <div className="chain-drawer-full-list"><AutomaticDcCard />{modules.map((module, index) => <ModuleCard key={module.id} module={module} humReadout={module.type === 'hum' ? humReadoutFor(module) : undefined} liveFrequencies={liveHumFrequencies?.[module.id]} windActive={windActivityFor(module.id)} windHistory={windHistoryFor(module.id)} sampleRate={source.sampleRate} duration={duration} index={index} total={modules.length} collapsed={false} updateModule={updateModule} updateParams={updateParams} captureNoiseSample={captureNoiseSample} selectionLength={selectionEnd - selectionStart} deleteModule={deleteModule} duplicateModule={duplicateModule} moveModule={moveModule} />)}{modules.length === 0 && <div className="empty-state">No additional edits yet.</div>}</div>}
+              {automaticDcSelected ? <AutomaticDcCard /> : selectedModule ? <ModuleCard {...crossoverComparisonProps} module={selectedModule} humReadout={selectedModule.type === 'hum' ? humReadoutFor(selectedModule) : undefined} liveFrequencies={liveHumFrequencies?.[selectedModule.id]} windActive={windActivityFor(selectedModule.id)} windHistory={windHistoryFor(selectedModule.id)} sampleRate={source.sampleRate} duration={duration} index={modules.findIndex((module) => module.id === selectedModule.id)} total={modules.length} collapsed={false} updateModule={updateModule} updateParams={updateParams} captureNoiseSample={captureNoiseSample} selectionLength={selectionEnd - selectionStart} deleteModule={deleteModule} duplicateModule={duplicateModule} moveModule={moveModule} /> : <div className="chain-drawer-full-list"><AutomaticDcCard />{modules.map((module, index) => <ModuleCard {...crossoverComparisonProps} key={module.id} module={module} humReadout={module.type === 'hum' ? humReadoutFor(module) : undefined} liveFrequencies={liveHumFrequencies?.[module.id]} windActive={windActivityFor(module.id)} windHistory={windHistoryFor(module.id)} sampleRate={source.sampleRate} duration={duration} index={index} total={modules.length} collapsed={false} updateModule={updateModule} updateParams={updateParams} captureNoiseSample={captureNoiseSample} selectionLength={selectionEnd - selectionStart} deleteModule={deleteModule} duplicateModule={duplicateModule} moveModule={moveModule} />)}{modules.length === 0 && <div className="empty-state">No additional edits yet.</div>}</div>}
           </div>
           <div className="chain-drawer-footer">processing is local · original stays untouched</div>
         </aside>
@@ -3011,7 +3070,7 @@ function WindHistoryTimeline({ moduleId, moduleName, segments, sampleRate, durat
   </div>;
 }
 
-function ModuleCard({ module, humReadout, liveFrequencies, windActive, windHistory, sampleRate, duration, index, total, collapsed, updateModule, updateParams, captureNoiseSample, selectionLength, deleteModule, duplicateModule, moveModule }: { module: EditModule; humReadout?: ReturnType<typeof humOpeningReadout>; liveFrequencies?: number[]; windActive?: boolean | null; windHistory: WindHistorySegment[]; sampleRate: number; duration: number; index: number; total: number; collapsed: boolean; updateModule: (id: string, patch: Partial<EditModule>) => void; updateParams: (id: string, key: string, value: number | string) => void; captureNoiseSample: (id: string) => Promise<void>; selectionLength: number; deleteModule: (id: string) => void; duplicateModule: (module: EditModule) => void; moveModule: (index: number, direction: -1 | 1) => void }) {
+function ModuleCard({ module, humReadout, liveFrequencies, windActive, windHistory, sampleRate, duration, index, total, collapsed, updateModule, updateParams, captureNoiseSample, selectionLength, deleteModule, duplicateModule, moveModule, crossoverComparison, startCrossoverComparison, setCrossoverAlternative, selectCrossoverSide, acceptCrossoverComparison, cancelCrossoverComparison }: { module: EditModule; humReadout?: ReturnType<typeof humOpeningReadout>; liveFrequencies?: number[]; windActive?: boolean | null; windHistory: WindHistorySegment[]; sampleRate: number; duration: number; index: number; total: number; collapsed: boolean; updateModule: (id: string, patch: Partial<EditModule>) => void; updateParams: (id: string, key: string, value: number | string) => void; captureNoiseSample: (id: string) => Promise<void>; selectionLength: number; deleteModule: (id: string) => void; duplicateModule: (module: EditModule) => void; moveModule: (index: number, direction: -1 | 1) => void; crossoverComparison: CrossoverComparison | null; startCrossoverComparison: (moduleId: string, currentHz: number) => void; setCrossoverAlternative: (value: number) => void; selectCrossoverSide: (side: 'A' | 'B') => void; acceptCrossoverComparison: (moduleId: string) => void; cancelCrossoverComparison: () => void }) {
   const p = module.params;
   const numberInput = (key: string, label: string, min: number, max: number, step: number, suffix = '', options?: { resetValue?: number; wheelStep?: number }) => <RangeControl label={label} value={Number(p[key])} min={min} max={max} step={step} suffix={suffix} resetValue={options?.resetValue} wheelStep={options?.wheelStep} onChange={(value) => updateParams(module.id, key, value)} testId={`range-${module.type}-${key}`} />;
   const spectralBoundInput = (key: 'start' | 'end' | 'low' | 'high', label: string, max: number, step: number) => <label><span className="field-label">{label} {key === 'start' || key === 'end' ? '(s)' : '(Hz)'}</span><input key={`${module.id}-${key}-${p[key]}`} className="input-field font-mono-value" type="number" min={0} max={max} step={step} defaultValue={Number(p[key])} onBlur={(event) => {
@@ -3070,7 +3129,26 @@ function ModuleCard({ module, humReadout, liveFrequencies, windActive, windHisto
                  <option>Low</option><option>Medium</option><option>High</option>
                 </select></label>
               {numberInput('reduction', 'Reduction', 0, 100, 1, '%', { resetValue: 72, wheelStep: 5 })}
-              {numberInput('crossoverHz', 'Crossover frequency', 40, Math.min(1600, Math.floor(sampleRate * .45)), 1, ' Hz', { resetValue: 140, wheelStep: 10 })}
+              {crossoverComparison?.moduleId === module.id ? <div className="col-span-2 space-y-2 rounded-md border border-border p-3" data-testid={`wind-crossover-comparison-${module.id}`}>
+                <div className="flex items-center justify-between gap-2 text-[11px]">
+                  <span className="font-semibold">Current edit stays at {crossoverComparison.currentHz} Hz</span>
+                  <button type="button" className="quiet-btn !py-1 !px-2 !text-[10px]" onClick={cancelCrossoverComparison} data-testid={`button-wind-crossover-cancel-${module.id}`}>Cancel</button>
+                </div>
+                <RangeControl label="Alternative crossover" value={crossoverComparison.alternativeHz} min={40} max={Math.min(1600, Math.floor(sampleRate * .45))} step={1} suffix=" Hz" onChange={setCrossoverAlternative} testId={`range-wind-crossover-alternative-${module.id}`} />
+                <div className="grid grid-cols-2 gap-2">
+                  <button type="button" className={`quiet-btn justify-center ${crossoverComparison.side === 'A' ? '!border-[hsl(var(--primary))] !text-[hsl(var(--primary))]' : ''}`} onClick={() => selectCrossoverSide('A')} aria-pressed={crossoverComparison.side === 'A'} data-testid={`button-wind-crossover-a-${module.id}`}>A · Current {crossoverComparison.currentHz} Hz</button>
+                  <button type="button" className={`quiet-btn justify-center ${crossoverComparison.side === 'B' ? '!border-[hsl(var(--primary))] !text-[hsl(var(--primary))]' : ''}`} onClick={() => selectCrossoverSide('B')} aria-pressed={crossoverComparison.side === 'B'} data-testid={`button-wind-crossover-b-${module.id}`}>B · Alternative {crossoverComparison.alternativeHz} Hz</button>
+                </div>
+                <p role="status" className="text-[10px] leading-relaxed text-muted-foreground" data-testid={`wind-crossover-status-${module.id}`}>
+                  {crossoverComparison.side === 'A' ? 'A is selected. Press Play to hear the current edit.' : 'B is selected. Press Play to audition the temporary crossover; your project has not changed.'}
+                </p>
+                <div className="flex justify-end">
+                  <button type="button" className="primary-btn !py-1.5 !px-2.5 !text-[11px]" onClick={() => acceptCrossoverComparison(module.id)} disabled={crossoverComparison.side !== 'B' || crossoverComparison.alternativeHz === crossoverComparison.currentHz} data-testid={`button-wind-crossover-accept-${module.id}`}>Use B · {crossoverComparison.alternativeHz} Hz</button>
+                </div>
+              </div> : <div className="col-span-2 space-y-1">
+                {numberInput('crossoverHz', 'Crossover frequency', 40, Math.min(1600, Math.floor(sampleRate * .45)), 1, ' Hz', { resetValue: 140, wheelStep: 10 })}
+                <button type="button" className="quiet-btn !py-1 !px-2 !text-[10px]" onClick={() => startCrossoverComparison(module.id, windCrossoverFrequency(p.crossoverHz, sampleRate))} data-testid={`button-wind-crossover-compare-${module.id}`}>Compare another crossover…</button>
+              </div>}
               {numberInput('smoothing', 'Smoothing', 0, 100, 1, '%', { resetValue: 50, wheelStep: 5 })}
            </div>
             <p className="text-[10px] leading-relaxed text-muted-foreground">Higher Reduction removes more low-frequency signal when wind is detected. A higher Crossover frequency affects a wider low-frequency range and can attenuate wanted bass or low calls below or near that frequency while wind is detected. That lost detail cannot be restored by the low-end compensation; lower the crossover or compare with bypass. More Smoothing makes changes ramp more slowly. These controls are approximate.</p>

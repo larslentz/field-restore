@@ -3,12 +3,18 @@ import test from 'node:test';
 import { isFixedLowRumble, isLegacyWind, makeDefaultChain, makeLowRumbleRemoval, makeModule, renderChain, withoutLegacyDcModules } from './edit-chain.ts';
 import { parseChainPresets } from './chain-presets.ts';
 import { createStreamingEditChain } from './streaming-edit-chain.ts';
-import { WIND_COMPENSATION_TIMING, WindProcessor, windCompensationTiming, windCrossoverFrequency, windReductionPercent, windSmoothing } from './wind-reduction.ts';
+import { WIND_COMPENSATION_TIMING, WindProcessor, windAlternativeCrossover, windCompensationTiming, windCrossoverFrequency, windReductionPercent, windSmoothing } from './wind-reduction.ts';
 
 const sampleRate = 24000;
 const count = sampleRate * 4;
 const wind = (detection = 'Medium', removal = 'Medium') =>
   ({ ...makeModule('wind'), params: { mode: 'Automatic', detection, removal } });
+
+test('suggests a distinct, sample-rate-safe alternative crossover', () => {
+  assert.equal(windAlternativeCrossover(140), 240);
+  assert.equal(windAlternativeCrossover(1580), 1480);
+  assert.equal(windAlternativeCrossover(1600, 8000), 1500);
+});
 
 function sampleInput(from = sampleRate, to = sampleRate * 3) {
   let seed = 12345;
