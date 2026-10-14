@@ -42,3 +42,143 @@ mtime_ms = 1791895955980
 storage_uri = "gcs://replit-rams-assets-kirk/rams/assets/repl:8a9e2605-9f1a-4420-9d32-d3ac3d57cef0/c863b9d4-51d2-4429-8137-98d2c9a3032c/d5d6d3e7-b96d-48d6-8376-aca366f0250d"
 storage_version_token = "1791896053991557"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "03330HLWKJ0TtKvym8-w0"
+uri = "file://generated-artifacts/field-restore-carousel/Field-Restore-01.jpg"
+type = "image"
+title = "Field Restore carousel — slide 1 of 10"
+description = "1080 × 1350 JPEG, ready to download or upload as an Instagram carousel image."
+logical_id = "63c8ec08-e0c9-405f-88eb-c4b566cef104"
+content_hash = "sha256:14fc139b86fc5351624569efe46838d2d4d9015b719e3b3a8cdcb543a17e39dd"
+size = 122711
+mtime_ms = 1791962229528
+storage_uri = "gcs://replit-rams-assets-kirk/rams/assets/repl:8a9e2605-9f1a-4420-9d32-d3ac3d57cef0/63c8ec08-e0c9-405f-88eb-c4b566cef104/47554727-6ff9-432f-a94e-b38b8a9bb4b7"
+storage_version_token = "1791962262114817"
+content_type = "image/jpeg"
+
+[[outputs]]
+id = "tl4URJM4ApFWsrXHfgcs0"
+uri = "file://generated-artifacts/field-restore-carousel/Field-Restore-02.jpg"
+type = "image"
+title = "Field Restore carousel — slide 2 of 10"
+description = "1080 × 1350 JPEG, ready to download or upload as an Instagram carousel image."
+logical_id = "987fe24d-81a4-4910-87ee-03c7bbb1095f"
+content_hash = "sha256:8105b3bdebbe37b72d8113efccdf026975209e836d4c045bef114dc79ed90999"
+size = 86628
+mtime_ms = 1791962231736
+storage_uri = "gcs://replit-rams-assets-kirk/rams/assets/repl:8a9e2605-9f1a-4420-9d32-d3ac3d57cef0/987fe24d-81a4-4910-87ee-03c7bbb1095f/69b205a4-3f6d-41ef-b6eb-4e85399f2174"
+storage_version_token = "1791962262739962"
+content_type = "image/jpeg"
+
+[[outputs]]
+id = "mX98BC2kRH4S4077Pe4k8"
+uri = "file://generated-artifacts/field-restore-carousel/Field-Restore-03.jpg"
+type = "image"
+title = "Field Restore carousel — slide 3 of 10"
+description = "1080 × 1350 JPEG, ready to download or upload as an Instagram carousel image."
+logical_id = "ca69481a-1f29-4332-8008-9eb82c04d6d2"
+content_hash = "sha256:58691ec4509958026c57a999c1f51cf0935f3e55377087d312118fd3ea3a249d"
+size = 81630
+mtime_ms = 1791962234144
+storage_uri = "gcs://replit-rams-assets-kirk/rams/assets/repl:8a9e2605-9f1a-4420-9d32-d3ac3d57cef0/ca69481a-1f29-4332-8008-9eb82c04d6d2/a1a33389-d5b8-402a-a3b4-15823ecae57f"
+storage_version_token = "1791962263419612"
+content_type = "image/jpeg"
+
+[[outputs]]
+id = "OBUKjASl4GCbxoGOD_I3e"
+uri = "file://generated-artifacts/field-restore-carousel/Field-Restore-04.jpg"
+type = "image"
+title = "Field Restore carousel — slide 4 of 10"
+description = "1080 × 1350 JPEG, ready to download or upload as an Instagram carousel image."
+logical_id = "6c74db6f-8c19-4bb7-86e6-ee4be8e893ae"
+content_hash = "sha256:4a96dfeca270d840553b4869dd60ed39ee4acf71ee91e7b0586b8bb50a01c7bb"
+size = 100351
+mtime_ms = 1791962236380
+storage_uri = "gcs://replit-rams-assets-kirk/rams/assets/repl:8a9e2605-9f1a-4420-9d32-d3ac3d57cef0/6c74db6f-8c19-4bb7-86e6-ee4be8e893ae/c906fff6-6314-4824-8a5f-7371bc59913e"
+storage_version_token = "1791962264189632"
+content_type = "image/jpeg"
+
+[[outputs]]
+id = "Bg7SPewdazggi2i3QpalV"
+uri = "file://generated-artifacts/field-restore-carousel/Field-Restore-05.jpg"
+type = "image"
+title = "Field Restore carousel — slide 5 of 10"
+description = "1080 × 1350 JPEG, ready to download or upload as an Instagram carousel image."
+logical_id = "360721fe-f59a-4e58-86d2-7730136f9506"
+content_hash = "sha256:76a5bf306b8be7b37ffbb4db0df5f94029bd04f5d327c461e4e8ececdc46e478"
+size = 102492
+mtime_ms = 1791962238336
+storage_uri = "gcs://replit-rams-assets-kirk/rams/assets/repl:8a9e2605-9f1a-4420-9d32-d3ac3d57cef0/360721fe-f59a-4e58-86d2-7730136f9506/b1299b3e-9cb2-4a35-9547-5305955cab50"
+storage_version_token = "1791962264866431"
+content_type = "image/jpeg"
+
+[[outputs]]
+id = "a7gAb2Au-rq9ANmbel49R"
+uri = "file://generated-artifacts/field-restore-carousel/Field-Restore-06.jpg"
+type = "image"
+title = "Field Restore carousel — slide 6 of 10"
+description = "1080 × 1350 JPEG, ready to download or upload as an Instagram carousel image."
+logical_id = "416f43da-7b52-4bb0-98a1-a572a51841be"
+content_hash = "sha256:a12a9c323f5891dda7d17d0269672b72cf7c628ad191afe0e52101042d49713f"
+size = 125627
+mtime_ms = 1791962240504
+storage_uri = "gcs://replit-rams-assets-kirk/rams/assets/repl:8a9e2605-9f1a-4420-9d32-d3ac3d57cef0/416f43da-7b52-4bb0-98a1-a572a51841be/8f5e6e34-a870-485d-adbd-9ca0354a2597"
+storage_version_token = "1791962265454671"
+content_type = "image/jpeg"
+
+[[outputs]]
+id = "_6_UTh_XrqF82mrguD80D"
+uri = "file://generated-artifacts/field-restore-carousel/Field-Restore-07.jpg"
+type = "image"
+title = "Field Restore carousel — slide 7 of 10"
+description = "1080 × 1350 JPEG, ready to download or upload as an Instagram carousel image."
+logical_id = "11a65d6c-e53e-40ea-9e64-19c45bd1a37d"
+content_hash = "sha256:5927b30443c494d7d6d3b50359d4cac537805a64eb37f6bdb87eae2371f556e1"
+size = 120219
+mtime_ms = 1791962242408
+storage_uri = "gcs://replit-rams-assets-kirk/rams/assets/repl:8a9e2605-9f1a-4420-9d32-d3ac3d57cef0/11a65d6c-e53e-40ea-9e64-19c45bd1a37d/959778d2-6522-4b69-8890-56c8fcab688b"
+storage_version_token = "1791962266013428"
+content_type = "image/jpeg"
+
+[[outputs]]
+id = "fATJy0C1tQ7F_eCOYH4pe"
+uri = "file://generated-artifacts/field-restore-carousel/Field-Restore-08.jpg"
+type = "image"
+title = "Field Restore carousel — slide 8 of 10"
+description = "1080 × 1350 JPEG, ready to download or upload as an Instagram carousel image."
+logical_id = "93e8ac41-9d0e-42ad-8a7f-b45fc608bb65"
+content_hash = "sha256:296f76facacf37172fa0e14dd8c8c2892da9f234abf86788022005b06152e809"
+size = 126027
+mtime_ms = 1791962244416
+storage_uri = "gcs://replit-rams-assets-kirk/rams/assets/repl:8a9e2605-9f1a-4420-9d32-d3ac3d57cef0/93e8ac41-9d0e-42ad-8a7f-b45fc608bb65/49f438c8-6da9-4c37-85f9-39bb913c2347"
+storage_version_token = "1791962266624602"
+content_type = "image/jpeg"
+
+[[outputs]]
+id = "CWLCCg0YE5oXCiKRH4GdL"
+uri = "file://generated-artifacts/field-restore-carousel/Field-Restore-09.jpg"
+type = "image"
+title = "Field Restore carousel — slide 9 of 10"
+description = "1080 × 1350 JPEG, ready to download or upload as an Instagram carousel image."
+logical_id = "d82a84c6-96fd-4eee-b3ed-0aff2c6ee512"
+content_hash = "sha256:5dc8ffc979198ab2c4c95a7b4ccbc3ceaaaded5057fd7119b68eade06223fd8c"
+size = 115874
+mtime_ms = 1791962246528
+storage_uri = "gcs://replit-rams-assets-kirk/rams/assets/repl:8a9e2605-9f1a-4420-9d32-d3ac3d57cef0/d82a84c6-96fd-4eee-b3ed-0aff2c6ee512/1d5be98a-4414-4cb9-8269-711a21505896"
+storage_version_token = "1791962267214476"
+content_type = "image/jpeg"
+
+[[outputs]]
+id = "y2IVneoAw1Mm0jqqPME2L"
+uri = "file://generated-artifacts/field-restore-carousel/Field-Restore-10.jpg"
+type = "image"
+title = "Field Restore carousel — slide 10 of 10"
+description = "1080 × 1350 JPEG, ready to download or upload as an Instagram carousel image."
+logical_id = "9afb8f8b-9969-4a4f-ad05-f65d24d8450a"
+content_hash = "sha256:a620ceba050466244667ad2b057a869ea1867d2477186099d1a4934cc09c08d5"
+size = 111819
+mtime_ms = 1791962248544
+storage_uri = "gcs://replit-rams-assets-kirk/rams/assets/repl:8a9e2605-9f1a-4420-9d32-d3ac3d57cef0/9afb8f8b-9969-4a4f-ad05-f65d24d8450a/3f182db6-f100-4520-9399-3ad83fcae43f"
+storage_version_token = "1791962267782532"
+content_type = "image/jpeg"
