@@ -13,7 +13,6 @@ import { createBrowserWavDownload } from '@/lib/browser-wav-download';
 import { createDesktopDestination } from '@/lib/desktop-save';
 import { InstallPanel } from '@/components/install-panel';
 import { ExportModal } from '@/components/ExportModal';
-import { formatWindActivitySummary, summarizeWindActivity } from '@/lib/edit-chain';
 import { openExportRelay, type ExportRelay } from '@/lib/export-relay';
 import { audioRange, fingerprintAudio, parseAudioMetadata, readAudioFrames, type AudioMetadata } from '@/lib/source-audio';
 import { decodeFlac } from '@/lib/flac';
@@ -1866,49 +1865,6 @@ function App() {
     };
   };
 
-  const loadWindPreview = useCallback(async (signal: AbortSignal) => {
-    const sampleRate = source.sampleRate;
-    const startFrame = Math.floor(trimStart * sampleRate);
-    const endFrame = Math.min(
-      largeSource?.metadata.frameCount ?? source.channels[0]?.length ?? 0,
-      Math.ceil(trimEnd * sampleRate),
-    );
-    const summarize = (events: MemoryRenderResult['windEvents']) => summarizeWindActivity(
-      modules, { events, startFrame, endFrame }, sampleRate,
-    );
-    // Bypassed, fixed high-pass, and zero-reduction modules need no detector scan.
-    let summary = summarize([]);
-    if (summary.enabled) {
-      if (largeSource) {
-        const { file, metadata } = largeSource;
-        const events: MemoryRenderResult['windEvents'] = [];
-        const spectralPatches = await getSpectralPatches(signal);
-        const frequencies = await analyzeFileInitialHum(file, metadata, processingModules, signal);
-        const processor = createStreamingEditChain(processingModules, sampleRate, metadata.frameCount, 0,
-          frequencies, undefined,
-          (moduleId, frame, active) => events.push({ moduleId, frame, active }),
-          undefined, spectralPatches);
-        // Match export's full prefix warmup and stateful processing, keeping
-        // only detector events rather than a second copy of the rendered audio.
-        await warmFileProcessor(file, metadata, processor, 0, endFrame, signal);
-        summary = summarize(events);
-      } else {
-        let rendered = memoryRender;
-        if (!rendered) {
-          const pending = memoryJobRef.current;
-          if (!pending || pending.source !== source || pending.chain !== processingModules) {
-            throw new Error(memoryRenderError || 'Edited audio is not ready. Please retry.');
-          }
-          rendered = await pending.job.promise;
-          if (signal.aborted) throw new DOMException('Preview cancelled.', 'AbortError');
-          if (memoryJobRef.current !== pending) throw new Error('The edits changed. Please retry.');
-        }
-        summary = summarize(rendered.windEvents);
-      }
-    }
-    return formatWindActivitySummary(summary, [trimStart, trimEnd]);
-  }, [source, modules, processingModules, largeSource, memoryRender, memoryRenderError, getSpectralPatches, trimStart, trimEnd]);
-
   const exportAudio = async () => {
     if (crossoverComparison) {
       setError('Accept or cancel the crossover comparison before exporting audio.');
@@ -1916,7 +1872,6 @@ function App() {
     }
     const filenames = exportFilenames(title, source.name, descriptiveWords);
     setError('');
-    let windActivityEvents = memoryRender?.windEvents ?? [];
     let browserDownloadStarted = false;
     let relay: ExportRelay | null = null;
     if (largeSource) {
@@ -1945,7 +1900,7 @@ function App() {
           const initialHumFrequencies = await analyzeFileInitialHum(file, metadata, processingModules, controller.signal);
           const processor = createStreamingEditChain(processingModules, metadata.sampleRate, metadata.frameCount, warmStart,
             initialHumFrequencies, undefined,
-            (moduleId, frame, active) => windActivityEvents.push({ moduleId, frame, active }),
+            undefined,
             undefined, spectralPatches);
           if (warmStart < firstFrame) {
             setOperationStatus('Preparing trimmed export');
@@ -1991,7 +1946,6 @@ function App() {
         setOperationStatus('Preparing edited audio');
         try {
           rendered = await pending.job.promise;
-          windActivityEvents = rendered.windEvents;
         } catch (caught) {
           setOperationStatus('');
           setError(caught instanceof Error ? `Unable to render edited audio: ${caught.message}` : 'Unable to render edited audio.');
@@ -2023,11 +1977,6 @@ function App() {
       modules,
       selection: [selectionStart, selectionEnd],
       trackDescription,
-      windActivity: {
-        events: windActivityEvents,
-        startFrame: Math.floor(trimStart * source.sampleRate),
-        endFrame: Math.ceil(trimEnd * source.sampleRate),
-      },
       signalStatistics: statisticsPending ? { unavailable: true } : {
         original: originalStats,
         edited: currentStats,
@@ -2911,7 +2860,7 @@ function App() {
         </div>}
       </section>
       <input ref={fileRef} type="file" accept=".wav,.flac,.mp4,audio/wav,audio/flac,video/mp4,audio/mp4" onChange={importFile} className="hidden" inert={!!modal || presetDialogOpen} aria-hidden={modal || presetDialogOpen ? true : undefined} data-testid="input-import-wav" />
-      {modal === 'export' && <ExportModal onClose={() => setModal(null)} onExport={exportAudio} title={title} loadWindPreview={loadWindPreview} exporting={!!operationStatus} />}
+      {modal === 'export' && <ExportModal onClose={() => setModal(null)} onExport={exportAudio} title={title} exporting={!!operationStatus} />}
       {modal === 'help' && <HelpModal onClose={() => setModal(null)} />}
       {modal === 'settings' && <SettingsModal onClose={() => setModal(null)} spectrogramPalette={spectrogramPalette} onSpectrogramPaletteChange={(palette) => { setSpectrogramPalette(palette); localStorage.setItem('field-restore-spectrogram-palette', palette); }} />}
       {presetDialogOpen && <div className="modal-backdrop" inert={!!modal} aria-hidden={modal ? true : undefined}>

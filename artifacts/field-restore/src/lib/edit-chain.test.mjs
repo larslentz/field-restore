@@ -164,7 +164,7 @@ test('restoration reports format as a readable text summary with the edit chain 
   assert.doesNotMatch(text, /^\s*\{/m);
 });
 
-test('restoration report separates confirmed wind, idle, and unconfirmed exported time', () => {
+test('wind summary stays available internally but is omitted from the restoration report', () => {
   const wind = { ...makeModule('wind'), id: 'wind-report', enabled: true };
   const report = makeRestorationReport({
     source: 'field.wav',
@@ -188,11 +188,11 @@ test('restoration report separates confirmed wind, idle, and unconfirmed exporte
   });
   const text = formatRestorationReport(report);
 
-  assert.match(text, /WIND REMOVAL ACTIVITY\n-+\nSource-time coverage: 00:00\.000 – 00:06\.000 \(exported range only\)\./);
-  assert.match(text, /Active: 00:01\.000–00:03\.000/);
-  assert.match(text, /Idle: 00:03\.000–00:06\.000/);
-  assert.match(text, /Unconfirmed: 00:00\.000–00:01\.000/);
-  assert.match(text, /This is not a full-recording scan\./);
+  assert.doesNotMatch(text, /WIND REMOVAL ACTIVITY|Source-time coverage:|Unconfirmed:/);
+  const summary = formatWindActivitySummary(report.windActivity, report.trim).join('\n');
+  assert.match(summary, /Active: 00:01\.000–00:03\.000/);
+  assert.match(summary, /Idle: 00:03\.000–00:06\.000/);
+  assert.match(summary, /Unconfirmed: 00:00\.000–00:01\.000/);
   assert.doesNotMatch(text, /audio data|base64|Float32Array/i);
 });
 
@@ -206,13 +206,15 @@ test('restoration report marks detector-unobserved time unconfirmed and identifi
     modules: [{ ...makeModule('wind'), id: 'wind-report' }],
     selection: [0, 0],
   };
-  const unobserved = formatRestorationReport(makeRestorationReport(input));
+  const unobservedReport = makeRestorationReport(input);
+  const unobserved = formatWindActivitySummary(unobservedReport.windActivity, unobservedReport.trim).join('\n');
   assert.match(unobserved, /Unconfirmed: 00:00\.000–00:02\.000/);
 
-  const bypassed = formatRestorationReport(makeRestorationReport({
+  const bypassedReport = makeRestorationReport({
     ...input,
     modules: [{ ...input.modules[0], enabled: false }],
-  }));
+  });
+  const bypassed = formatWindActivitySummary(bypassedReport.windActivity, bypassedReport.trim).join('\n');
   assert.match(bypassed, /No enabled automatic Wind Removal with reduction above 0%; no confirmed processing activity to report\./);
 });
 
@@ -331,9 +333,7 @@ test('file-backed WAV export reports match memory across chunks, trims, and pref
       }
       const preview = summarizeWindActivity(modules, { events: previewEvents, startFrame, endFrame }, sampleRate);
       assert.deepEqual(preview, report.windActivity, 'discard-only preview must match saved export-range activity');
-      assert.ok(formatRestorationReport(report).includes(
-        formatWindActivitySummary(preview, [startFrame / sampleRate, endFrame / sampleRate]).join('\n'),
-      ), 'the downloaded report includes the exact preview text');
+      assert.doesNotMatch(formatRestorationReport(report), /WIND REMOVAL ACTIVITY|Source-time coverage:/);
       assert.deepEqual(report, reportFor(memoryEvents, startFrame, endFrame),
         'streamed report must match the full memory render even when later events are not collected');
       assert.deepEqual(Object.keys(report.windActivity).sort(), ['enabled', 'intervals', 'sampleRate']);

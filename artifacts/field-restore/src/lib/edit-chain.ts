@@ -394,7 +394,6 @@ export function formatRestorationReport(report: ReturnType<typeof makeRestoratio
       ...Object.entries(module.params).map(([key, value]) => humanizeReportSetting(module, key, value, report.sampleRate)),
     ].join('\n')).join('\n')
     : 'No editable modules.';
-  const windActivity = formatWindActivitySummary(report.windActivity, report.trim);
   return [
     'FIELD RESTORE — RESTORATION REPORT',
     '==================================',
@@ -410,7 +409,6 @@ export function formatRestorationReport(report: ReturnType<typeof makeRestoratio
     `Selection: ${reportTime(report.selection[0])} – ${reportTime(report.selection[1])}`,
     `Automatic DC offset removal: ${report.automaticDcOffsetRemoval ? 'Applied' : 'Not applied'}`,
     '',
-    ...windActivity,
     ...(report.signalStatistics ? [
       'SIGNAL STATISTICS',
       '-----------------',

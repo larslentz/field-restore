@@ -57,11 +57,11 @@ Time-positioned hum history is an observation of audible processed playback, not
 
 **How to apply:** Retain only audible-playhead decisions in local bounded history, preserve gaps across seeks and loops, and reset the history whenever its source or edit chain changes.
 
-Restoration reports must derive wind intervals from confirmed detector events emitted by the export render, not from bounded heard-playback history.
+Do not include Wind Removal activity intervals or a wind activity preview in restoration exports. Keep the normal module settings and signal statistics in the text report.
 
-**Why:** Playback history contains visit gaps, loop repeats, and evictions, so it cannot describe the exported range as if it were scanned continuously.
+**Why:** The user explicitly requested removal because the extra activity report scan slowed export too much and they did not need it.
 
-**How to apply:** Summarize only the export's source-time range; mark time before confirmation as unconfirmed and do not imply that unexported time was scanned.
+**How to apply:** Do not gate the export button on a wind scan or collect wind events for the report. Preserve the actual Wind Removal processing and its in-app playback history.
 
 Automatic broadband cleanup must be judged against wanted audio *inside noise*, not just isolated clean tones and noise-only clips. Preserve short onsets after the estimate has settled, and check high-sample-rate recordings.
 
