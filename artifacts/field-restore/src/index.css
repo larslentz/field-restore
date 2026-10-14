@@ -175,7 +175,8 @@
 .brand-links:hover { color: #e5f49d; }
 .brand-links:focus-visible, .compact-more-link:focus-visible { outline: 2px solid hsl(var(--sidebar-primary)); outline-offset: 2px; }
 .main-shell { min-width: 0; min-height: 0; flex: 1; display: flex; flex-direction: column; }
-.topbar { height: 58px; flex: 0 0 58px; border-bottom: 1px solid hsl(var(--border)); display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 24px; background: hsl(var(--card)); }
+.topbar { min-height: 58px; flex: 0 0 auto; border-bottom: 1px solid hsl(var(--border)); display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 24px; background: hsl(var(--card)); }
+.topbar-recording-copy { flex: 1 1 0%; }
 .topbar-actions { flex: 0 0 auto; }
 .topbar-processing .topbar-recording { flex: 0 1 auto; }
 .topbar-processing .topbar-recording .chip, .topbar-processing .topbar-recording .dc-status { display: none; }
@@ -519,6 +520,7 @@
 .empty-state { padding: 34px 20px; text-align: center; color: hsl(var(--muted-foreground)); }
 @media (max-width: 1100px) {
   .main-content { padding-left: 15px; padding-right: 15px; }
+  .topbar-recording .chip, .topbar-recording .dc-status { display: none; }
   .topbar-processing .topbar-recording-copy { max-width: 145px; }
   .work-banner-copy span { display: none; }
   .work-banner-progress { width: 75px; flex-basis: 75px; }
@@ -567,7 +569,7 @@
   .spectrogram-source-label.with-hum-history { display: none; }
   .main-content { padding: 10px; }
   .transport-dock { padding: 0 10px max(10px, env(safe-area-inset-bottom)); }
-  .topbar { height: 52px; flex-basis: 52px; }
+  .topbar { min-height: 52px; }
   .topbar-processing .topbar-recording-copy, .topbar-processing .topbar-actions { display: none; }
   .topbar-processing .topbar-recording { flex: 0 0 auto; }
   .topbar-processing .work-banner { flex-basis: 0; }
