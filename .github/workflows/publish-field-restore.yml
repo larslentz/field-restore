@@ -1,6 +1,9 @@
 name: Publish Field Restore to GitHub Pages
 
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
     inputs:
       publish:
@@ -105,7 +108,7 @@ jobs:
 
   deploy:
     name: Deploy approved Pages artifact
-    if: ${{ inputs.publish }}
+    if: ${{ github.event_name == 'push' || inputs.publish }}
     needs: build
     runs-on: ubuntu-latest
     permissions:
